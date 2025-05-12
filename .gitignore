@@ -1,1 +1,3 @@
-__pycache__/downloadThread.cpython-313.pyc
+__pycache__/*.py[cod]
+*.py[cod]
+*.pyc

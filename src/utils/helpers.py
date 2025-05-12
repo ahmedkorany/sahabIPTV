@@ -1,0 +1,221 @@
+"""
+Helper functions for the application
+"""
+import os
+import json
+from PyQt5.QtGui import QPalette, QColor
+from PyQt5.QtCore import Qt
+
+def load_json_file(file_path, default=None):
+    """Load JSON data from a file"""
+    if default is None:
+        default = {}
+    
+    if not os.path.exists(file_path):
+        return default
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def save_json_file(file_path, data):
+    """Save JSON data to a file"""
+    try:
+        directory = os.path.dirname(file_path)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+def format_duration(seconds):
+    """Format seconds to HH:MM:SS"""
+    if seconds is None:
+        return "00:00:00"
+    
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    else:
+        return f"{minutes:02d}:{seconds:02d}"
+
+def apply_dark_theme(app):
+    """Apply dark theme to the application"""
+    dark_palette = QPalette()
+    dark_palette.setColor(QPalette.Window, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.WindowText, Qt.white)
+    dark_palette.setColor(QPalette.Base, QColor(25, 25, 25))
+    dark_palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+    dark_palette.setColor(QPalette.ToolTipText, Qt.white)
+    dark_palette.setColor(QPalette.Text, Qt.white)
+    dark_palette.setColor(QPalette.Button, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.ButtonText, Qt.white)
+    dark_palette.setColor(QPalette.BrightText, Qt.red)
+    dark_palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.HighlightedText, Qt.black)
+    
+    app.setPalette(dark_palette)
+    
+    # Set stylesheet for better appearance
+    app.setStyleSheet("""
+        QToolTip { 
+            color: #ffffff; 
+            background-color: #2a82da; 
+            border: 1px solid white; 
+        }
+        
+        QTabWidget::pane {
+            border: 1px solid #444;
+            top: -1px;
+        }
+        
+        QTabBar::tab {
+            background: #3A3A3A;
+            border: 1px solid #444;
+            padding: 5px 10px;
+            margin-right: 2px;
+        }
+        
+        QTabBar::tab:selected {
+            background: #636363;
+        }
+        
+        QTabBar::tab:hover {
+            background: #505050;
+        }
+        
+        QPushButton {
+            background-color: #3A3A3A;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 5px 10px;
+        }
+        
+        QPushButton:hover {
+            background-color: #505050;
+        }
+        
+        QPushButton:pressed {
+            background-color: #2a82da;
+        }
+        
+        QLineEdit, QComboBox {
+            background-color: #2D2D2D;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 3px 5px;
+        }
+        
+        QProgressBar {
+            border: 1px solid #555;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        QProgressBar::chunk {
+            background-color: #2a82da;
+        }
+        
+        QSlider::groove:horizontal {
+            height: 8px;
+            background: #2D2D2D;
+            margin: 2px 0;
+        }
+        
+        QSlider::handle:horizontal {
+            background: #2a82da;
+            border: 1px solid #2a82da;
+            width: 18px;
+            margin: -2px 0;
+            border-radius: 9px;
+        }
+        
+        QSlider::sub-page:horizontal {
+            background: #2a82da;
+        }
+    """)
+
+def get_translations(language):
+    """Get translations for the specified language"""
+    translations = {
+        "en": {
+            "Live TV": "Live TV",
+            "Movies": "Movies",
+            "Series": "Series",
+            "Favorites": "Favorites",
+            "Play": "Play",
+            "Pause": "Pause",
+            "Stop": "Stop",
+            "Record": "Record",
+            "Stop Recording": "Stop Recording",
+            "Add to Favorites": "Add to Favorites",
+            "Download": "Download",
+            "Download Episode": "Download Episode",
+            "Download Season": "Download Season",
+            "Remove from Favorites": "Remove from Favorites",
+            "Connect": "Connect",
+            "Server URL": "Server URL",
+            "Username": "Username",
+            "Password": "Password",
+            "Remember": "Remember",
+            "Search channels...": "Search channels...",
+            "Search movies...": "Search movies...",
+            "Search series...": "Search series...",
+            "Search favorites...": "Search favorites...",
+            "Settings": "Settings",
+            "Language": "Language",
+            "Dark Mode": "Dark Mode",
+            "Volume": "Volume",
+            "Mute": "Mute",
+            "Fullscreen": "Fullscreen",
+            "Exit Fullscreen": "Exit Fullscreen",
+            "Speed": "Speed",
+            "Downloads": "Downloads"
+        },
+        "ar": {
+            "Live TV": "البث المباشر",
+            "Movies": "الأفلام",
+            "Series": "المسلسلات",
+            "Favorites": "المفضلة",
+            "Play": "تشغيل",
+            "Pause": "إيقاف مؤقت",
+            "Stop": "إيقاف",
+            "Record": "تسجيل",
+            "Stop Recording": "إيقاف التسجيل",
+            "Add to Favorites": "إضافة إلى المفضلة",
+            "Download": "تحميل",
+            "Download Episode": "تحميل الحلقة",
+            "Download Season": "تحميل الموسم",
+            "Remove from Favorites": "إزالة من المفضلة",
+            "Connect": "اتصال",
+            "Server URL": "عنوان الخادم",
+            "Username": "اسم المستخدم",
+            "Password": "كلمة المرور",
+            "Remember": "تذكر",
+            "Search channels...": "البحث في القنوات...",
+            "Search movies...": "البحث في الأفلام...",
+            "Search series...": "البحث في المسلسلات...",
+            "Search favorites...": "البحث في المفضلة...",
+            "Settings": "الإعدادات",
+            "Language": "اللغة",
+            "Dark Mode": "الوضع الداكن",
+            "Volume": "الصوت",
+            "Mute": "كتم",
+            "Fullscreen": "ملء الشاشة",
+            "Exit Fullscreen": "الخروج من ملء الشاشة",
+            "Speed": "السرعة",
+            "Downloads": "التحميلات"
+        }
+    }
+    
+    return translations.get(language, translations["en"])

@@ -1,0 +1,555 @@
+"""
+Series tab for the application
+"""
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+                            QListWidget, QPushButton, QLineEdit, QMessageBox,
+                            QFileDialog, QLabel)
+from PyQt5.QtCore import Qt, pyqtSignal
+from src.ui.player import MediaPlayer
+from src.utils.download import DownloadThread, BatchDownloadThread
+from src.ui.widgets.dialogs import ProgressDialog
+
+class SeriesTab(QWidget):
+    """Series tab widget"""
+    add_to_favorites = pyqtSignal(dict)
+    
+    def __init__(self, api_client, parent=None):
+        super().__init__(parent)
+        self.api_client = api_client
+        self.series_data = []
+        self.current_series = None
+        self.current_episodes = []
+        self.current_episode = None
+        self.download_thread = None
+        self.batch_download_thread = None
+        self.progress_dialog = None
+        self.current_page = 1
+        self.total_pages = 1
+        self.page_size = 30
+        self.all_items = []
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Set up the UI components"""
+        layout = QVBoxLayout(self)
+        
+        # Search bar
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search series...")
+        self.search_input.textChanged.connect(self.search_series)
+        search_layout.addWidget(self.search_input)
+        
+        # Main content area with splitter
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Lists widget
+        lists_widget = QWidget()
+        lists_layout = QHBoxLayout(lists_widget)
+        lists_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Categories, series, seasons, episodes
+        categories_widget = QWidget()
+        categories_layout = QVBoxLayout(categories_widget)
+        categories_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.categories_list = QListWidget()
+        self.categories_list.setMinimumWidth(150)
+        self.categories_list.itemClicked.connect(self.category_clicked)
+        
+        categories_layout.addWidget(QLabel("Categories"))
+        categories_layout.addWidget(self.categories_list)
+        
+        series_widget = QWidget()
+        series_layout = QVBoxLayout(series_widget)
+        series_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.series_list = QListWidget()
+        self.series_list.setMinimumWidth(200)
+        self.series_list.itemClicked.connect(self.series_clicked)
+        
+        series_layout.addWidget(QLabel("Series"))
+        series_layout.addWidget(self.series_list)
+        
+        seasons_widget = QWidget()
+        seasons_layout = QVBoxLayout(seasons_widget)
+        seasons_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.seasons_list = QListWidget()
+        self.seasons_list.setMinimumWidth(100)
+        self.seasons_list.itemClicked.connect(self.season_clicked)
+        
+        seasons_layout.addWidget(QLabel("Seasons"))
+        seasons_layout.addWidget(self.seasons_list)
+        
+        episodes_widget = QWidget()
+        episodes_layout = QVBoxLayout(episodes_widget)
+        episodes_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.episodes_list = QListWidget()
+        self.episodes_list.setMinimumWidth(200)
+        self.episodes_list.itemDoubleClicked.connect(self.episode_double_clicked)
+        
+        episodes_layout.addWidget(QLabel("Episodes"))
+        episodes_layout.addWidget(self.episodes_list)
+        
+        lists_layout.addWidget(categories_widget)
+        lists_layout.addWidget(series_widget)
+        lists_layout.addWidget(seasons_widget)
+        lists_layout.addWidget(episodes_widget)
+        
+        # Player and controls
+        player_widget = QWidget()
+        player_layout = QVBoxLayout(player_widget)
+        player_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.player = MediaPlayer()
+        
+        # Additional controls
+        controls_layout = QHBoxLayout()
+        
+        self.play_button = QPushButton("Play")
+        self.play_button.clicked.connect(self.play_episode)
+        
+        self.download_episode_button = QPushButton("Download Episode")
+        self.download_episode_button.clicked.connect(self.download_episode)
+        
+        self.download_season_button = QPushButton("Download Season")
+        self.download_season_button.clicked.connect(self.download_season)
+        
+        self.add_favorite_button = QPushButton("Add to Favorites")
+        self.add_favorite_button.clicked.connect(self.add_to_favorites_clicked)
+        
+        controls_layout.addWidget(self.play_button)
+        controls_layout.addWidget(self.download_episode_button)
+        controls_layout.addWidget(self.download_season_button)
+        controls_layout.addWidget(self.add_favorite_button)
+        
+        player_layout.addWidget(self.player)
+        player_layout.addLayout(controls_layout)
+        
+        # Add widgets to splitter
+        splitter.addWidget(lists_widget)
+        splitter.addWidget(player_widget)
+        splitter.setSizes([600, 800])
+        
+        # Add all components to main layout
+        layout.addLayout(search_layout)
+        layout.addWidget(splitter)
+
+        # Add pagination controls to the UI
+        pagination_layout = QHBoxLayout()
+        self.prev_page_button = QPushButton("Previous")
+        self.prev_page_button.clicked.connect(self.go_to_previous_page)
+        self.page_label = QLabel("Page 1 of 1")
+        self.next_page_button = QPushButton("Next")
+        self.next_page_button.clicked.connect(self.go_to_next_page)
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addWidget(self.next_page_button)
+        
+    def paginate_items(self, items, page):
+        """Paginate items with 30 items per page"""
+        total_items = len(items)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
+        
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
+        
+        start = (page - 1) * self.page_size
+        end = min(start + self.page_size, total_items)
+        
+        return items[start:end], total_pages
+
+    def update_pagination_controls(self):
+        """Update pagination controls based on current state"""
+        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+        self.prev_page_button.setEnabled(self.current_page > 1)
+        self.next_page_button.setEnabled(self.current_page < self.total_pages)
+
+    def go_to_previous_page(self):
+        """Go to the previous page"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.display_current_page()
+
+    def go_to_next_page(self):
+        """Go to the next page"""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.display_current_page()
+
+    def display_current_page(self):
+        """Display the current page of items"""
+        # For MoviesTab
+        self.movies_list.clear()
+        page_items, self.total_pages = self.paginate_items(self.all_items, self.current_page)
+        
+        for item in page_items:
+            self.movies_list.addItem(item['name'])
+        
+        self.update_pagination_controls()
+
+    def load_categories(self):
+        """Load series categories from the API"""
+        self.categories_list.clear()
+        
+        success, data = self.api_client.get_series_categories()
+        if success:
+            # Add "All" category at the beginning
+            self.categories_list.addItem("All")
+            
+            # Add the rest of the categories
+            for category in data:
+                self.categories_list.addItem(category['category_name'])
+        else:
+            QMessageBox.warning(self, "Error", f"Failed to load categories: {data}")
+
+    def category_clicked(self, item):
+        """Handle category selection"""
+        category_name = item.text()
+        
+        if category_name == "All":
+            # Load all series across categories
+            self.load_all_series()
+        else:
+            # Find category ID
+            success, categories = self.api_client.get_series_categories()
+            if not success:
+                QMessageBox.warning(self, "Error", f"Failed to load categories: {categories}")
+                return
+            
+            category_id = None
+            for category in categories:
+                if category['category_name'] == category_name:
+                    category_id = category['category_id']
+                    break
+            
+            if category_id:
+                self.load_series(category_id)
+
+    def load_all_series(self):
+        """Load all series from all categories"""
+        self.series_list.clear()
+        all_series = []
+        
+        # Get all categories
+        success, categories = self.api_client.get_series_categories()
+        if not success:
+            QMessageBox.warning(self, "Error", f"Failed to load categories: {categories}")
+            return
+        
+        # Get series from each category
+        for category in categories:
+            success, series = self.api_client.get_series(category['category_id'])
+            if success:
+                all_series.extend(series)
+        
+        # Update the series list
+        self.series_data = all_series
+        for series in all_series:
+            self.series_list.addItem(series['name'])
+
+    def load_series(self, category_id):
+        """Load series for the selected category"""
+        self.series_list.clear()
+        self.seasons_list.clear()
+        self.episodes_list.clear()
+        
+        success, data = self.api_client.get_series(category_id)
+        if success:
+            self.series_data = data
+            for series in data:
+                self.series_list.addItem(series['name'])
+        else:
+            QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
+    
+    def search_series(self, text):
+        """Search series based on input text"""
+        if not self.series_data:
+            return
+        
+        text = text.lower()
+        self.series_list.clear()
+        
+        for series in self.series_data:
+            if text in series['name'].lower():
+                self.series_list.addItem(series['name'])
+    
+    def search_series(self, text):
+        """Search series based on input text"""
+        if not hasattr(self, 'all_items') or not self.all_items:
+            return
+    
+        text = text.lower()
+        
+        if not text:
+            # If search is cleared, show all items with pagination
+            self.current_page = 1
+            self.display_current_page()
+            return
+        
+        # Filter items based on search text
+        filtered_items = [item for item in self.all_items if text in item['name'].lower()]
+        
+        # Display filtered items
+        self.series_list.clear()
+        self.current_page = 1
+        page_items, self.total_pages = self.paginate_items(filtered_items, self.current_page)
+        
+        for item in page_items:
+            self.series_list.addItem(item['name'])
+        
+        self.update_pagination_controls()
+    
+    def series_clicked(self, item):
+        """Handle series selection"""
+        series_name = item.text()
+        
+        # Find series in data
+        series = None
+        for s in self.series_data:
+            if s['name'] == series_name:
+                series = s
+                break
+        
+        if not series:
+            return
+        
+        self.current_series = series
+        self.load_seasons(series['series_id'])
+    
+    def load_seasons(self, series_id):
+        """Load seasons for the selected series"""
+        self.seasons_list.clear()
+        self.episodes_list.clear()
+        
+        success, data = self.api_client.get_series_info(series_id)
+        if success:
+            self.series_info = data
+            if 'episodes' in data:
+                for season_number in sorted(data['episodes'].keys(), key=int):
+                    self.seasons_list.addItem(f"Season {season_number}")
+        else:
+            QMessageBox.warning(self, "Error", f"Failed to load seasons: {data}")
+    
+    def season_clicked(self, item):
+        """Handle season selection"""
+        season_text = item.text()
+        season_number = season_text.replace("Season ", "")
+        
+        if hasattr(self, 'series_info') and 'episodes' in self.series_info and season_number in self.series_info['episodes']:
+            episodes = self.series_info['episodes'][season_number]
+            
+            self.episodes_list.clear()
+            self.current_episodes = episodes
+            self.current_season = season_number
+            
+            for episode in sorted(episodes, key=lambda x: int(x['episode_num'])):
+                self.episodes_list.addItem(f"E{episode['episode_num']} - {episode['title']}")
+    
+    def episode_double_clicked(self, item):
+        """Handle episode double-click"""
+        self.play_episode()
+    
+    def play_episode(self):
+        """Play the selected episode"""
+        if not self.episodes_list.currentItem():
+            QMessageBox.warning(self, "Error", "No episode selected")
+            return
+        
+        episode_text = self.episodes_list.currentItem().text()
+        episode = None
+        for ep in self.current_episodes:
+            if episode_text.startswith(f"E{ep['episode_num']}"):
+                episode = ep
+                break
+        
+        if not episode:
+            return
+        
+        episode_id = episode['id']
+        
+        # Get container extension (default to mp4)
+        container_extension = episode.get('container_extension', 'mp4')
+        
+        stream_url = self.api_client.get_series_url(episode_id, container_extension)
+        
+        if self.player.play(stream_url):
+            self.current_episode = {
+                'name': f"{self.current_series['name']} - S{episode['season']}E{episode['episode_num']} - {episode['title']}",
+                'stream_url': stream_url,
+                'episode_id': episode_id,
+                'stream_type': 'series',
+                'series_id': self.current_series['series_id'],
+                'season': episode['season'],
+                'episode_num': episode['episode_num'],
+                'title': episode['title'],
+                'container_extension': container_extension
+            }
+    
+    def download_episode(self):
+        """Download the selected episode"""
+        if not self.episodes_list.currentItem():
+            QMessageBox.warning(self, "Error", "No episode selected")
+            return
+        
+        episode_text = self.episodes_list.currentItem().text()
+        episode = None
+        for ep in self.current_episodes:
+            if episode_text.startswith(f"E{ep['episode_num']}"):
+                episode = ep
+                break
+        
+        if not episode:
+            return
+        
+        episode_id = episode['id']
+        episode_title = episode['title']
+        season_number = episode['season']
+        episode_number = episode['episode_num']
+        
+        # Get container extension (default to mp4)
+        container_extension = episode.get('container_extension', 'mp4')
+        
+        # Create filename
+        filename = f"{self.current_series['name']} - S{season_number}E{episode_number} - {episode_title}.{container_extension}"
+        
+        stream_url = self.api_client.get_series_url(episode_id, container_extension)
+        
+        # Ask for save location
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Episode", filename, f"Video Files (*.{container_extension})"
+        )
+        
+        if not save_path:
+            return
+        
+        # Create progress dialog
+        self.progress_dialog = ProgressDialog(self, "Downloading", f"Downloading {filename}...")
+        self.progress_dialog.cancelled.connect(self.cancel_download)
+        
+        # Start download thread
+        self.download_thread = DownloadThread(stream_url, save_path, self.api_client.headers)
+        self.download_thread.progress_update.connect(self.update_download_progress)
+        self.download_thread.download_complete.connect(self.download_finished)
+        self.download_thread.download_error.connect(self.download_error)
+        
+        self.progress_dialog.show()
+        self.download_thread.start()
+    
+    def download_season(self):
+        """Download the complete season"""
+        if not self.seasons_list.currentItem():
+            QMessageBox.warning(self, "Error", "No season selected")
+            return
+        
+        season_text = self.seasons_list.currentItem().text()
+        season_number = season_text.replace("Season ", "")
+        
+        if not hasattr(self, 'series_info') or 'episodes' not in self.series_info or season_number not in self.series_info['episodes']:
+            QMessageBox.warning(self, "Error", "Failed to get season information")
+            return
+        
+        episodes = self.series_info['episodes'][season_number]
+        
+        # Ask for save directory
+        save_dir = QFileDialog.getExistingDirectory(self, "Select Directory to Save Season")
+        
+        if not save_dir:
+            return
+        
+        # Create season directory
+        series_name = self.current_series['name']
+        season_dir = f"{save_dir}/{series_name} - Season {season_number}"
+        
+        import os
+        os.makedirs(season_dir, exist_ok=True)
+        
+        # Create progress dialog
+        self.progress_dialog = ProgressDialog(
+            self, "Downloading Season", 
+            f"Downloading {series_name} - Season {season_number}..."
+        )
+        self.progress_dialog.cancelled.connect(self.cancel_batch_download)
+        
+        # Start batch download thread
+        self.batch_download_thread = BatchDownloadThread(
+            self.api_client, episodes, season_dir, series_name
+        )
+        self.batch_download_thread.progress_update.connect(self.update_batch_progress)
+        self.batch_download_thread.download_complete.connect(self.batch_download_finished)
+        self.batch_download_thread.download_error.connect(self.batch_download_error)
+        
+        self.progress_dialog.show()
+        self.batch_download_thread.start()
+    
+    def update_download_progress(self, progress):
+        """Update download progress dialog"""
+        if self.progress_dialog:
+            self.progress_dialog.set_progress(progress)
+    
+    def download_finished(self, save_path):
+        """Handle download completion"""
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        QMessageBox.information(self, "Download Complete", f"File saved to: {save_path}")
+    
+    def download_error(self, error_message):
+        """Handle download error"""
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        QMessageBox.critical(self, "Download Error", error_message)
+    
+    def cancel_download(self):
+        """Cancel the current download"""
+        if self.download_thread and self.download_thread.isRunning():
+            self.download_thread.cancel()
+    
+    def update_batch_progress(self, episode_index, progress):
+        """Update batch download progress dialog"""
+        if self.progress_dialog:
+            self.progress_dialog.set_text(f"Downloading episode {episode_index+1}... {progress}%")
+            self.progress_dialog.set_progress(progress)
+    
+    def batch_download_finished(self):
+        """Handle batch download completion"""
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        QMessageBox.information(self, "Download Complete", "Season download completed")
+    
+    def batch_download_error(self, error_message):
+        """Handle batch download error"""
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        QMessageBox.critical(self, "Download Error", error_message)
+    
+    def cancel_batch_download(self):
+        """Cancel the current batch download"""
+        if self.batch_download_thread and self.batch_download_thread.isRunning():
+            self.batch_download_thread.cancel()
+    
+    def add_to_favorites_clicked(self):
+        """Add current episode to favorites"""
+        if not self.current_episode:
+            QMessageBox.warning(self, "Error", "No episode is playing")
+            return
+        
+        self.add_to_favorites.emit(self.current_episode)
+
+class DownloadItem:
+    def __init__(self, name, save_path):
+        self.name = name
+        self.save_path = save_path
+        self.progress = 0
+        self.status = 'active'  # active, paused, completed, error
