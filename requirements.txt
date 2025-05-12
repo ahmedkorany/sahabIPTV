@@ -1,0 +1,6 @@
+PyQt5
+opencv-python
+m3u8
+requests
+python-vlc
+python-mpv
