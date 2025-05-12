@@ -117,7 +117,6 @@ class MoviesTab(QWidget):
         self.filtered_movies = []  # Store filtered movies for search
         self.current_movie = None
         self.download_thread = None
-        self.progress_dialog = None
         
         # Pagination
         self.current_page = 1
@@ -433,7 +432,6 @@ class MoviesTab(QWidget):
         if self.main_window and hasattr(self.main_window, 'downloads_tab'):
             self.main_window.downloads_tab.add_download(download_item)
         
-        self.progress_dialog.show()
         self.download_thread.start()
     
     def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
@@ -446,19 +444,6 @@ class MoviesTab(QWidget):
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
             
-            # Also update the progress dialog if it exists
-            if hasattr(self, 'progress_dialog') and self.progress_dialog:
-                self.progress_dialog.set_progress(progress)
-                
-                # If we have size information, show more detailed progress
-                if total_size > 0:
-                    speed = download_item.get_formatted_speed()
-                    time_left = download_item.get_formatted_time()
-                    self.progress_dialog.set_text(
-                        f"Downloading {download_item.name}...\n"
-                        f"{progress}% complete\n"
-                        f"Speed: {speed} - Time left: {time_left}"
-                    )
     
     def download_finished(self, download_item, save_path):
         """Handle download completion"""
@@ -470,10 +455,6 @@ class MoviesTab(QWidget):
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
         
-        # Close the progress dialog if it exists
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
         
         QMessageBox.information(self, "Download Complete", f"File saved to: {save_path}")
     
@@ -487,10 +468,6 @@ class MoviesTab(QWidget):
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
         
-        # Close the progress dialog if it exists
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
         
         QMessageBox.critical(self, "Download Error", error_message)
     

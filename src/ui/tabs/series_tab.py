@@ -120,7 +120,6 @@ class SeriesTab(QWidget):
         self.current_episode = None
         self.download_thread = None
         self.batch_download_thread = None
-        self.progress_dialog = None
         
         # Pagination
         self.current_page = 1
@@ -532,7 +531,6 @@ class SeriesTab(QWidget):
         if self.main_window and hasattr(self.main_window, 'downloads_tab'):
             self.main_window.downloads_tab.add_download(download_item)
         
-        self.progress_dialog.show()
         self.download_thread.start()
     
     def download_season(self):
@@ -561,13 +559,6 @@ class SeriesTab(QWidget):
         season_dir = os.path.join(save_dir, f"{series_name} - Season {season_number}")
         os.makedirs(season_dir, exist_ok=True)
         
-        # Create progress dialog
-        self.progress_dialog = ProgressDialog(
-            self, "Downloading Season", 
-            f"Downloading {series_name} - Season {season_number}..."
-        )
-        self.progress_dialog.cancelled.connect(self.cancel_batch_download)
-        
         # Create download item for the whole season
         download_item = DownloadItem(
             f"{series_name} - Season {season_number} (Complete)",
@@ -592,7 +583,6 @@ class SeriesTab(QWidget):
         if self.main_window and hasattr(self.main_window, 'downloads_tab'):
             self.main_window.downloads_tab.add_download(download_item)
         
-        self.progress_dialog.show()
         self.batch_download_thread.start()
     
     def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
@@ -605,19 +595,6 @@ class SeriesTab(QWidget):
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
             
-            # Also update the progress dialog if it exists
-            if hasattr(self, 'progress_dialog') and self.progress_dialog:
-                self.progress_dialog.set_progress(progress)
-                
-                # If we have size information, show more detailed progress
-                if total_size > 0:
-                    speed = download_item.get_formatted_speed()
-                    time_left = download_item.get_formatted_time()
-                    self.progress_dialog.set_text(
-                        f"Downloading {download_item.name}...\n"
-                        f"{progress}% complete\n"
-                        f"Speed: {speed} - Time left: {time_left}"
-                    )
     
     def download_finished(self, download_item, save_path):
         """Handle download completion"""
@@ -628,11 +605,6 @@ class SeriesTab(QWidget):
             # Update the UI in the downloads tab
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
-        
-        # Close the progress dialog if it exists
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
         
         QMessageBox.information(self, "Download Complete", f"File saved to: {save_path}")
     
@@ -645,11 +617,6 @@ class SeriesTab(QWidget):
             # Update the UI in the downloads tab
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
-        
-        # Close the progress dialog if it exists
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
         
         QMessageBox.critical(self, "Download Error", error_message)
     
@@ -672,10 +639,6 @@ class SeriesTab(QWidget):
                     if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                         self.main_window.downloads_tab.update_download_item(download_item)
         
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.set_text(f"Downloading episode {episode_index+1} of {len(self.current_episodes)}... {progress}%")
-            self.progress_dialog.set_progress(progress)
-    
     def batch_download_finished(self, download_item):
         """Handle batch download completion"""
         if download_item:
@@ -686,10 +649,6 @@ class SeriesTab(QWidget):
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
         
-        # Close the progress dialog if it exists
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
         
         QMessageBox.information(self, "Download Complete", "Season download completed")
     
@@ -703,10 +662,6 @@ class SeriesTab(QWidget):
             if self.main_window and hasattr(self.main_window, 'downloads_tab'):
                 self.main_window.downloads_tab.update_download_item(download_item)
         
-        # Close the progress dialog if it exists
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
         
         QMessageBox.critical(self, "Download Error", error_message)
     
