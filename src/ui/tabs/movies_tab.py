@@ -414,10 +414,6 @@ class MoviesTab(QWidget):
         if not save_path:
             return
         
-        # Create progress dialog
-        self.progress_dialog = ProgressDialog(self, "Downloading", f"Downloading {movie_name}...")
-        self.progress_dialog.cancelled.connect(self.cancel_download)
-        
         # Create download item
         download_item = DownloadItem(movie_name, save_path)
         

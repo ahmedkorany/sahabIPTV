@@ -512,9 +512,6 @@ class SeriesTab(QWidget):
         if not save_path:
             return
         
-        # Create progress dialog
-        self.progress_dialog = ProgressDialog(self, "Downloading", f"Downloading {filename}...")
-        self.progress_dialog.cancelled.connect(self.cancel_download)
         
         # Create download item
         download_item = DownloadItem(filename, save_path)
