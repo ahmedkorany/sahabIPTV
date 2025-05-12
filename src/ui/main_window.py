@@ -11,7 +11,7 @@ from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
 from src.ui.tabs.favorites_tab import FavoritesTab
-from src.ui.tabs.download_tab import DownloadsTab  # Import DownloadsTab
+from src.ui.tabs.downloads_tab import DownloadsTab  # Import DownloadsTab
 from src.ui.widgets.dialogs import LoginDialog
 from src.utils.helpers import load_json_file, save_json_file, get_translations
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
