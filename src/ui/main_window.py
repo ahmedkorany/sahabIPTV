@@ -11,7 +11,7 @@ from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
 from src.ui.tabs.favorites_tab import FavoritesTab
-from src.ui.tabs.downloads_tab import DownloadsTab  # Import DownloadsTab
+from src.ui.tabs.downloads_tab import DownloadsTab
 from src.ui.widgets.dialogs import LoginDialog
 from src.utils.helpers import load_json_file, save_json_file, get_translations
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
@@ -34,7 +34,8 @@ class MainWindow(QMainWindow):
         # Show login dialog on startup
         self.show_login_dialog()
         self.downloads_tab = DownloadsTab()
-        self.tabs.addTab(self.downloads_tab, self.translations["Downloads"])
+        self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
+
 
         
     def setup_ui(self):
@@ -62,7 +63,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.movies_tab, self.translations["Movies"])
         self.tabs.addTab(self.series_tab, self.translations["Series"])
         self.tabs.addTab(self.favorites_tab, self.translations["Favorites"])
-        
+        self.live_tab.main_window = self
+        self.movies_tab.main_window = self
+        self.series_tab.main_window = self
         self.setCentralWidget(self.tabs)
         
         # Create menu bar
