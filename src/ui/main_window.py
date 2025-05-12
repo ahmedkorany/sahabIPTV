@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         
     def setup_ui(self):
         """Set up the UI components"""
-        self.setWindowTitle("Sahab IPTV")
+        self.setWindowTitle("Sahab Xtream IPTV")
         self.resize(*WINDOW_SIZE)
         
         # Create central widget with tabs
