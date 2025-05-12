@@ -215,13 +215,12 @@ class SeriesTab(QWidget):
         player_layout = QVBoxLayout(player_widget)
         player_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.player = MediaPlayer()
-        
+        self.player = MediaPlayer(parent=self)
+        self.player.controls.play_pause_button.clicked.connect(self.play_episode)
+        self.episodes_list.itemClicked.connect(self.player.controls.stop_clicked)
+
         # Additional controls
         controls_layout = QHBoxLayout()
-        
-        self.play_button = QPushButton("Play")
-        self.play_button.clicked.connect(self.play_episode)
         
         self.download_episode_button = QPushButton("Download Episode")
         self.download_episode_button.clicked.connect(self.download_episode)
@@ -232,7 +231,6 @@ class SeriesTab(QWidget):
         self.add_favorite_button = QPushButton("Add to Favorites")
         self.add_favorite_button.clicked.connect(self.add_to_favorites_clicked)
         
-        controls_layout.addWidget(self.play_button)
         controls_layout.addWidget(self.download_episode_button)
         controls_layout.addWidget(self.download_season_button)
         controls_layout.addWidget(self.add_favorite_button)
@@ -439,41 +437,45 @@ class SeriesTab(QWidget):
         self.play_episode()
     
     def play_episode(self):
-        """Play the selected episode"""
-        if not self.episodes_list.currentItem():
-            QMessageBox.warning(self, "Error", "No episode selected")
-            return
-        
-        episode_text = self.episodes_list.currentItem().text()
-        episode = None
-        for ep in self.current_episodes:
-            if episode_text.startswith(f"E{ep['episode_num']}"):
-                episode = ep
-                break
-        
-        if not episode:
-            return
-        
-        episode_id = episode['id']
-        
-        # Get container extension (default to mp4)
-        container_extension = episode.get('container_extension', 'mp4')
-        
-        stream_url = self.api_client.get_series_url(episode_id, container_extension)
-        
-        if self.player.play(stream_url):
-            self.current_episode = {
-                'name': f"{self.current_series['name']} - S{episode['season']}E{episode['episode_num']} - {episode['title']}",
-                'stream_url': stream_url,
-                'episode_id': episode_id,
-                'stream_type': 'series',
-                'series_id': self.current_series['series_id'],
-                'season': episode['season'],
-                'episode_num': episode['episode_num'],
-                'title': episode['title'],
-                'container_extension': container_extension
-            }
-    
+        if(self.player.play_started == False):
+            """Play the selected episode"""
+            if not self.episodes_list.currentItem():
+                QMessageBox.warning(self, "Error", "No episode selected")
+                return
+            
+            episode_text = self.episodes_list.currentItem().text()
+            episode = None
+            for ep in self.current_episodes:
+                if episode_text.startswith(f"E{ep['episode_num']}"):
+                    episode = ep
+                    break
+            
+            if not episode:
+                return
+            
+            episode_id = episode['id']
+            
+            # Get container extension (default to mp4)
+            container_extension = episode.get('container_extension', 'mp4')
+            
+            stream_url = self.api_client.get_series_url(episode_id, container_extension)
+            
+            if self.player.play(stream_url):
+                self.current_episode = {
+                    'name': f"{self.current_series['name']} - S{episode['season']}E{episode['episode_num']} - {episode['title']}",
+                    'stream_url': stream_url,
+                    'episode_id': episode_id,
+                    'stream_type': 'series',
+                    'series_id': self.current_series['series_id'],
+                    'season': episode['season'],
+                    'episode_num': episode['episode_num'],
+                    'title': episode['title'],
+                    'container_extension': container_extension
+                }
+                self.player.controls.play_pause_button.clicked.disconnect(self.play_episode)
+        else:
+                self.player.play_pause(True)
+
     def download_episode(self):
         """Download the selected episode"""
         if not self.episodes_list.currentItem():

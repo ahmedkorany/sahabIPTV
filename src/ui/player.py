@@ -23,6 +23,7 @@ class MediaPlayer(QWidget):
         self.update_timer = QTimer(self)
         self.update_timer.setInterval(1000)  # Update every second
         self.update_timer.timeout.connect(self.update_player_state)
+        self.play_started = False
     
     def setup_ui(self):
         """Set up the UI components"""
@@ -89,7 +90,7 @@ class MediaPlayer(QWidget):
             
             # Emit signal
             self.playback_started.emit()
-            
+            self.play_started = True
             return True
         except Exception as e:
             self.playback_error.emit(str(e))
@@ -110,6 +111,7 @@ class MediaPlayer(QWidget):
         self.controls.set_playing(False)
         self.controls.set_current_time(0)
         self.playback_stopped.emit()
+        self.play_started = False
     
     def seek(self, time):
         """Seek to specific time in seconds"""

@@ -175,13 +175,12 @@ class MoviesTab(QWidget):
         player_layout = QVBoxLayout(player_widget)
         player_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.player = MediaPlayer()
-        
+        self.player = MediaPlayer(parent=self)
+        self.player.controls.play_pause_button.clicked.connect(self.play_movie)
+        self.movies_list.itemClicked.connect(self.player.controls.stop_clicked)
+
         # Additional controls
         controls_layout = QHBoxLayout()
-        
-        self.play_button = QPushButton("Play")
-        self.play_button.clicked.connect(self.play_movie)
         
         self.download_button = QPushButton("Download")
         self.download_button.clicked.connect(self.download_movie)
@@ -189,7 +188,6 @@ class MoviesTab(QWidget):
         self.add_favorite_button = QPushButton("Add to Favorites")
         self.add_favorite_button.clicked.connect(self.add_to_favorites_clicked)
         
-        controls_layout.addWidget(self.play_button)
         controls_layout.addWidget(self.download_button)
         controls_layout.addWidget(self.add_favorite_button)
         
@@ -345,39 +343,43 @@ class MoviesTab(QWidget):
         self.play_movie()
     
     def play_movie(self):
-        """Play the selected movie"""
-        if not self.movies_list.currentItem():
-            QMessageBox.warning(self, "Error", "No movie selected")
-            return
-        
-        movie_name = self.movies_list.currentItem().text()
-        movie = None
-        for m in self.filtered_movies:
-            if m['name'] == movie_name:
-                movie = m
-                break
-        
-        if not movie:
-            return
-        
-        stream_id = movie['stream_id']
-        
-        # Get container extension from VOD info
-        container_extension = "mp4"  # Default extension
-        success, vod_info = self.api_client.get_vod_info(stream_id)
-        if success and 'movie_data' in vod_info and 'container_extension' in vod_info['movie_data']:
-            container_extension = vod_info['movie_data']['container_extension']
-        
-        stream_url = self.api_client.get_movie_url(stream_id, container_extension)
-        
-        if self.player.play(stream_url):
-            self.current_movie = {
-                'name': movie['name'],
-                'stream_url': stream_url,
-                'stream_id': stream_id,
-                'stream_type': 'movie',
-                'container_extension': container_extension
-            }
+        if(self.player.play_started == False):
+            """Play the selected movie"""
+            if not self.movies_list.currentItem():
+                QMessageBox.warning(self, "Error", "No movie selected")
+                return
+            
+            movie_name = self.movies_list.currentItem().text()
+            movie = None
+            for m in self.filtered_movies:
+                if m['name'] == movie_name:
+                    movie = m
+                    break
+            
+            if not movie:
+                return
+            
+            stream_id = movie['stream_id']
+            
+            # Get container extension from VOD info
+            container_extension = "mp4"  # Default extension
+            success, vod_info = self.api_client.get_vod_info(stream_id)
+            if success and 'movie_data' in vod_info and 'container_extension' in vod_info['movie_data']:
+                container_extension = vod_info['movie_data']['container_extension']
+            
+            stream_url = self.api_client.get_movie_url(stream_id, container_extension)
+            
+            if self.player.play(stream_url):
+                self.current_movie = {
+                    'name': movie['name'],
+                    'stream_url': stream_url,
+                    'stream_id': stream_id,
+                    'stream_type': 'movie',
+                    'container_extension': container_extension
+                }
+                self.player.controls.play_pause_button.clicked.connect(self.play_movie)
+            else:
+                self.player.play_pause(False)
     
     def download_movie(self):
         """Download the selected movie"""
