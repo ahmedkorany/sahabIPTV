@@ -1,33 +1,134 @@
 """
 Series tab for the application
 """
+import time
+import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel)
+                            QFileDialog, QLabel, QProgressBar)
 from PyQt5.QtCore import Qt, pyqtSignal
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
 
+class DownloadItem:
+    def __init__(self, name, save_path, download_thread=None):
+        self.name = name
+        self.save_path = save_path
+        self.progress = 0
+        self.status = 'active'  # active, paused, completed, error
+        self.download_thread = download_thread
+        self.error_message = None
+        self.time_created = time.time()
+        self.time_completed = None
+        self.total_size = 0
+        self.downloaded_size = 0
+        self.speed = 0  # bytes per second
+        self.estimated_time = 0  # seconds remaining
+    
+    def update_progress(self, progress, downloaded_size=0, total_size=0):
+        self.progress = progress
+        
+        if total_size > 0:
+            self.total_size = total_size
+            self.downloaded_size = downloaded_size
+            
+            # Calculate download speed and estimated time
+            if self.status == 'active' and progress > 0:
+                elapsed_time = time.time() - self.time_created
+                if elapsed_time > 0:
+                    self.speed = downloaded_size / elapsed_time
+                    remaining_bytes = total_size - downloaded_size
+                    if self.speed > 0:
+                        self.estimated_time = remaining_bytes / self.speed
+    
+    def complete(self, save_path):
+        self.status = 'completed'
+        self.progress = 100
+        self.time_completed = time.time()
+        self.save_path = save_path
+        
+    def fail(self, error_message):
+        self.status = 'error'
+        self.error_message = error_message
+        
+    def pause(self):
+        if self.status == 'active' and self.download_thread:
+            self.status = 'paused'
+            # Signal the download thread to pause
+            if hasattr(self.download_thread, 'pause'):
+                self.download_thread.pause()
+    
+    def resume(self):
+        if self.status == 'paused' and self.download_thread:
+            self.status = 'active'
+            # Signal the download thread to resume
+            if hasattr(self.download_thread, 'resume'):
+                self.download_thread.resume()
+    
+    def cancel(self):
+        if self.download_thread and hasattr(self.download_thread, 'cancel'):
+            self.download_thread.cancel()
+            self.status = 'cancelled'
+    
+    def get_formatted_speed(self):
+        """Return formatted download speed (e.g., '1.2 MB/s')"""
+        if self.speed == 0:
+            return "0 B/s"
+        
+        units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+        size = self.speed
+        unit_index = 0
+        
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+            
+        return f"{size:.2f} {units[unit_index]}"
+    
+    def get_formatted_time(self):
+        """Return formatted estimated time remaining"""
+        if self.estimated_time <= 0:
+            return "calculating..."
+            
+        seconds = int(self.estimated_time)
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            seconds %= 60
+            return f"{minutes}m {seconds}s"
+        else:
+            hours = seconds // 3600
+            seconds %= 3600
+            minutes = seconds // 60
+            return f"{hours}h {minutes}m"
+
 class SeriesTab(QWidget):
     """Series tab widget"""
     add_to_favorites = pyqtSignal(dict)
+    add_to_downloads = pyqtSignal(object)  # Signal to add download to downloads tab
     
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
         self.api_client = api_client
         self.series_data = []
+        self.all_series = []  # Store all series across categories
+        self.filtered_series = []  # Store filtered series for search
         self.current_series = None
         self.current_episodes = []
         self.current_episode = None
         self.download_thread = None
         self.batch_download_thread = None
         self.progress_dialog = None
+        
+        # Pagination
         self.current_page = 1
         self.total_pages = 1
         self.page_size = 30
-        self.all_items = []
+        
         self.setup_ui()
+        self.main_window = None  # Will be set by the main window
     
     def setup_ui(self):
         """Set up the UI components"""
@@ -68,8 +169,20 @@ class SeriesTab(QWidget):
         self.series_list.setMinimumWidth(200)
         self.series_list.itemClicked.connect(self.series_clicked)
         
+        # Pagination controls for series
+        series_pagination_layout = QHBoxLayout()
+        self.series_prev_button = QPushButton("Previous")
+        self.series_prev_button.clicked.connect(self.go_to_previous_series_page)
+        self.series_page_label = QLabel("Page 1 of 1")
+        self.series_next_button = QPushButton("Next")
+        self.series_next_button.clicked.connect(self.go_to_next_series_page)
+        series_pagination_layout.addWidget(self.series_prev_button)
+        series_pagination_layout.addWidget(self.series_page_label)
+        series_pagination_layout.addWidget(self.series_next_button)
+        
         series_layout.addWidget(QLabel("Series"))
         series_layout.addWidget(self.series_list)
+        series_layout.addLayout(series_pagination_layout)
         
         seasons_widget = QWidget()
         seasons_layout = QVBoxLayout(seasons_widget)
@@ -136,62 +249,7 @@ class SeriesTab(QWidget):
         # Add all components to main layout
         layout.addLayout(search_layout)
         layout.addWidget(splitter)
-
-        # Add pagination controls to the UI
-        pagination_layout = QHBoxLayout()
-        self.prev_page_button = QPushButton("Previous")
-        self.prev_page_button.clicked.connect(self.go_to_previous_page)
-        self.page_label = QLabel("Page 1 of 1")
-        self.next_page_button = QPushButton("Next")
-        self.next_page_button.clicked.connect(self.go_to_next_page)
-        pagination_layout.addWidget(self.prev_page_button)
-        pagination_layout.addWidget(self.page_label)
-        pagination_layout.addWidget(self.next_page_button)
-        
-    def paginate_items(self, items, page):
-        """Paginate items with 30 items per page"""
-        total_items = len(items)
-        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
-        
-        if page < 1:
-            page = 1
-        if page > total_pages:
-            page = total_pages
-        
-        start = (page - 1) * self.page_size
-        end = min(start + self.page_size, total_items)
-        
-        return items[start:end], total_pages
-
-    def update_pagination_controls(self):
-        """Update pagination controls based on current state"""
-        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
-        self.prev_page_button.setEnabled(self.current_page > 1)
-        self.next_page_button.setEnabled(self.current_page < self.total_pages)
-
-    def go_to_previous_page(self):
-        """Go to the previous page"""
-        if self.current_page > 1:
-            self.current_page -= 1
-            self.display_current_page()
-
-    def go_to_next_page(self):
-        """Go to the next page"""
-        if self.current_page < self.total_pages:
-            self.current_page += 1
-            self.display_current_page()
-
-    def display_current_page(self):
-        """Display the current page of items"""
-        # For MoviesTab
-        self.movies_list.clear()
-        page_items, self.total_pages = self.paginate_items(self.all_items, self.current_page)
-        
-        for item in page_items:
-            self.movies_list.addItem(item['name'])
-        
-        self.update_pagination_controls()
-
+    
     def load_categories(self):
         """Load series categories from the API"""
         self.categories_list.clear()
@@ -206,7 +264,7 @@ class SeriesTab(QWidget):
                 self.categories_list.addItem(category['category_name'])
         else:
             QMessageBox.warning(self, "Error", f"Failed to load categories: {data}")
-
+    
     def category_clicked(self, item):
         """Handle category selection"""
         category_name = item.text()
@@ -229,10 +287,12 @@ class SeriesTab(QWidget):
             
             if category_id:
                 self.load_series(category_id)
-
+    
     def load_all_series(self):
         """Load all series from all categories"""
         self.series_list.clear()
+        self.seasons_list.clear()
+        self.episodes_list.clear()
         all_series = []
         
         # Get all categories
@@ -248,10 +308,11 @@ class SeriesTab(QWidget):
                 all_series.extend(series)
         
         # Update the series list
-        self.series_data = all_series
-        for series in all_series:
-            self.series_list.addItem(series['name'])
-
+        self.all_series = all_series
+        self.filtered_series = all_series
+        self.current_page = 1
+        self.display_current_series_page()
+    
     def load_series(self, category_id):
         """Load series for the selected category"""
         self.series_list.clear()
@@ -260,49 +321,73 @@ class SeriesTab(QWidget):
         
         success, data = self.api_client.get_series(category_id)
         if success:
-            self.series_data = data
-            for series in data:
-                self.series_list.addItem(series['name'])
+            self.all_series = data
+            self.filtered_series = data
+            self.current_page = 1
+            self.display_current_series_page()
         else:
             QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
     
-    def search_series(self, text):
-        """Search series based on input text"""
-        if not self.series_data:
-            return
+    def paginate_items(self, items, page):
+        """Paginate items with specified items per page"""
+        total_items = len(items)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
         
-        text = text.lower()
-        self.series_list.clear()
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
         
-        for series in self.series_data:
-            if text in series['name'].lower():
-                self.series_list.addItem(series['name'])
+        start = (page - 1) * self.page_size
+        end = min(start + self.page_size, total_items)
+        
+        return items[start:end], total_pages
     
-    def search_series(self, text):
-        """Search series based on input text"""
-        if not hasattr(self, 'all_items') or not self.all_items:
-            return
+    def update_series_pagination_controls(self):
+        """Update series pagination controls based on current state"""
+        self.series_page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+        self.series_prev_button.setEnabled(self.current_page > 1)
+        self.series_next_button.setEnabled(self.current_page < self.total_pages)
     
-        text = text.lower()
-        
-        if not text:
-            # If search is cleared, show all items with pagination
-            self.current_page = 1
-            self.display_current_page()
-            return
-        
-        # Filter items based on search text
-        filtered_items = [item for item in self.all_items if text in item['name'].lower()]
-        
-        # Display filtered items
+    def go_to_previous_series_page(self):
+        """Go to the previous page of series"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.display_current_series_page()
+    
+    def go_to_next_series_page(self):
+        """Go to the next page of series"""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.display_current_series_page()
+    
+    def display_current_series_page(self):
+        """Display the current page of series"""
         self.series_list.clear()
-        self.current_page = 1
-        page_items, self.total_pages = self.paginate_items(filtered_items, self.current_page)
+        page_items, self.total_pages = self.paginate_items(self.filtered_series, self.current_page)
         
         for item in page_items:
             self.series_list.addItem(item['name'])
         
-        self.update_pagination_controls()
+        self.update_series_pagination_controls()
+    
+    def search_series(self, text):
+        """Search series based on input text"""
+        if not self.all_series:
+            return
+        
+        text = text.lower()
+        
+        if not text:
+            # If search is cleared, show all items with pagination
+            self.filtered_series = self.all_series
+        else:
+            # Filter items based on search text
+            self.filtered_series = [item for item in self.all_series if text in item['name'].lower()]
+        
+        # Reset to first page and display results
+        self.current_page = 1
+        self.display_current_series_page()
     
     def series_clicked(self, item):
         """Handle series selection"""
@@ -310,7 +395,7 @@ class SeriesTab(QWidget):
         
         # Find series in data
         series = None
-        for s in self.series_data:
+        for s in self.filtered_series:
             if s['name'] == series_name:
                 series = s
                 break
@@ -431,11 +516,24 @@ class SeriesTab(QWidget):
         self.progress_dialog = ProgressDialog(self, "Downloading", f"Downloading {filename}...")
         self.progress_dialog.cancelled.connect(self.cancel_download)
         
+        # Create download item
+        download_item = DownloadItem(filename, save_path)
+        
         # Start download thread
         self.download_thread = DownloadThread(stream_url, save_path, self.api_client.headers)
-        self.download_thread.progress_update.connect(self.update_download_progress)
-        self.download_thread.download_complete.connect(self.download_finished)
-        self.download_thread.download_error.connect(self.download_error)
+        download_item.download_thread = self.download_thread
+        
+        # Connect signals
+        self.download_thread.progress_update.connect(
+            lambda progress, downloaded=0, total=0: self.update_download_progress(download_item, progress, downloaded, total))
+        self.download_thread.download_complete.connect(
+            lambda path: self.download_finished(download_item, path))
+        self.download_thread.download_error.connect(
+            lambda error: self.download_error(download_item, error))
+        
+        # Add to downloads tab
+        if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+            self.main_window.downloads_tab.add_download(download_item)
         
         self.progress_dialog.show()
         self.download_thread.start()
@@ -463,9 +561,7 @@ class SeriesTab(QWidget):
         
         # Create season directory
         series_name = self.current_series['name']
-        season_dir = f"{save_dir}/{series_name} - Season {season_number}"
-        
-        import os
+        season_dir = os.path.join(save_dir, f"{series_name} - Season {season_number}")
         os.makedirs(season_dir, exist_ok=True)
         
         # Create progress dialog
@@ -475,33 +571,86 @@ class SeriesTab(QWidget):
         )
         self.progress_dialog.cancelled.connect(self.cancel_batch_download)
         
+        # Create download item for the whole season
+        download_item = DownloadItem(
+            f"{series_name} - Season {season_number} (Complete)",
+            season_dir
+        )
+        
         # Start batch download thread
         self.batch_download_thread = BatchDownloadThread(
             self.api_client, episodes, season_dir, series_name
         )
-        self.batch_download_thread.progress_update.connect(self.update_batch_progress)
-        self.batch_download_thread.download_complete.connect(self.batch_download_finished)
-        self.batch_download_thread.download_error.connect(self.batch_download_error)
+        download_item.download_thread = self.batch_download_thread
+        
+        # Connect signals
+        self.batch_download_thread.progress_update.connect(
+            lambda episode_idx, progress: self.update_batch_progress(download_item, episode_idx, progress))
+        self.batch_download_thread.download_complete.connect(
+            lambda: self.batch_download_finished(download_item))
+        self.batch_download_thread.download_error.connect(
+            lambda error: self.batch_download_error(download_item, error))
+        
+        # Add to downloads tab
+        if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+            self.main_window.downloads_tab.add_download(download_item)
         
         self.progress_dialog.show()
         self.batch_download_thread.start()
     
-    def update_download_progress(self, progress):
-        """Update download progress dialog"""
-        if self.progress_dialog:
-            self.progress_dialog.set_progress(progress)
+    def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
+        """Update download progress in the downloads tab"""
+        if download_item:
+            # Update the download item
+            download_item.update_progress(progress, downloaded_size, total_size)
+            
+            # Update the UI in the downloads tab
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
+            
+            # Also update the progress dialog if it exists
+            if hasattr(self, 'progress_dialog') and self.progress_dialog:
+                self.progress_dialog.set_progress(progress)
+                
+                # If we have size information, show more detailed progress
+                if total_size > 0:
+                    speed = download_item.get_formatted_speed()
+                    time_left = download_item.get_formatted_time()
+                    self.progress_dialog.set_text(
+                        f"Downloading {download_item.name}...\n"
+                        f"{progress}% complete\n"
+                        f"Speed: {speed} - Time left: {time_left}"
+                    )
     
-    def download_finished(self, save_path):
+    def download_finished(self, download_item, save_path):
         """Handle download completion"""
-        if self.progress_dialog:
+        if download_item:
+            # Update the download item
+            download_item.complete(save_path)
+            
+            # Update the UI in the downloads tab
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
+        
+        # Close the progress dialog if it exists
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
             self.progress_dialog.close()
             self.progress_dialog = None
         
         QMessageBox.information(self, "Download Complete", f"File saved to: {save_path}")
     
-    def download_error(self, error_message):
+    def download_error(self, download_item, error_message):
         """Handle download error"""
-        if self.progress_dialog:
+        if download_item:
+            # Update the download item
+            download_item.fail(error_message)
+            
+            # Update the UI in the downloads tab
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
+        
+        # Close the progress dialog if it exists
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
             self.progress_dialog.close()
             self.progress_dialog = None
         
@@ -512,23 +661,53 @@ class SeriesTab(QWidget):
         if self.download_thread and self.download_thread.isRunning():
             self.download_thread.cancel()
     
-    def update_batch_progress(self, episode_index, progress):
+    def update_batch_progress(self, download_item, episode_index, progress):
         """Update batch download progress dialog"""
-        if self.progress_dialog:
-            self.progress_dialog.set_text(f"Downloading episode {episode_index+1}... {progress}%")
+        if download_item:
+            # For batch downloads, we'll use the episode index and progress to calculate overall progress
+            if hasattr(self, 'current_episodes'):
+                total_episodes = len(self.current_episodes)
+                if total_episodes > 0:
+                    overall_progress = int((episode_index * 100 + progress) / total_episodes)
+                    download_item.update_progress(overall_progress)
+                    
+                    # Update the UI in the downloads tab
+                    if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                        self.main_window.downloads_tab.update_download_item(download_item)
+        
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.set_text(f"Downloading episode {episode_index+1} of {len(self.current_episodes)}... {progress}%")
             self.progress_dialog.set_progress(progress)
     
-    def batch_download_finished(self):
+    def batch_download_finished(self, download_item):
         """Handle batch download completion"""
-        if self.progress_dialog:
+        if download_item:
+            # Update the download item
+            download_item.complete(download_item.save_path)
+            
+            # Update the UI in the downloads tab
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
+        
+        # Close the progress dialog if it exists
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
             self.progress_dialog.close()
             self.progress_dialog = None
         
         QMessageBox.information(self, "Download Complete", "Season download completed")
     
-    def batch_download_error(self, error_message):
+    def batch_download_error(self, download_item, error_message):
         """Handle batch download error"""
-        if self.progress_dialog:
+        if download_item:
+            # Update the download item
+            download_item.fail(error_message)
+            
+            # Update the UI in the downloads tab
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
+        
+        # Close the progress dialog if it exists
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
             self.progress_dialog.close()
             self.progress_dialog = None
         
@@ -546,10 +725,3 @@ class SeriesTab(QWidget):
             return
         
         self.add_to_favorites.emit(self.current_episode)
-
-class DownloadItem:
-    def __init__(self, name, save_path):
-        self.name = name
-        self.save_path = save_path
-        self.progress = 0
-        self.status = 'active'  # active, paused, completed, error

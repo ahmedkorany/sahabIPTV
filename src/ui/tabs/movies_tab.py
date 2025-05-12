@@ -1,31 +1,131 @@
 """
 Movies tab for the application
 """
+import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel)
+                            QFileDialog, QLabel, QProgressBar, QHeaderView, 
+                            QTableWidget, QTableWidgetItem)
 from PyQt5.QtCore import Qt, pyqtSignal
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread
-from src.utils.download_item import DownloadItem  # Ensure this path is correct or adjust it
+from src.ui.widgets.dialogs import ProgressDialog
+
+class DownloadItem:
+    def __init__(self, name, save_path, download_thread=None):
+        self.name = name
+        self.save_path = save_path
+        self.progress = 0
+        self.status = 'active'  # active, paused, completed, error
+        self.download_thread = download_thread
+        self.error_message = None
+        self.time_created = time.time()
+        self.time_completed = None
+        self.total_size = 0
+        self.downloaded_size = 0
+        self.speed = 0  # bytes per second
+        self.estimated_time = 0  # seconds remaining
+    
+    def update_progress(self, progress, downloaded_size=0, total_size=0):
+        self.progress = progress
+        
+        if total_size > 0:
+            self.total_size = total_size
+            self.downloaded_size = downloaded_size
+            
+            # Calculate download speed and estimated time
+            if self.status == 'active' and progress > 0:
+                elapsed_time = time.time() - self.time_created
+                if elapsed_time > 0:
+                    self.speed = downloaded_size / elapsed_time
+                    remaining_bytes = total_size - downloaded_size
+                    if self.speed > 0:
+                        self.estimated_time = remaining_bytes / self.speed
+    
+    def complete(self, save_path):
+        self.status = 'completed'
+        self.progress = 100
+        self.time_completed = time.time()
+        self.save_path = save_path
+        
+    def fail(self, error_message):
+        self.status = 'error'
+        self.error_message = error_message
+        
+    def pause(self):
+        if self.status == 'active' and self.download_thread:
+            self.status = 'paused'
+            # Signal the download thread to pause
+            if hasattr(self.download_thread, 'pause'):
+                self.download_thread.pause()
+    
+    def resume(self):
+        if self.status == 'paused' and self.download_thread:
+            self.status = 'active'
+            # Signal the download thread to resume
+            if hasattr(self.download_thread, 'resume'):
+                self.download_thread.resume()
+    
+    def cancel(self):
+        if self.download_thread and hasattr(self.download_thread, 'cancel'):
+            self.download_thread.cancel()
+            self.status = 'cancelled'
+    
+    def get_formatted_speed(self):
+        """Return formatted download speed (e.g., '1.2 MB/s')"""
+        if self.speed == 0:
+            return "0 B/s"
+        
+        units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+        size = self.speed
+        unit_index = 0
+        
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+            
+        return f"{size:.2f} {units[unit_index]}"
+    
+    def get_formatted_time(self):
+        """Return formatted estimated time remaining"""
+        if self.estimated_time <= 0:
+            return "calculating..."
+            
+        seconds = int(self.estimated_time)
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            seconds %= 60
+            return f"{minutes}m {seconds}s"
+        else:
+            hours = seconds // 3600
+            seconds %= 3600
+            minutes = seconds // 60
+            return f"{hours}h {minutes}m"
 
 class MoviesTab(QWidget):
     """Movies tab widget"""
     add_to_favorites = pyqtSignal(dict)
+    add_to_downloads = pyqtSignal(object)  # Signal to add download to downloads tab
     
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
         self.api_client = api_client
         self.movies = []
+        self.all_movies = []  # Store all movies across categories
+        self.filtered_movies = []  # Store filtered movies for search
         self.current_movie = None
         self.download_thread = None
         self.progress_dialog = None
+        
+        # Pagination
         self.current_page = 1
         self.total_pages = 1
         self.page_size = 30
-        self.all_items = []
-        self.main_window = parent
+        
         self.setup_ui()
+        self.main_window = None  # Will be set by the main window
     
     def setup_ui(self):
         """Set up the UI components"""
@@ -53,10 +153,23 @@ class MoviesTab(QWidget):
         self.movies_list = QListWidget()
         self.movies_list.setMinimumWidth(300)
         self.movies_list.itemDoubleClicked.connect(self.movie_double_clicked)
+        
         lists_layout.addWidget(QLabel("Categories"))
         lists_layout.addWidget(self.categories_list)
         lists_layout.addWidget(QLabel("Movies"))
         lists_layout.addWidget(self.movies_list)
+        
+        # Pagination controls
+        pagination_layout = QHBoxLayout()
+        self.prev_page_button = QPushButton("Previous")
+        self.prev_page_button.clicked.connect(self.go_to_previous_page)
+        self.page_label = QLabel("Page 1 of 1")
+        self.next_page_button = QPushButton("Next")
+        self.next_page_button.clicked.connect(self.go_to_next_page)
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addWidget(self.next_page_button)
+        lists_layout.addLayout(pagination_layout)
         
         # Player and controls
         player_widget = QWidget()
@@ -92,61 +205,7 @@ class MoviesTab(QWidget):
         # Add all components to main layout
         layout.addLayout(search_layout)
         layout.addWidget(splitter)
-        # Add pagination controls to the UI
-        pagination_layout = QHBoxLayout()
-        self.prev_page_button = QPushButton("Previous")
-        self.prev_page_button.clicked.connect(self.go_to_previous_page)
-        self.page_label = QLabel("Page 1 of 1")
-        self.next_page_button = QPushButton("Next")
-        self.next_page_button.clicked.connect(self.go_to_next_page)
-        pagination_layout.addWidget(self.prev_page_button)
-        pagination_layout.addWidget(self.page_label)
-        pagination_layout.addWidget(self.next_page_button)
-
-    def paginate_items(self, items, page):
-        """Paginate items with 30 items per page"""
-        total_items = len(items)
-        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
-        
-        if page < 1:
-            page = 1
-        if page > total_pages:
-            page = total_pages
-        
-        start = (page - 1) * self.page_size
-        end = min(start + self.page_size, total_items)
-        
-        return items[start:end], total_pages
-
-    def update_pagination_controls(self):
-        """Update pagination controls based on current state"""
-        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
-        self.prev_page_button.setEnabled(self.current_page > 1)
-        self.next_page_button.setEnabled(self.current_page < self.total_pages)
-
-    def go_to_previous_page(self):
-        """Go to the previous page"""
-        if self.current_page > 1:
-            self.current_page -= 1
-            self.display_current_page()
-
-    def go_to_next_page(self):
-        """Go to the next page"""
-        if self.current_page < self.total_pages:
-            self.current_page += 1
-            self.display_current_page()
-
-    def display_current_page(self):
-        """Display the current page of items"""
-        # For MoviesTab
-        self.movies_list.clear()
-        page_items, self.total_pages = self.paginate_items(self.all_items, self.current_page)
-        
-        for item in page_items:
-            self.movies_list.addItem(item['name'])
-        
-        self.update_pagination_controls()
-
+    
     def load_categories(self):
         """Load movie categories from the API"""
         self.categories_list.clear()
@@ -161,7 +220,7 @@ class MoviesTab(QWidget):
                 self.categories_list.addItem(category['category_name'])
         else:
             QMessageBox.warning(self, "Error", f"Failed to load categories: {data}")
-
+    
     def category_clicked(self, item):
         """Handle category selection"""
         category_name = item.text()
@@ -184,7 +243,7 @@ class MoviesTab(QWidget):
             
             if category_id:
                 self.load_movies(category_id)
-
+    
     def load_all_movies(self):
         """Load all movies from all categories"""
         self.movies_list.clear()
@@ -203,49 +262,85 @@ class MoviesTab(QWidget):
                 all_movies.extend(movies)
         
         # Update the movies list
-        self.movies = all_movies
-        for movie in all_movies:
-            self.movies_list.addItem(movie['name'])
-
+        self.all_movies = all_movies
+        self.filtered_movies = all_movies
+        self.current_page = 1
+        self.display_current_page()
+    
     def load_movies(self, category_id):
         """Load movies for the selected category"""
         self.movies_list.clear()
         
         success, data = self.api_client.get_vod_streams(category_id)
         if success:
-            self.movies = data
-            for movie in data:
-                self.movies_list.addItem(movie['name'])
+            self.all_movies = data
+            self.filtered_movies = data
+            self.current_page = 1
+            self.display_current_page()
         else:
             QMessageBox.warning(self, "Error", f"Failed to load movies: {data}")
     
+    def paginate_items(self, items, page):
+        """Paginate items with specified items per page"""
+        total_items = len(items)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
+        
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
+        
+        start = (page - 1) * self.page_size
+        end = min(start + self.page_size, total_items)
+        
+        return items[start:end], total_pages
+    
+    def update_pagination_controls(self):
+        """Update pagination controls based on current state"""
+        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+        self.prev_page_button.setEnabled(self.current_page > 1)
+        self.next_page_button.setEnabled(self.current_page < self.total_pages)
+    
+    def go_to_previous_page(self):
+        """Go to the previous page"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.display_current_page()
+    
+    def go_to_next_page(self):
+        """Go to the next page"""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.display_current_page()
+    
+    def display_current_page(self):
+        """Display the current page of items"""
+        self.movies_list.clear()
+        page_items, self.total_pages = self.paginate_items(self.filtered_movies, self.current_page)
+        
+        for item in page_items:
+            self.movies_list.addItem(item['name'])
+        
+        self.update_pagination_controls()
+    
     def search_movies(self, text):
         """Search movies based on input text"""
-        if not hasattr(self, 'all_items') or not self.all_items:
+        if not self.all_movies:
             return
         
         text = text.lower()
         
         if not text:
             # If search is cleared, show all items with pagination
-            self.current_page = 1
-            self.display_current_page()
-            return
+            self.filtered_movies = self.all_movies
+        else:
+            # Filter items based on search text
+            self.filtered_movies = [item for item in self.all_movies if text in item['name'].lower()]
         
-        # Filter items based on search text
-        filtered_items = [item for item in self.all_items if text in item['name'].lower()]
-        
-        # Display filtered items
-        self.movies_list.clear()
+        # Reset to first page and display results
         self.current_page = 1
-        page_items, self.total_pages = self.paginate_items(filtered_items, self.current_page)
-        
-        for item in page_items:
-            self.movies_list.addItem(item['name'])
-        
-        self.update_pagination_controls()
-
-
+        self.display_current_page()
+    
     def movie_double_clicked(self, item):
         """Handle movie double-click"""
         self.play_movie()
@@ -258,7 +353,7 @@ class MoviesTab(QWidget):
         
         movie_name = self.movies_list.currentItem().text()
         movie = None
-        for m in self.movies:
+        for m in self.filtered_movies:
             if m['name'] == movie_name:
                 movie = m
                 break
@@ -293,7 +388,7 @@ class MoviesTab(QWidget):
         
         movie_name = self.movies_list.currentItem().text()
         movie = None
-        for m in self.movies:
+        for m in self.filtered_movies:
             if m['name'] == movie_name:
                 movie = m
                 break
@@ -319,20 +414,30 @@ class MoviesTab(QWidget):
         if not save_path:
             return
         
+        # Create progress dialog
+        self.progress_dialog = ProgressDialog(self, "Downloading", f"Downloading {movie_name}...")
+        self.progress_dialog.cancelled.connect(self.cancel_download)
+        
+        # Create download item
+        download_item = DownloadItem(movie_name, save_path)
+        
         # Start download thread
         self.download_thread = DownloadThread(stream_url, save_path, self.api_client.headers)
-
-            # Create download item and add to downloads tab
-        download_item = DownloadItem(movie_name, save_path)
-        self.main_window.downloads_tab.add_download(download_item)
+        download_item.download_thread = self.download_thread
         
-        # Connect download thread signals to update download item
+        # Connect signals
         self.download_thread.progress_update.connect(
-            lambda progress: self.update_download_progress(download_item, progress))
+            lambda progress, downloaded=0, total=0: self.update_download_progress(download_item, progress, downloaded, total))
         self.download_thread.download_complete.connect(
             lambda path: self.download_finished(download_item, path))
         self.download_thread.download_error.connect(
             lambda error: self.download_error(download_item, error))
+        
+        # Add to downloads tab
+        if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+            self.main_window.downloads_tab.add_download(download_item)
+        
+        self.progress_dialog.show()
         self.download_thread.start()
     
     def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
@@ -340,8 +445,25 @@ class MoviesTab(QWidget):
         if download_item:
             # Update the download item
             download_item.update_progress(progress, downloaded_size, total_size)
-            self.main_window.downloads_tab.update_downloads_table()
-
+            
+            # Update the UI in the downloads tab
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
+            
+            # Also update the progress dialog if it exists
+            if hasattr(self, 'progress_dialog') and self.progress_dialog:
+                self.progress_dialog.set_progress(progress)
+                
+                # If we have size information, show more detailed progress
+                if total_size > 0:
+                    speed = download_item.get_formatted_speed()
+                    time_left = download_item.get_formatted_time()
+                    self.progress_dialog.set_text(
+                        f"Downloading {download_item.name}...\n"
+                        f"{progress}% complete\n"
+                        f"Speed: {speed} - Time left: {time_left}"
+                    )
+    
     def download_finished(self, download_item, save_path):
         """Handle download completion"""
         if download_item:
@@ -349,8 +471,16 @@ class MoviesTab(QWidget):
             download_item.complete(save_path)
             
             # Update the UI in the downloads tab
-            self.main_window.downloads_tab.update_downloads_table()
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
         
+        # Close the progress dialog if it exists
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        QMessageBox.information(self, "Download Complete", f"File saved to: {save_path}")
+    
     def download_error(self, download_item, error_message):
         """Handle download error"""
         if download_item:
@@ -358,8 +488,16 @@ class MoviesTab(QWidget):
             download_item.fail(error_message)
             
             # Update the UI in the downloads tab
-            self.main_window.downloads_tab.update_downloads_table()
-
+            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
+                self.main_window.downloads_tab.update_download_item(download_item)
+        
+        # Close the progress dialog if it exists
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        QMessageBox.critical(self, "Download Error", error_message)
+    
     def cancel_download(self):
         """Cancel the current download"""
         if self.download_thread and self.download_thread.isRunning():
