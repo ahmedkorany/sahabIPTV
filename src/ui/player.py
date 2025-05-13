@@ -4,7 +4,7 @@ Media player widget for the application
 import sys
 import vlc
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent
 from src.ui.widgets.controls import PlayerControls
 from src.config import DEFAULT_VOLUME
 
@@ -24,7 +24,15 @@ class MediaPlayer(QWidget):
         self.update_timer.setInterval(1000)  # Update every second
         self.update_timer.timeout.connect(self.update_player_state)
         self.play_started = False
-    
+        self.old_parent = None
+        self.old_geometry = None
+        
+        self.is_fullscreen = False
+        self.normal_parent = None
+        self.normal_geometry = None
+        self.normal_layout_position = None
+        self.fullscreen_window = None
+
     def setup_ui(self):
         """Set up the UI components"""
         layout = QVBoxLayout(self)
@@ -36,6 +44,8 @@ class MediaPlayer(QWidget):
         self.video_frame.setFrameShape(QFrame.StyledPanel)
         self.video_frame.setFrameShadow(QFrame.Raised)
         self.video_frame.setStyleSheet("background-color: black;")
+        self.video_frame.installEventFilter(self)
+        self.video_frame.setFocusPolicy(Qt.StrongFocus)
         
         # Player controls
         self.controls = PlayerControls()
@@ -69,7 +79,6 @@ class MediaPlayer(QWidget):
         # Set initial volume
         self.player.audio_set_volume(DEFAULT_VOLUME)
         self.controls.set_volume(DEFAULT_VOLUME)
-    
     def play(self, url):
         """Play media from URL"""
         try:
@@ -124,10 +133,121 @@ class MediaPlayer(QWidget):
     def set_mute(self, mute):
         """Mute or unmute audio"""
         self.player.audio_set_mute(mute)
+    def keyPressEvent(self, event):
+        """Handle key press events"""
+        if event.key() == Qt.Key_Escape and self.video_frame.isFullScreen():
+            # Exit fullscreen mode when Escape is pressed
+            print("Escape pressed")
+            self.controls.set_fullscreen(False)
+            self.toggle_fullscreen(False)
+        else:
+            super().keyPressEvent(event)
     
     def toggle_fullscreen(self, fullscreen):
         """Toggle fullscreen mode"""
-        self.player.set_fullscreen(fullscreen)
+        if fullscreen and not self.is_fullscreen:
+            # Going to fullscreen
+            self.enter_fullscreen()
+        elif not fullscreen and self.is_fullscreen:
+            # Exiting fullscreen
+            self.exit_fullscreen()
+
+    def enter_fullscreen_old(self):
+        """Toggle fullscreen mode"""
+        # Save the current parent only if not already in fullscreen
+        if not hasattr(self, 'old_parent') or self.old_parent is None:
+            self.old_parent = self.video_frame.parentWidget()
+            self.old_geometry = self.video_frame.geometry()
+        
+        # Detach from layout and make it a top-level window
+        self.video_frame.setParent(None)
+        self.video_frame.setWindowFlags(Qt.Window)
+        self.video_frame.showFullScreen()
+        self.video_frame.setFocus()  # Give focus to the video frame
+        self.is_fullscreen = True
+        self.controls.set_fullscreen(True)
+        
+        # Make sure VLC knows about the new window
+        if sys.platform == "linux" or sys.platform == "linux2":
+            self.player.set_xwindow(self.video_frame.winId())
+        elif sys.platform == "win32":
+            self.player.set_hwnd(self.video_frame.winId())
+        elif sys.platform == "darwin":
+            self.player.set_nsobject(int(self.video_frame.winId()))
+
+    def enter_fullscreen(self):
+        """Enter fullscreen mode"""
+        if self.is_fullscreen:
+            return
+            
+        # Save current state
+        self.normal_parent = self.video_frame.parentWidget()
+        self.normal_geometry = self.video_frame.geometry()
+        
+        # Detach the video frame from its parent
+        self.video_frame.setParent(None)
+        
+        # Set window flags for proper fullscreen behavior
+        self.video_frame.setWindowFlags(Qt.Window)
+        
+        # Show fullscreen
+        self.video_frame.showFullScreen()
+        self.video_frame.setFocus()
+        
+        # Update VLC player to use the new window
+        if sys.platform == "linux" or sys.platform == "linux2":
+            self.player.set_xwindow(self.video_frame.winId())
+        elif sys.platform == "win32":
+            self.player.set_hwnd(self.video_frame.winId())
+        elif sys.platform == "darwin":
+            self.player.set_nsobject(int(self.video_frame.winId()))
+        
+        self.is_fullscreen = True
+        self.controls.set_fullscreen(True)
+        
+        # Install event filter to catch Escape key
+        self.video_frame.installEventFilter(self)
+
+    def exit_fullscreen(self):
+        """Exit fullscreen mode"""
+        if not self.is_fullscreen:
+            return
+        
+        # Exit fullscreen mode
+        self.video_frame.setWindowFlags(Qt.Widget)
+        
+        # Reparent video frame back to the original parent
+        if self.normal_parent:
+            # Get the layout of the normal parent
+            parent_layout = self.layout()
+            
+            # Add video frame back to the original layout
+            parent_layout.insertWidget(0, self.video_frame, 1)
+            
+            # Make sure the video frame is visible
+            self.video_frame.show()
+            
+            # Update VLC player
+            if sys.platform == "linux" or sys.platform == "linux2":
+                self.player.set_xwindow(self.video_frame.winId())
+            elif sys.platform == "win32":
+                self.player.set_hwnd(self.video_frame.winId())
+            elif sys.platform == "darwin":
+                self.player.set_nsobject(int(self.video_frame.winId()))
+        
+        self.is_fullscreen = False
+        self.controls.set_fullscreen(False)
+        
+        # Remove event filter
+        self.video_frame.removeEventFilter(self)
+
+    
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            self.exit_fullscreen()
+            return True
+        
+        return super().eventFilter(obj, event)
     
     def set_playback_rate(self, rate):
         """Set playback speed rate"""

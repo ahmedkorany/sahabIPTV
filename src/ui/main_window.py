@@ -167,9 +167,7 @@ class MainWindow(QMainWindow):
             # Load data
             self.live_tab.load_categories()
             self.movies_tab.load_categories()
-            self.series_tab.load_categories()
-            
-            QMessageBox.information(self, "Connection Success", "Successfully connected to IPTV server")
+            self.series_tab.load_categories()            
         else:
             self.statusBar.showMessage("Connection failed")
             QMessageBox.critical(self, "Connection Error", f"Failed to connect: {data}")

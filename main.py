@@ -14,7 +14,7 @@ if __name__ == "__main__":
     app.setStyle('Fusion')
     
     # Set application icon
-    app.setWindowIcon(QIcon('assets/app_icon.png'))
+    app.setWindowIcon(QIcon('assets/sahab_icon.jpeg'))
     
     # Set application name and organization
     app.setApplicationName("Sahab IPTV")
