@@ -4,6 +4,7 @@ Media player widget for the application
 import sys
 import vlc
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame
+from PyQt5.QtWidgets import QLabel
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent
 from src.ui.widgets.controls import PlayerControls
 from src.config import DEFAULT_VOLUME
@@ -185,6 +186,106 @@ class MediaPlayer(QWidget):
         # Install event filter to catch Escape key
         self.video_frame.installEventFilter(self)
 
+        # Show ESC message overlay
+        self.show_esc_message()
+        # Show controls overlay initially
+        self.show_controls_overlay()
+
+    def show_esc_message(self):
+        """Display 'Press ESC to return to normal view' overlay for 5 seconds in fullscreen."""
+        from PyQt5.QtCore import QTimer, Qt
+        # Remove previous message if exists
+        if hasattr(self, '_esc_message_label') and self._esc_message_label:
+            self._esc_message_label.deleteLater()
+            self._esc_message_label = None
+        self._esc_message_label = QLabel(self.video_frame)
+        self._esc_message_label.setText("<b>Press ESC to return to normal view</b>")
+        self._esc_message_label.setStyleSheet(
+            "background: rgba(0,0,0,0.7); color: white; padding: 16px 32px; border-radius: 8px; font-size: 20px;"
+        )
+        self._esc_message_label.setAlignment(Qt.AlignCenter)
+        self._esc_message_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._esc_message_label.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        self._esc_message_label.resize(self.video_frame.size())
+        self._esc_message_label.move(0, int(self.video_frame.height() * 0.4))
+        self._esc_message_label.show()
+        self._esc_message_label.raise_()
+        # Resize with video_frame
+        self.video_frame.installEventFilter(self)
+        # Hide after 5 seconds
+        QTimer.singleShot(5000, self._esc_message_label.hide)
+
+    def show_controls_overlay(self):
+        """Show play controls overlay in fullscreen mode."""
+        from PyQt5.QtWidgets import QWidget, QHBoxLayout, QPushButton
+        from PyQt5.QtCore import Qt, QTimer
+        # Remove previous overlay if exists
+        if hasattr(self, '_controls_overlay') and self._controls_overlay:
+            self._controls_overlay.deleteLater()
+            self._controls_overlay = None
+        overlay = QWidget(self.video_frame)
+        overlay.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        overlay.setWindowFlags(Qt.FramelessWindowHint | Qt.ToolTip)
+        overlay.setStyleSheet("background: rgba(0,0,0,0.5); border-radius: 12px;")
+        layout = QHBoxLayout(overlay)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(30)
+        # Play/Pause
+        is_playing = self.is_playing()
+        # Use a Unicode triangle for Play and a double bar for Pause
+        play_icon = "\u25B6"  # Unicode black right-pointing triangle
+        pause_icon = "||"  # Unicode double vertical bar
+        play_pause_btn = QPushButton(play_icon if not is_playing else pause_icon)
+        play_pause_btn.setToolTip("Pause" if is_playing else "Play")
+        play_pause_btn.setFixedSize(48, 48)
+        play_pause_btn.setStyleSheet("font-size: 36px; background: #222; color: #fff; border-radius: 24px;")
+        def toggle_play_pause():
+            if self.is_playing():
+                self.play_pause(False)
+            else:
+                self.play_pause(True)
+            # Refresh overlay to update icon
+            self.show_controls_overlay()
+        play_pause_btn.clicked.connect(toggle_play_pause)
+        layout.addWidget(play_pause_btn)
+        # Stop
+        stop_btn = QPushButton("⏹")
+        stop_btn.setToolTip("Stop")
+        stop_btn.setFixedSize(48, 48)
+        stop_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
+        def stop_and_exit():
+            self.stop()
+            self.exit_fullscreen()
+        stop_btn.clicked.connect(stop_and_exit)
+        layout.addWidget(stop_btn)
+        # Fast backward
+        back_btn = QPushButton("⏪")
+        back_btn.setToolTip("Fast Backward")
+        back_btn.setFixedSize(48, 48)
+        back_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
+        back_btn.clicked.connect(lambda: self.seek(max(0, self.player.get_time()//1000 - 10)))
+        layout.addWidget(back_btn)
+        # Fast forward
+        forward_btn = QPushButton("⏩")
+        forward_btn.setToolTip("Fast Forward")
+        forward_btn.setFixedSize(48, 48)
+        forward_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
+        forward_btn.clicked.connect(lambda: self.seek(self.player.get_time()//1000 + 10))
+        layout.addWidget(forward_btn)
+        # Position overlay at bottom center
+        overlay.resize(min(400, self.video_frame.width()-40), 80)
+        overlay.move((self.video_frame.width() - overlay.width()) // 2, self.video_frame.height() - overlay.height() - 40)
+        overlay.show()
+        overlay.raise_()
+        self._controls_overlay = overlay
+        # Hide after 3 seconds if no interaction
+        if hasattr(self, '_controls_overlay_timer') and self._controls_overlay_timer:
+            self._controls_overlay_timer.stop()
+        self._controls_overlay_timer = QTimer(self.video_frame)
+        self._controls_overlay_timer.setSingleShot(True)
+        self._controls_overlay_timer.timeout.connect(overlay.hide)
+        self._controls_overlay_timer.start(3000)
+
     def exit_fullscreen(self):
         """Exit fullscreen mode"""
         if not self.is_fullscreen:
@@ -220,10 +321,24 @@ class MediaPlayer(QWidget):
 
     
     def eventFilter(self, obj, event):
+        from PyQt5.QtCore import QEvent
+        # Use hasattr to avoid AttributeError if is_fullscreen is not set yet
+        is_fullscreen = getattr(self, 'is_fullscreen', False)
         if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
             self.exit_fullscreen()
             return True
-        
+        # Resize overlays if video_frame is resized
+        if obj == self.video_frame and event.type() == QEvent.Resize:
+            if hasattr(self, '_esc_message_label') and self._esc_message_label and self._esc_message_label.isVisible():
+                self._esc_message_label.resize(self.video_frame.size())
+                self._esc_message_label.move(0, int(self.video_frame.height() * 0.4))
+            if hasattr(self, '_controls_overlay') and self._controls_overlay and self._controls_overlay.isVisible():
+                self._controls_overlay.resize(min(400, self.video_frame.width()-40), 80)
+                self._controls_overlay.move((self.video_frame.width() - self._controls_overlay.width()) // 2, self.video_frame.height() - self._controls_overlay.height() - 40)
+        # Show controls overlay on mouse click in fullscreen
+        if obj == self.video_frame and is_fullscreen and event.type() == QEvent.MouseButtonPress:
+            self.show_controls_overlay()
+            return True
         return super().eventFilter(obj, event)
     
     def set_playback_rate(self, rate):
