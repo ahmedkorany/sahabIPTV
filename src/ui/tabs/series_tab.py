@@ -227,12 +227,16 @@ class SeriesTab(QWidget):
         
         self.download_season_button = QPushButton("Download Season")
         self.download_season_button.clicked.connect(self.download_season)
+
+        self.export_season_button = QPushButton("Export Season")
+        self.export_season_button.clicked.connect(self.export_season)
         
         self.add_favorite_button = QPushButton("Add to Favorites")
         self.add_favorite_button.clicked.connect(self.add_to_favorites_clicked)
         
         controls_layout.addWidget(self.download_episode_button)
         controls_layout.addWidget(self.download_season_button)
+        controls_layout.addWidget(self.export_season_button)
         controls_layout.addWidget(self.add_favorite_button)
         
         player_layout.addWidget(self.player)
@@ -587,6 +591,41 @@ class SeriesTab(QWidget):
         
         self.batch_download_thread.start()
     
+    def export_season(self):
+        """Export all episode URLs of the selected season to a text file"""
+        if not self.seasons_list.currentItem():
+            QMessageBox.warning(self, "Error", "No season selected")
+            return
+
+        season_text = self.seasons_list.currentItem().text()
+        season_number = season_text.replace("Season ", "")
+
+        if not hasattr(self, 'series_info') or 'episodes' not in self.series_info or season_number not in self.series_info['episodes']:
+            QMessageBox.warning(self, "Error", "Failed to get season information")
+            return
+
+        episodes = self.series_info['episodes'][season_number]
+
+        # Ask for save location
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Season URLs", f"{self.current_series['name']} - Season {season_number}.txt", "Text Files (*.txt)"
+        )
+
+        if not save_path:
+            return
+
+        try:
+            with open(save_path, 'w') as file:
+                for episode in episodes:
+                    episode_id = episode['id']
+                    container_extension = episode.get('container_extension', 'mp4')
+                    stream_url = self.api_client.get_series_url(episode_id, container_extension)
+                    file.write(f"{stream_url}\n")
+
+            QMessageBox.information(self, "Export Complete", f"Season URLs exported to: {save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export season URLs: {str(e)}")
+        return
     def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
         """Update download progress in the downloads tab"""
         if download_item:
