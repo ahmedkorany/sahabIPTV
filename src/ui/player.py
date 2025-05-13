@@ -152,29 +152,6 @@ class MediaPlayer(QWidget):
             # Exiting fullscreen
             self.exit_fullscreen()
 
-    def enter_fullscreen_old(self):
-        """Toggle fullscreen mode"""
-        # Save the current parent only if not already in fullscreen
-        if not hasattr(self, 'old_parent') or self.old_parent is None:
-            self.old_parent = self.video_frame.parentWidget()
-            self.old_geometry = self.video_frame.geometry()
-        
-        # Detach from layout and make it a top-level window
-        self.video_frame.setParent(None)
-        self.video_frame.setWindowFlags(Qt.Window)
-        self.video_frame.showFullScreen()
-        self.video_frame.setFocus()  # Give focus to the video frame
-        self.is_fullscreen = True
-        self.controls.set_fullscreen(True)
-        
-        # Make sure VLC knows about the new window
-        if sys.platform == "linux" or sys.platform == "linux2":
-            self.player.set_xwindow(self.video_frame.winId())
-        elif sys.platform == "win32":
-            self.player.set_hwnd(self.video_frame.winId())
-        elif sys.platform == "darwin":
-            self.player.set_nsobject(int(self.video_frame.winId()))
-
     def enter_fullscreen(self):
         """Enter fullscreen mode"""
         if self.is_fullscreen:
