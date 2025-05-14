@@ -84,9 +84,11 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("Ready")
         
-        # Add account label to status bar
+        # Add account label and expiry label to status bar
         self.account_label = QLabel()
+        self.expiry_label = QLabel()
         self.statusBar.addPermanentWidget(self.account_label)
+        self.statusBar.addPermanentWidget(self.expiry_label)
         self.update_account_label()
     
     def create_menu_bar(self):
@@ -243,12 +245,23 @@ class MainWindow(QMainWindow):
         self.statusBar.showMessage("Connecting to server...")
         self.api_client.set_credentials(server, username, password)
         success, data = self.api_client.authenticate()
+        expiry_str = ""
         if success:
             self.statusBar.showMessage("Connected successfully")
             self.live_tab.load_categories()
             self.movies_tab.load_categories()
             self.series_tab.load_categories()
-            self.update_account_label()  # Update app title after connect
+            # Get expiry date from user_info if available
+            if data and 'user_info' in data and 'exp_date' in data['user_info']:
+                import datetime
+                exp_ts = int(data['user_info']['exp_date'])
+                expiry = datetime.datetime.fromtimestamp(exp_ts)
+                expiry_str = expiry.strftime('%Y-%m-%d')
+                self.expiry_label.setText(f"Expiry: {expiry_str}")
+            else:
+                self.expiry_label.setText("")
+            self.update_account_label()
+            self._load_account_data()
         else:
             self.statusBar.showMessage("Connection failed")
             from PyQt5.QtWidgets import QMessageBox
@@ -261,8 +274,9 @@ class MainWindow(QMainWindow):
         self.favorites_tab.set_favorites(self.favorites)
     
     def save_favorites(self):
-        """Save favorites to file"""
-        save_json_file(FAVORITES_FILE, self.favorites)
+        from src.utils.helpers import save_json_file
+        fav_file = self._account_data_key('favorites.json')
+        save_json_file(fav_file, self.favorites)
     
     def add_to_favorites(self, item):
         """Add an item to favorites"""
@@ -381,3 +395,18 @@ class MainWindow(QMainWindow):
             else:
                 self.account_label.setText("")
                 self.setWindowTitle("Sahab Xtream IPTV")
+
+    def _account_data_key(self, suffix):
+        # Use a unique key for each account's data
+        return f"{self.current_account}_{suffix}" if self.current_account else suffix
+
+    def _load_account_data(self):
+        # Load favorites and downloads for the current account
+        from src.utils.helpers import load_json_file
+        fav_file = self._account_data_key('favorites.json')
+        try:
+            self.favorites = load_json_file(fav_file, [])
+        except Exception:
+            self.favorites = []
+        self.favorites_tab.set_favorites(self.favorites)
+        # TODO: Implement per-account downloads loading if needed
