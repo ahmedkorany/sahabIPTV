@@ -3,7 +3,7 @@ Main application window
 """
 import os
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QMessageBox, 
-                            QAction, QMenu, QMenuBar, QToolBar, QStatusBar)
+                            QAction, QMenu, QMenuBar, QToolBar, QStatusBar, QLabel)
 from PyQt5.QtCore import Qt, QSettings, QSize
 from PyQt5.QtGui import QIcon
 from src.api.xtream import XtreamClient
@@ -26,29 +26,26 @@ class MainWindow(QMainWindow):
         self.settings = QSettings()
         self.language = self.settings.value("language", DEFAULT_LANGUAGE)
         self.translations = get_translations(self.language)
-
+        self.accounts = self.settings.value("accounts", {}, type=dict)
+        self.current_account = self.settings.value("current_account", "", type=str)
         self.setup_ui()
         self.load_favorites()
         self.load_settings()
-
-        # Try auto-login if credentials exist and remember_credentials is True
-        server = self.settings.value("server", "")
-        username = self.settings.value("username", "")
-        password = self.settings.value("password", "")
-        remember = self.settings.value("remember_credentials", True, type=bool)
         auto_login_success = False
-        if server and username and password and remember:
-            success, _ = self.api_client.set_credentials(server, username, password) or (True, None)
-            success, _ = self.api_client.authenticate()
-            if success:
-                self.connect_to_server(server, username, password)
-                auto_login_success = True
+        if self.current_account and self.current_account in self.accounts:
+            acc = self.accounts[self.current_account]
+            server, username, password = acc.get('server', ''), acc.get('username', ''), acc.get('password', '')
+            if server and username and password:
+                self.api_client.set_credentials(server, username, password)
+                success, _ = self.api_client.authenticate()
+                if success:
+                    self.connect_to_server(server, username, password)
+                    auto_login_success = True
         if not auto_login_success:
-            self.show_login_dialog()
+            self.show_account_switch_dialog()
         self.downloads_tab = DownloadsTab()
         self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
 
-        
     def setup_ui(self):
         """Set up the UI components"""
         self.setWindowTitle("Sahab Xtream IPTV")
@@ -86,6 +83,11 @@ class MainWindow(QMainWindow):
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("Ready")
+        
+        # Add account label to status bar
+        self.account_label = QLabel()
+        self.statusBar.addPermanentWidget(self.account_label)
+        self.update_account_label()
     
     def create_menu_bar(self):
         """Create the menu bar"""
@@ -95,8 +97,12 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("File")
         
         connect_action = QAction("Connect / Re-login", self)
-        connect_action.triggered.connect(self.show_login_dialog)
+        connect_action.triggered.connect(self.show_account_switch_dialog)
         file_menu.addAction(connect_action)
+        
+        edit_account_action = QAction("Edit Current Account", self)
+        edit_account_action.triggered.connect(self.edit_current_account)
+        file_menu.addAction(edit_account_action)
         
         file_menu.addSeparator()
         
@@ -131,18 +137,91 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
     
-    def show_login_dialog(self):
-        """Show the login dialog"""
-        # Get saved credentials
-        server = self.settings.value("server", "")
-        username = self.settings.value("username", "")
-        password = self.settings.value("password", "")
-        remember = self.settings.value("remember_credentials", True, type=bool)
-        
+    def show_account_switch_dialog(self):
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select IPTV Account")
+        layout = QVBoxLayout(dlg)
+        label = QLabel("Choose an account or add a new one:")
+        layout.addWidget(label)
+        combo = QComboBox()
+        combo.addItems(list(self.accounts.keys()) + ["Add new account..."])
+        layout.addWidget(combo)
+        btns = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        cancel_btn = QPushButton("Cancel")
+        edit_btn = QPushButton("Edit")
+        btns.addWidget(ok_btn)
+        btns.addWidget(edit_btn)
+        btns.addWidget(cancel_btn)
+        layout.addLayout(btns)
+        def on_ok():
+            idx = combo.currentIndex()
+            if idx == len(self.accounts):
+                self.show_login_dialog(account_switch=True)
+            else:
+                name = combo.currentText()
+                self.current_account = name
+                self.settings.setValue("current_account", name)
+                acc = self.accounts[name]
+                self.api_client.set_credentials(acc['server'], acc['username'], acc['password'])
+                success, _ = self.api_client.authenticate()
+                if success:
+                    self.connect_to_server(acc['server'], acc['username'], acc['password'])
+                else:
+                    self.show_login_dialog(account_switch=True, prefill=acc)
+            dlg.accept()
+        def on_edit():
+            idx = combo.currentIndex()
+            if idx < len(self.accounts):
+                name = combo.currentText()
+                acc = self.accounts[name]
+                self.edit_account(name, acc)
+                dlg.accept()
+        ok_btn.clicked.connect(on_ok)
+        edit_btn.clicked.connect(on_edit)
+        cancel_btn.clicked.connect(dlg.reject)
+        dlg.exec_()
+
+    def show_login_dialog(self, account_switch=False, prefill=None):
+        # Get saved credentials or prefill
+        if prefill:
+            server = prefill.get('server', '')
+            username = prefill.get('username', '')
+            password = prefill.get('password', '')
+            remember = True
+            account_name = prefill.get('account_name', self.current_account or "")
+        else:
+            server = self.settings.value("server", "")
+            username = self.settings.value("username", "")
+            password = self.settings.value("password", "")
+            remember = self.settings.value("remember_credentials", True, type=bool)
+            account_name = self.current_account or ""
+        from src.ui.widgets.dialogs import LoginDialog
+        from PyQt5.QtWidgets import QLineEdit, QLabel, QVBoxLayout
         dialog = LoginDialog(self, server, username, password, remember)
+        # Add account name field to the dialog
+        name_label = QLabel("Account Name:")
+        name_edit = QLineEdit(account_name)
+        dialog.layout().insertWidget(0, name_edit)
+        dialog.layout().insertWidget(0, name_label)
         if dialog.exec_():
             credentials = dialog.get_credentials()
-            
+            name = name_edit.text().strip() or f"Account {len(self.accounts)+1}"
+            # Save account
+            acc = {
+                'server': credentials['server'],
+                'username': credentials['username'],
+                'password': credentials['password'],
+                'account_name': name
+            }
+            # Remove old name if renaming
+            if self.current_account and self.current_account in self.accounts and self.current_account != name:
+                self.accounts.pop(self.current_account)
+            self.accounts[name] = acc
+            self.current_account = name
+            self.settings.setValue("accounts", self.accounts)
+            self.settings.setValue("current_account", name)
             # Save credentials if remember is checked
             if credentials['remember']:
                 self.settings.setValue("server", credentials['server'])
@@ -154,35 +233,28 @@ class MainWindow(QMainWindow):
                 self.settings.remove("username")
                 self.settings.remove("password")
                 self.settings.setValue("remember_credentials", False)
-            
             # Connect to server
-            self.connect_to_server(
-                credentials['server'],
-                credentials['username'],
-                credentials['password']
-            )
-    
+            self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
+            self.update_account_label()  # Update app title after login
+        elif account_switch:
+            self.show_account_switch_dialog()
+
     def connect_to_server(self, server, username, password):
-        """Connect to the IPTV server"""
         self.statusBar.showMessage("Connecting to server...")
-        
-        # Set credentials
         self.api_client.set_credentials(server, username, password)
-        
-        # Authenticate
         success, data = self.api_client.authenticate()
-        
         if success:
             self.statusBar.showMessage("Connected successfully")
-            
-            # Load data
             self.live_tab.load_categories()
             self.movies_tab.load_categories()
-            self.series_tab.load_categories()            
+            self.series_tab.load_categories()
+            self.update_account_label()  # Update app title after connect
         else:
             self.statusBar.showMessage("Connection failed")
+            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Connection Error", f"Failed to connect: {data}")
-    
+            self.show_login_dialog(account_switch=True)
+
     def load_favorites(self):
         """Load favorites from file"""
         self.favorites = load_json_file(FAVORITES_FILE, [])
@@ -272,3 +344,40 @@ class MainWindow(QMainWindow):
         self.save_settings()
         self.save_favorites()
         event.accept()
+
+    def edit_account(self, name, acc):
+        from src.ui.widgets.dialogs import LoginDialog
+        dialog = LoginDialog(self, acc.get('server', ''), acc.get('username', ''), acc.get('password', ''), True)
+        if dialog.exec_():
+            credentials = dialog.get_credentials()
+            # Optionally allow renaming
+            from PyQt5.QtWidgets import QInputDialog
+            new_name, ok = QInputDialog.getText(self, "Edit Account Name", "Edit account name:", text=name)
+            if not ok or not new_name.strip():
+                new_name = name
+            # Update account
+            self.accounts.pop(name)
+            self.accounts[new_name] = {
+                'server': credentials['server'],
+                'username': credentials['username'],
+                'password': credentials['password']
+            }
+            self.current_account = new_name
+            self.settings.setValue("accounts", self.accounts)
+            self.settings.setValue("current_account", new_name)
+            self.api_client.set_credentials(credentials['server'], credentials['username'], credentials['password'])
+            self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
+            self.update_account_label()
+
+    def edit_current_account(self):
+        if self.current_account and self.current_account in self.accounts:
+            self.edit_account(self.current_account, self.accounts[self.current_account])
+
+    def update_account_label(self):
+        if hasattr(self, 'account_label'):
+            if self.current_account:
+                self.account_label.setText(f"Account: {self.current_account}")
+                self.setWindowTitle(f"Sahab Xtream IPTV - {self.current_account}")
+            else:
+                self.account_label.setText("")
+                self.setWindowTitle("Sahab Xtream IPTV")
