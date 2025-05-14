@@ -26,16 +26,27 @@ class MainWindow(QMainWindow):
         self.settings = QSettings()
         self.language = self.settings.value("language", DEFAULT_LANGUAGE)
         self.translations = get_translations(self.language)
-        
+
         self.setup_ui()
         self.load_favorites()
         self.load_settings()
-        
-        # Show login dialog on startup
-        self.show_login_dialog()
+
+        # Try auto-login if credentials exist and remember_credentials is True
+        server = self.settings.value("server", "")
+        username = self.settings.value("username", "")
+        password = self.settings.value("password", "")
+        remember = self.settings.value("remember_credentials", True, type=bool)
+        auto_login_success = False
+        if server and username and password and remember:
+            success, _ = self.api_client.set_credentials(server, username, password) or (True, None)
+            success, _ = self.api_client.authenticate()
+            if success:
+                self.connect_to_server(server, username, password)
+                auto_login_success = True
+        if not auto_login_success:
+            self.show_login_dialog()
         self.downloads_tab = DownloadsTab()
         self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
-
 
         
     def setup_ui(self):
@@ -83,7 +94,7 @@ class MainWindow(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("File")
         
-        connect_action = QAction("Connect", self)
+        connect_action = QAction("Connect / Re-login", self)
         connect_action.triggered.connect(self.show_login_dialog)
         file_menu.addAction(connect_action)
         

@@ -28,20 +28,39 @@ class DownloadItem:
     
     def update_progress(self, progress, downloaded_size=0, total_size=0):
         self.progress = progress
-        
         if total_size > 0:
             self.total_size = total_size
             self.downloaded_size = downloaded_size
-            
             # Calculate download speed and estimated time
             if self.status == 'active' and progress > 0:
-                elapsed_time = time.time() - self.time_created
-                if elapsed_time > 0:
-                    self.speed = downloaded_size / elapsed_time
-                    remaining_bytes = total_size - downloaded_size
-                    if self.speed > 0:
-                        self.estimated_time = remaining_bytes / self.speed
-    
+                now = time.time()
+                elapsed_time = now - self.time_created
+                # Use a moving window for speed calculation for smoother updates
+                if not hasattr(self, '_last_update_time'):
+                    self._last_update_time = now
+                    self._last_downloaded_size = self.downloaded_size
+                    self.speed = 0
+                else:
+                    delta_time = now - self._last_update_time
+                    delta_bytes = self.downloaded_size - getattr(self, '_last_downloaded_size', 0)
+                    if delta_time > 0 and delta_bytes >= 0:
+                        inst_speed = delta_bytes / delta_time
+                        # Use instant speed for more responsive UI
+                        self.speed = inst_speed
+                    self._last_update_time = now
+                    self._last_downloaded_size = self.downloaded_size
+                remaining_bytes = self.total_size - self.downloaded_size
+                if self.speed > 0:
+                    self.estimated_time = remaining_bytes / self.speed
+                else:
+                    self.estimated_time = 0
+            else:
+                self.speed = 0
+                self.estimated_time = 0
+        else:
+            self.speed = 0
+            self.estimated_time = 0
+
     def complete(self, save_path):
         self.status = 'completed'
         self.progress = 100
@@ -73,24 +92,20 @@ class DownloadItem:
     
     def get_formatted_speed(self):
         """Return formatted download speed (e.g., '1.2 MB/s')"""
-        if self.speed == 0:
-            return "0 B/s"
-        
+        if self.speed == 0 or self.status in ['completed', 'error', 'cancelled']:
+            return "--"
         units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
         size = self.speed
         unit_index = 0
-        
         while size >= 1024 and unit_index < len(units) - 1:
             size /= 1024
             unit_index += 1
-            
         return f"{size:.2f} {units[unit_index]}"
     
     def get_formatted_time(self):
         """Return formatted estimated time remaining"""
-        if self.estimated_time <= 0:
-            return "calculating..."
-            
+        if self.estimated_time is None or self.estimated_time <= 0 or self.status in ['completed', 'error', 'cancelled']:
+            return "--"
         seconds = int(self.estimated_time)
         if seconds < 60:
             return f"{seconds}s"
