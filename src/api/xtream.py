@@ -188,3 +188,14 @@ class XtreamClient:
     def get_series_url(self, episode_id, container_extension="mp4"):
         """Get the URL for a series episode"""
         return f"{self.server_url}/series/{self.username}/{self.password}/{episode_id}.{container_extension}"
+    
+    def get_image_data(self, url):
+        """Download image data from a URL and return bytes (for QPixmap)"""
+        try:
+            import requests
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                return resp.content
+            return b''
+        except Exception:
+            return b''

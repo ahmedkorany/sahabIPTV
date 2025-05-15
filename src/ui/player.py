@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QLabel
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent
 from src.ui.widgets.controls import PlayerControls
 from src.config import DEFAULT_VOLUME
+from PyQt5.QtWidgets import QMainWindow
 
 class MediaPlayer(QWidget):
     """Media player widget using VLC"""
@@ -157,21 +158,20 @@ class MediaPlayer(QWidget):
         """Enter fullscreen mode"""
         if self.is_fullscreen:
             return
-            
         # Save current state
         self.normal_parent = self.video_frame.parentWidget()
         self.normal_geometry = self.video_frame.geometry()
-        
         # Detach the video frame from its parent
         self.video_frame.setParent(None)
-        
-        # Set window flags for proper fullscreen behavior
-        self.video_frame.setWindowFlags(Qt.Window)
-        
-        # Show fullscreen
-        self.video_frame.showFullScreen()
+        # Create a new top-level window for fullscreen
+        from PyQt5.QtWidgets import QMainWindow, QApplication
+        screen = QApplication.primaryScreen().geometry()
+        self.fullscreen_window = QMainWindow()
+        self.fullscreen_window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        self.fullscreen_window.setGeometry(screen)
+        self.fullscreen_window.setCentralWidget(self.video_frame)
+        self.fullscreen_window.showFullScreen()
         self.video_frame.setFocus()
-        
         # Update VLC player to use the new window
         if sys.platform == "linux" or sys.platform == "linux2":
             self.player.set_xwindow(self.video_frame.winId())
@@ -179,16 +179,10 @@ class MediaPlayer(QWidget):
             self.player.set_hwnd(self.video_frame.winId())
         elif sys.platform == "darwin":
             self.player.set_nsobject(int(self.video_frame.winId()))
-        
         self.is_fullscreen = True
         self.controls.set_fullscreen(True)
-        
-        # Install event filter to catch Escape key
         self.video_frame.installEventFilter(self)
-
-        # Show ESC message overlay
         self.show_esc_message()
-        # Show controls overlay initially
         self.show_controls_overlay()
 
     def show_esc_message(self):
@@ -290,34 +284,26 @@ class MediaPlayer(QWidget):
         """Exit fullscreen mode"""
         if not self.is_fullscreen:
             return
-        
-        # Exit fullscreen mode
-        self.video_frame.setWindowFlags(Qt.Widget)
-        
+        # Remove event filter
+        self.video_frame.removeEventFilter(self)
         # Reparent video frame back to the original parent
         if self.normal_parent:
-            # Get the layout of the normal parent
             parent_layout = self.layout()
-            
-            # Add video frame back to the original layout
             parent_layout.insertWidget(0, self.video_frame, 1)
-            
-            # Make sure the video frame is visible
+            self.video_frame.setGeometry(self.normal_geometry)
             self.video_frame.show()
-            
-            # Update VLC player
             if sys.platform == "linux" or sys.platform == "linux2":
                 self.player.set_xwindow(self.video_frame.winId())
             elif sys.platform == "win32":
                 self.player.set_hwnd(self.video_frame.winId())
             elif sys.platform == "darwin":
                 self.player.set_nsobject(int(self.video_frame.winId()))
-        
+        # Close and delete the fullscreen window
+        if hasattr(self, 'fullscreen_window') and self.fullscreen_window:
+            self.fullscreen_window.close()
+            self.fullscreen_window = None
         self.is_fullscreen = False
         self.controls.set_fullscreen(False)
-        
-        # Remove event filter
-        self.video_frame.removeEventFilter(self)
 
     
     def eventFilter(self, obj, event):
@@ -366,3 +352,33 @@ class MediaPlayer(QWidget):
     def is_playing(self):
         """Check if player is currently playing"""
         return self.player.is_playing()
+
+class PlayerWindow(QMainWindow):
+    """Top-level window for video playback using MediaPlayer"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Player")
+        self.setMinimumSize(800, 450)
+        self.player = MediaPlayer(self)
+        self.setCentralWidget(self.player)
+        self.player.playback_stopped.connect(self.close)
+        self._was_closed = False
+
+    def play(self, url):
+        # If the window was closed, re-create the player widget
+        if self._was_closed:
+            self.takeCentralWidget().deleteLater()
+            self.player = MediaPlayer(self)
+            self.setCentralWidget(self.player)
+            self.player.playback_stopped.connect(self.close)
+            self._was_closed = False
+        self.player.stop()  # Always stop previous playback
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.player.play(url)
+
+    def closeEvent(self, event):
+        self.player.stop()
+        self._was_closed = True
+        event.accept()

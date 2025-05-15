@@ -1,13 +1,117 @@
 """
 Live TV tab for the application
 """
+import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel)
-from PyQt5.QtCore import Qt, pyqtSignal
+                            QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject
+from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer
 from src.utils.recorder import RecordingThread
 from src.ui.widgets.dialogs import ProgressDialog
+import hashlib
+import threading
+from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
+from src.utils.image_cache import ensure_cache_dir, get_cache_path
+
+CACHE_DIR = 'assets/cache/'
+
+def ensure_cache_dir():
+    import os
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+
+def get_cache_path(image_url_or_id):
+    h = hashlib.md5(str(image_url_or_id).encode('utf-8')).hexdigest()
+    return f"{CACHE_DIR}{h}.img"
+
+def get_api_client_from_label(label, main_window):
+    if main_window and hasattr(main_window, 'api_client'):
+        return main_window.api_client
+    parent = label.parent()
+    for _ in range(5):
+        if parent is None:
+            break
+        if hasattr(parent, 'api_client'):
+            return parent.api_client
+        parent = parent.parent() if hasattr(parent, 'parent') else None
+    return None
+
+def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
+    ensure_cache_dir()
+    cache_path = get_cache_path(image_url)
+    def set_pixmap(pixmap):
+        label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def worker():
+        from PyQt5.QtGui import QPixmap
+        print(f"[DEBUG] Start loading image: {image_url}")
+        if main_window and hasattr(main_window, 'loading_icon_controller'):
+            main_window.loading_icon_controller.show_icon.emit()
+        pix = QPixmap()
+        if os.path.exists(cache_path):
+            print(f"[DEBUG] Image found in cache: {cache_path}")
+            pix.load(cache_path)
+        else:
+            print(f"[DEBUG] Downloading image: {image_url}")
+            image_data = None
+            api_client = get_api_client_from_label(label, main_window)
+            try:
+                if (api_client):
+                    image_data = api_client.get_image_data(image_url)
+                else:
+                    print("[DEBUG] Could not find api_client for image download!")
+            except Exception as e:
+                print(f"[DEBUG] Error downloading image: {e}")
+            if image_data:
+                pix.loadFromData(image_data)
+                pix.save(cache_path)
+                print(f"[DEBUG] Image downloaded and cached: {cache_path}")
+        if not pix or pix.isNull():
+            pix = default_pixmap
+        QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        if loading_counter is not None:
+            loading_counter['count'] -= 1
+            if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        else:
+            if main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        print(f"[DEBUG] Finished loading image: {image_url}")
+    # Set cached or placeholder immediately
+    if os.path.exists(cache_path):
+        pix = QPixmap()
+        pix.load(cache_path)
+        set_pixmap(pix)
+    else:
+        set_pixmap(default_pixmap)
+        if loading_counter is not None:
+            loading_counter['count'] += 1
+        threading.Thread(target=worker, daemon=True).start()
+
+class ChannelLoaderWorker(QObject):
+    channels_loaded = pyqtSignal(list)
+    loading_failed = pyqtSignal(str)
+
+    def __init__(self, api_client, category_id, page, page_size):
+        super().__init__()
+        self.api_client = api_client
+        self.category_id = category_id
+        self.page = page
+        self.page_size = page_size
+
+    def run(self):
+        try:
+            success, data = self.api_client.get_live_streams(self.category_id)
+            if not success:
+                self.loading_failed.emit(str(data))
+                return
+            # Paginate
+            start = (self.page - 1) * self.page_size
+            end = start + self.page_size
+            self.channels_loaded.emit(data[start:end])
+        except Exception as e:
+            self.loading_failed.emit(str(e))
 
 class LiveTab(QWidget):
     """Live TV tab widget"""
@@ -19,164 +123,235 @@ class LiveTab(QWidget):
         self.live_channels = []
         self.current_channel = None
         self.recording_thread = None
+        self.page_size = 32
+        self.current_page = 1
+        self.total_pages = 1
         self.setup_ui()
+        self.main_window = None  # Will be set by the main window
     
     def setup_ui(self):
         """Set up the UI components"""
         layout = QVBoxLayout(self)
-        
+
         # Search bar
         search_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search channels...")
         self.search_input.textChanged.connect(self.search_channels)
         search_layout.addWidget(self.search_input)
-        
+
         # Main content area with splitter
         splitter = QSplitter(Qt.Horizontal)
-        
-        # Categories and channels lists
-        lists_widget = QWidget()
-        lists_layout = QVBoxLayout(lists_widget)
-        lists_layout.setContentsMargins(0, 0, 0, 0)
-        
+
+        # --- Left: Categories ---
         self.categories_list = QListWidget()
-        self.categories_list.setMinimumWidth(200)
+        self.categories_list.setMinimumWidth(220)
         self.categories_list.itemClicked.connect(self.category_clicked)
-        
-        self.channels_list = QListWidget()
-        self.channels_list.setMinimumWidth(300)
-        self.channels_list.itemDoubleClicked.connect(self.channel_double_clicked)
-        
-        lists_layout.addWidget(QLabel("Categories"))
-        lists_layout.addWidget(self.categories_list)
-        lists_layout.addWidget(QLabel("Channels"))
-        lists_layout.addWidget(self.channels_list)
-        
-        # Player and controls
-        player_widget = QWidget()
-        player_layout = QVBoxLayout(player_widget)
-        player_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.player = MediaPlayer()
-        
-        # Additional controls
-        controls_layout = QHBoxLayout()
-        
-        self.play_button = QPushButton("Play")
-        self.play_button.clicked.connect(self.play_channel)
-        
-        self.record_button = QPushButton("Record")
-        self.record_button.clicked.connect(self.record_channel)
-        
-        self.stop_record_button = QPushButton("Stop Recording")
-        self.stop_record_button.clicked.connect(self.stop_recording)
-        self.stop_record_button.setEnabled(False)
-        
-        self.add_favorite_button = QPushButton("Add to Favorites")
-        self.add_favorite_button.clicked.connect(self.add_to_favorites_clicked)
-        
-        controls_layout.addWidget(self.play_button)
-        controls_layout.addWidget(self.record_button)
-        controls_layout.addWidget(self.stop_record_button)
-        controls_layout.addWidget(self.add_favorite_button)
-        
-        player_layout.addWidget(self.player)
-        player_layout.addLayout(controls_layout)
-        
-        # Add widgets to splitter
-        splitter.addWidget(lists_widget)
-        splitter.addWidget(player_widget)
-        splitter.setSizes([400, 800])
-        
+        self.categories_list.setStyleSheet("QListWidget::item:selected { background: #444; color: #fff; font-weight: bold; }")
+
+        left_panel = QVBoxLayout()
+        left_panel.addWidget(QLabel("Categories"))
+        left_panel.addWidget(self.categories_list)
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+        left_widget.setMaximumWidth(300)
+
+        # --- Right: Channel Grid ---
+        self.channel_grid_widget = QWidget()
+        self.channel_grid_layout = QGridLayout(self.channel_grid_widget)
+        self.channel_grid_layout.setSpacing(16)
+        self.channel_grid_layout.setContentsMargins(8, 8, 8, 8)
+        self.channel_grid_widget.setStyleSheet("background: transparent;")
+        self.channel_grid_scroll = QScrollArea()
+        self.channel_grid_scroll.setWidgetResizable(True)
+        self.channel_grid_scroll.setWidget(self.channel_grid_widget)
+
+        right_panel = QVBoxLayout()
+        right_panel.addWidget(QLabel("Channels"))
+        right_panel.addWidget(self.channel_grid_scroll)
+        self.loading_label = QLabel("Loading...")
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setStyleSheet("color: #fff; font-size: 18px; background: #222;")
+        self.loading_label.hide()
+        self.setup_pagination_controls()
+        right_panel.addWidget(self.loading_label)
+        right_panel.addWidget(self.pagination_panel)
+        right_widget = QWidget()
+        right_widget.setLayout(right_panel)
+
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        splitter.setSizes([300, 900])
+
         # Add all components to main layout
         layout.addLayout(search_layout)
         layout.addWidget(splitter)
-    
+        self.display_current_page()
+        self.channel_grid_scroll.verticalScrollBar().valueChanged.connect(self.on_channel_grid_scroll)
+        self.page_size = 32
+        self.current_page = 1
+        self.loaded_pages = set()
+        self.loading = False
+        self.all_channels = []
+
     def load_categories(self):
         """Load live TV categories from the API"""
         self.categories_list.clear()
-        
+        self.categories = []
         success, data = self.api_client.get_live_categories()
         if success:
+            self.categories = data
             for category in data:
-                self.categories_list.addItem(category['category_name'])
+                count = category.get('num', '')
+                item = QListWidgetItem(f"{category['category_name']} ({count})")
+                item.setData(Qt.UserRole, category['category_id'])
+                self.categories_list.addItem(item)
         else:
             QMessageBox.warning(self, "Error", f"Failed to load categories: {data}")
-    
+
     def category_clicked(self, item):
-        """Handle category selection"""
-        category_name = item.text()
-        
-        # Find category ID
-        success, categories = self.api_client.get_live_categories()
-        if not success:
-            QMessageBox.warning(self, "Error", f"Failed to load categories: {categories}")
-            return
-        
-        category_id = None
-        for category in categories:
-            if category['category_name'] == category_name:
-                category_id = category['category_id']
-                break
-        
-        if category_id:
-            self.load_channels(category_id)
-    
+        category_id = item.data(Qt.UserRole)
+        self.load_channels(category_id)
+
     def load_channels(self, category_id):
-        """Load channels for the selected category"""
-        self.channels_list.clear()
-        
+        """Load channels for the selected category and display as grid (synchronously, like movies tab)"""
+        self.live_channels = []
+        self.current_category_id = category_id
+        self.current_page = 1
+        self.loaded_pages = set()
+        for i in reversed(range(self.channel_grid_layout.count())):
+            widget = self.channel_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        self.show_loading(True)
+        # Synchronous loading, no threading
         success, data = self.api_client.get_live_streams(category_id)
         if success:
             self.live_channels = data
-            for channel in data:
-                self.channels_list.addItem(channel['name'])
+            self.display_current_page()
         else:
             QMessageBox.warning(self, "Error", f"Failed to load channels: {data}")
-    
+        self.show_loading(False)
+
+    # Remove ChannelLoaderWorker and all threading-related code
+    # Remove load_channels_page, on_channels_loaded, on_channels_failed, on_channel_grid_scroll, loader_threads, etc.
+    # The rest of the class remains unchanged
+
+    def on_channels_loaded(self, channels, page):
+        self.live_channels.extend(channels)
+        self.display_channel_grid(self.live_channels)
+        self.loaded_pages.add(page)
+        self.loading = False
+        self.show_loading(False)
+
+    def on_channels_failed(self, error):
+        QMessageBox.warning(self, "Error", f"Failed to load channels: {error}")
+        self.loading = False
+        self.show_loading(False)
+
+    def on_channel_grid_scroll(self, value):
+        # Disable pagination logic since load_channels_page does not exist; optionally implement if needed
+        pass
+
+    def show_loading(self, show):
+        self.loading_label.setVisible(show)
+
+    def display_channel_grid(self, channels):
+        """Display channels as a grid of tiles"""
+        cols = 4
+        row = 0
+        col = 0
+        self.channel_tiles = []  # Store references for highlighting
+        main_window = self.main_window if hasattr(self, 'main_window') else None
+        loading_counter = getattr(main_window, 'loading_counter', None) if main_window else None
+        for channel in channels:
+            tile = QFrame()
+            tile.setFrameShape(QFrame.StyledPanel)
+            tile.setStyleSheet("background: #222; border-radius: 12px;")
+            tile_layout = QVBoxLayout(tile)
+            # Channel logo
+            logo = QLabel()
+            logo.setAlignment(Qt.AlignCenter)
+            default_pix = QPixmap('assets/live.png')
+            # Show cached or placeholder immediately, then load async
+            if channel.get('stream_icon'):
+                load_image_async(channel['stream_icon'], logo, default_pix, update_size=(80, 80), main_window=main_window, loading_counter=loading_counter)
+            else:
+                logo.setPixmap(default_pix.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            tile_layout.addWidget(logo)
+            # Channel name
+            name = QLabel(channel['name'])
+            name.setAlignment(Qt.AlignCenter)
+            name.setWordWrap(True)
+            name.setFont(QFont('Arial', 11, QFont.Bold))
+            name.setStyleSheet("color: #fff;")
+            tile_layout.addWidget(name)
+            tile.mousePressEvent = lambda e, ch=channel, t=tile: self.channel_tile_clicked(ch, t)
+            self.channel_grid_layout.addWidget(tile, row, col)
+            self.channel_tiles.append(tile)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+
+    def channel_tile_clicked(self, channel, tile=None):
+        self.current_channel = {
+            'name': channel['name'],
+            'stream_url': self.api_client.get_live_stream_url(channel['stream_id']),
+            'stream_id': channel['stream_id'],
+            'stream_type': 'live'
+        }
+        # Highlight selected tile
+        for t in getattr(self, 'channel_tiles', []):
+            t.setStyleSheet("background: #222; border-radius: 12px;")
+        if tile:
+            tile.setStyleSheet("background: #0057d8; border-radius: 12px; border: 2px solid #fff;")
+        self.play_channel(channel)
+
     def search_channels(self, text):
-        """Search channels based on input text"""
+        """Search channels based on input text (grid view)"""
         if not self.live_channels:
             return
-        
         text = text.lower()
-        self.channels_list.clear()
-        
-        for channel in self.live_channels:
-            if text in channel['name'].lower():
-                self.channels_list.addItem(channel['name'])
+        filtered = [ch for ch in self.live_channels if text in ch['name'].lower()]
+        self.display_channel_grid(filtered)
     
     def channel_double_clicked(self, item):
         """Handle channel double-click"""
-        self.play_channel()
+        # Find the channel object from the item
+        channel_name = item.text()
+        channel = next((ch for ch in self.live_channels if ch['name'] == channel_name), None)
+        if channel:
+            self.play_channel(channel)
     
-    def play_channel(self):
+    def play_channel(self, channel=None):
         """Play the selected channel"""
-        if not self.channels_list.currentItem():
-            QMessageBox.warning(self, "Error", "No channel selected")
-            return
-        
-        channel_name = self.channels_list.currentItem().text()
-        channel = None
-        for ch in self.live_channels:
-            if ch['name'] == channel_name:
-                channel = ch
-                break
-        
-        if not channel:
-            return
-        
-        stream_id = channel['stream_id']
-        stream_url = self.api_client.get_live_stream_url(stream_id)
-        
-        if self.player.play(stream_url):
+        if channel is not None:
             self.current_channel = {
                 'name': channel['name'],
-                'stream_url': stream_url,
-                'stream_id': stream_id,
+                'stream_url': self.api_client.get_live_stream_url(channel['stream_id']),
+                'stream_id': channel['stream_id'],
                 'stream_type': 'live'
             }
+        if not self.current_channel:
+            QMessageBox.warning(self, "Error", "No channel selected")
+            return
+        stream_url = self.current_channel.get('stream_url')
+        main_window = self.main_window if hasattr(self, 'main_window') else None
+        try:
+            if main_window and hasattr(main_window, 'player_window'):
+                player_window = main_window.player_window
+                player_window.play(stream_url)
+                player_window.show()
+                player_window.raise_()
+                player_window.activateWindow()
+            else:
+                if not hasattr(self, 'player'):
+                    self.player = MediaPlayer()
+                self.player.play(stream_url)
+        except Exception as e:
+            QMessageBox.critical(self, "Playback Error", f"Could not open the stream. The channel may be temporarily unavailable.\n\nError: {str(e)}")
+        # Optionally update current_channel again if needed
     
     def record_channel(self):
         """Record the current channel"""
@@ -236,3 +411,60 @@ class LiveTab(QWidget):
             return
         
         self.add_to_favorites.emit(self.current_channel)
+
+    def update_pagination_controls(self):
+        if self.total_pages > 1:
+            self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+            self.prev_page_button.setEnabled(self.current_page > 1)
+            self.next_page_button.setEnabled(self.current_page < self.total_pages)
+            self.pagination_panel.setVisible(True)
+        else:
+            self.pagination_panel.setVisible(False)
+        if hasattr(self, 'prev_button') and hasattr(self, 'next_button'):
+            self.prev_button.setVisible(self.current_page > 1)
+            self.next_button.setVisible(self.current_page < self.total_pages)
+
+    def go_to_previous_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.display_current_page()
+
+    def go_to_next_page(self):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.display_current_page()
+
+    def paginate_items(self, items, page):
+        total_items = len(items)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
+        start = (page - 1) * self.page_size
+        end = min(start + self.page_size, total_items)
+        return items[start:end], total_pages
+
+    def display_current_page(self):
+        for i in reversed(range(self.channel_grid_layout.count())):
+            widget = self.channel_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        page_items, self.total_pages = self.paginate_items(self.live_channels, self.current_page)
+        self.display_channel_grid(page_items)
+        self.update_pagination_controls()
+
+    def setup_pagination_controls(self):
+        self.pagination_panel = QWidget()
+        nav_layout = QHBoxLayout(self.pagination_panel)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setAlignment(Qt.AlignCenter)
+        self.prev_page_button = QPushButton("Previous")
+        self.next_page_button = QPushButton("Next")
+        self.page_label = QLabel()
+        self.prev_page_button.clicked.connect(self.go_to_previous_page)
+        self.next_page_button.clicked.connect(self.go_to_next_page)
+        nav_layout.addWidget(self.prev_page_button)
+        nav_layout.addWidget(self.page_label)
+        nav_layout.addWidget(self.next_page_button)
+        self.pagination_panel.setVisible(False)
