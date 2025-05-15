@@ -1,5 +1,6 @@
 __pycache__/*.py[cod]
 *.py[cod]
-*.pyc
+**/*.pyc
 .DS_Store
 assets/cache/
+src/__pycache__/*.pyc

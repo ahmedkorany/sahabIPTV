@@ -43,6 +43,7 @@ class HomeScreenWidget(QWidget):
         account_btn.setIcon(QIcon(os.path.join('assets', 'account.png')))
         account_btn.setToolTip('Switch Account')
         account_btn.setFlat(True)
+        account_btn.clicked.connect(self.handle_switch_account)
         nav_bar.addWidget(account_btn)
         main_layout.addLayout(nav_bar)
 
@@ -89,3 +90,9 @@ class HomeScreenWidget(QWidget):
             return
         self.expiry_date = expiry_date
         self.expiry_label.setText(f"Subscription expires: {self.expiry_date or 'N/A'}")
+
+    def handle_switch_account(self):
+        # Show the account switch dialog via parent MainWindow
+        main_window = self.window()
+        if hasattr(main_window, 'show_account_switch_dialog'):
+            main_window.show_account_switch_dialog()
