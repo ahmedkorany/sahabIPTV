@@ -4,7 +4,7 @@ Main application window
 import os
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QMessageBox, 
                             QAction, QMenu, QMenuBar, QToolBar, QStatusBar, QLabel)
-from PyQt5.QtCore import Qt, QSettings, QSize
+from PyQt5.QtCore import Qt, QSettings, QSize, pyqtSignal, QObject
 from PyQt5.QtGui import QIcon
 from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
@@ -15,6 +15,31 @@ from src.ui.tabs.downloads_tab import DownloadsTab
 from src.ui.widgets.dialogs import LoginDialog
 from src.utils.helpers import load_json_file, save_json_file, get_translations
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
+from src.ui.widgets.home_screen import HomeScreenWidget
+from src.ui.player import PlayerWindow
+
+class LoadingIconController(QObject):
+    show_icon = pyqtSignal()
+    hide_icon = pyqtSignal()
+
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        self.show_icon.connect(self._show)
+        self.hide_icon.connect(self._hide)
+
+    def _show(self):
+        if hasattr(self.main_window, 'statusBar') and hasattr(self.main_window, 'loading_icon_label'):
+            if not self.main_window.loading_icon_label.isVisible():
+                self.main_window.statusBar.addPermanentWidget(self.main_window.loading_icon_label)
+                self.main_window.loading_icon_label.setVisible(True)
+            self.main_window.statusBar.showMessage("Loading images...")
+
+    def _hide(self):
+        if hasattr(self.main_window, 'statusBar') and hasattr(self.main_window, 'loading_icon_label'):
+            self.main_window.statusBar.clearMessage()
+            self.main_window.statusBar.removeWidget(self.main_window.loading_icon_label)
+            self.main_window.loading_icon_label.setVisible(False)
 
 class MainWindow(QMainWindow):
     """Main application window"""
@@ -28,6 +53,8 @@ class MainWindow(QMainWindow):
         self.translations = get_translations(self.language)
         self.accounts = self.settings.value("accounts", {}, type=dict)
         self.current_account = self.settings.value("current_account", "", type=str)
+        self.player_window = PlayerWindow()  # Persistent player window
+        self.expiry_str = ""
         self.setup_ui()
         self.load_favorites()
         self.load_settings()
@@ -50,23 +77,27 @@ class MainWindow(QMainWindow):
         """Set up the UI components"""
         self.setWindowTitle("Sahab Xtream IPTV")
         self.resize(*WINDOW_SIZE)
-        
-        # Create central widget with tabs
+
+        # --- HOME SCREEN ---
+        self.home_screen = HomeScreenWidget(
+            parent=self,
+            on_tile_clicked=self.handle_home_tile_clicked,
+            user_info={'username': self.current_account or ''},
+            expiry_date=self.expiry_str
+        )
+
+        # --- Prepare tabs ---
         self.tabs = QTabWidget()
-        
-        # Create tabs
+        self.tabs.addTab(self.home_screen, self.translations.get("Home", "Home"))
         self.live_tab = LiveTab(self.api_client, parent=self)
         self.movies_tab = MoviesTab(self.api_client, parent=self)
         self.series_tab = SeriesTab(self.api_client, parent=self)
         self.favorites_tab = FavoritesTab(self.api_client, parent=self)
-        
-        # Connect signals
+        self.downloads_tab = DownloadsTab()
         self.live_tab.add_to_favorites.connect(self.add_to_favorites)
         self.movies_tab.add_to_favorites.connect(self.add_to_favorites)
         self.series_tab.add_to_favorites.connect(self.add_to_favorites)
         self.favorites_tab.remove_from_favorites.connect(self.remove_from_favorites)
-        
-        # Add tabs to tab widget
         self.tabs.addTab(self.live_tab, self.translations["Live TV"])
         self.tabs.addTab(self.movies_tab, self.translations["Movies"])
         self.tabs.addTab(self.series_tab, self.translations["Series"])
@@ -75,22 +106,54 @@ class MainWindow(QMainWindow):
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
         self.setCentralWidget(self.tabs)
-        
+
+        # Connect tab change to handler
+        self.tabs.currentChanged.connect(self.handle_tab_changed)
+
         # Create menu bar
         self.create_menu_bar()
-        
+
         # Create status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("Ready")
-        
-        # Add account label and expiry label to status bar
         self.account_label = QLabel()
         self.expiry_label = QLabel()
         self.statusBar.addPermanentWidget(self.account_label)
         self.statusBar.addPermanentWidget(self.expiry_label)
         self.update_account_label()
-    
+        # Add loading icon label and loading counter for image loading
+        from PyQt5.QtGui import QMovie
+        self.loading_icon_label = QLabel()
+        self.loading_icon_label.setVisible(False)
+        self.loading_icon = QMovie('assets/loading.gif')
+        self.loading_icon_label.setMovie(self.loading_icon)
+        self.loading_icon.start()
+        self.loading_counter = {'count': 0}
+        self.loading_icon_controller = LoadingIconController(self)
+        # Add loading icon label (hidden by default) at the rightmost of the status bar
+        self.loading_icon_label = QLabel()
+        self.loading_icon_label.setVisible(False)
+        loading_movie = QMovie('assets/loading.gif')
+        # Resize the loading icon to match the status bar height
+        statusbar_height = self.statusBar.sizeHint().height()
+        loading_movie.setScaledSize(QSize(statusbar_height, statusbar_height))
+        self.loading_icon_label.setMovie(loading_movie)
+        loading_movie.start()
+        self.statusBar.addPermanentWidget(self.loading_icon_label, 1)  # 1 = stretch factor, rightmost
+
+    def handle_tab_changed(self, index):
+        # If Home tab selected, update home screen info if needed
+        if index == 0 and hasattr(self, 'home_screen'):
+            self.home_screen.update_expiry_date(self.expiry_str)
+            # Optionally update user info, etc.
+
+    def handle_home_tile_clicked(self, key):
+        # Switch to the appropriate tab when a tile is clicked
+        tab_map = {'live': 1, 'movies': 2, 'series': 3}
+        if key in tab_map:
+            self.tabs.setCurrentIndex(tab_map[key])
+
     def create_menu_bar(self):
         """Create the menu bar"""
         menubar = self.menuBar()
@@ -138,6 +201,12 @@ class MainWindow(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
+
+        # Add Home action to menu bar for returning to home screen
+        home_action = QAction("Home", self)
+        home_action.setShortcut("Ctrl+H")
+        home_action.triggered.connect(self.show_home_screen)
+        menubar.addAction(home_action)
     
     def show_account_switch_dialog(self):
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton
@@ -241,8 +310,29 @@ class MainWindow(QMainWindow):
         elif account_switch:
             self.show_account_switch_dialog()
 
+    def clear_grids(self):
+        # Clear Live grid
+        if hasattr(self, 'live_tab') and hasattr(self.live_tab, 'channel_grid_layout'):
+            for i in reversed(range(self.live_tab.channel_grid_layout.count())):
+                widget = self.live_tab.channel_grid_layout.itemAt(i).widget()
+                if widget:
+                    widget.setParent(None)
+        # Clear Movies grid
+        if hasattr(self, 'movies_tab') and hasattr(self.movies_tab, 'movie_grid_layout'):
+            for i in reversed(range(self.movies_tab.movie_grid_layout.count())):
+                widget = self.movies_tab.movie_grid_layout.itemAt(i).widget()
+                if widget:
+                    widget.setParent(None)
+        # Clear Series grid
+        if hasattr(self, 'series_tab') and hasattr(self.series_tab, 'series_grid_layout'):
+            for i in reversed(range(self.series_tab.series_grid_layout.count())):
+                widget = self.series_tab.series_grid_layout.itemAt(i).widget()
+                if widget:
+                    widget.setParent(None)
+
     def connect_to_server(self, server, username, password):
         self.statusBar.showMessage("Connecting to server...")
+        self.clear_grids()
         self.api_client.set_credentials(server, username, password)
         success, data = self.api_client.authenticate()
         expiry_str = ""
@@ -256,8 +346,13 @@ class MainWindow(QMainWindow):
                 import datetime
                 exp_ts = int(data['user_info']['exp_date'])
                 expiry = datetime.datetime.fromtimestamp(exp_ts)
-                expiry_str = expiry.strftime('%Y-%m-%d')
-                self.expiry_label.setText(f"Expiry: {expiry_str}")
+                self.expiry_str = expiry.strftime('%Y-%m-%d')
+                if hasattr(self, 'home_screen') and self.home_screen:
+                    try:
+                        self.home_screen.update_expiry_date(self.expiry_str)
+                    except RuntimeError:
+                        print("Warning: Attempted to update expiry date on a deleted HomeScreen instance.")
+                self.expiry_label.setText(f"Expiry: {self.expiry_str}")
             else:
                 self.expiry_label.setText("")
             self.update_account_label()
@@ -326,10 +421,12 @@ class MainWindow(QMainWindow):
     def apply_language(self):
         """Apply language to UI elements"""
         # Set tab titles
-        self.tabs.setTabText(0, self.translations["Live TV"])
-        self.tabs.setTabText(1, self.translations["Movies"])
-        self.tabs.setTabText(2, self.translations["Series"])
-        self.tabs.setTabText(3, self.translations["Favorites"])
+        self.tabs.setTabText(0, self.translations.get("Home", "Home"))
+        self.tabs.setTabText(1, self.translations["Live TV"])
+        self.tabs.setTabText(2, self.translations["Movies"])
+        self.tabs.setTabText(3, self.translations["Series"])
+        self.tabs.setTabText(4, self.translations["Favorites"])
+        self.tabs.setTabText(5, self.translations.get("Downloads", "Downloads"))
         
         # Set layout direction
         if self.language == "ar":
@@ -349,7 +446,7 @@ class MainWindow(QMainWindow):
             "- Download functionality\n"
             "- Recording capability\n"
             "- Favorites management\n\n"
-            "Version 1.0.0"
+            "Version 2.0.0"
         )
     
     def closeEvent(self, event):
@@ -410,3 +507,7 @@ class MainWindow(QMainWindow):
             self.favorites = []
         self.favorites_tab.set_favorites(self.favorites)
         # TODO: Implement per-account downloads loading if needed
+
+    def show_home_screen(self):
+        """Return to the home screen from any tab"""
+        self.setCentralWidget(self.home_screen)

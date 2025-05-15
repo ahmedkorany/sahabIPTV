@@ -5,11 +5,93 @@ import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QProgressBar, QHeaderView, 
-                            QTableWidget, QTableWidgetItem)
+                            QTableWidget, QTableWidgetItem, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
+from src.ui.widgets.dialogs import MovieDetailsDialog
+from PyQt5.QtWidgets import QPushButton
+import hashlib
+import threading
+from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
+import os
+from src.utils.image_cache import ensure_cache_dir, get_cache_path
+
+CACHE_DIR = 'assets/cache/'
+LOADING_ICON = 'assets/loading.gif'
+
+def get_api_client_from_label(label, main_window):
+    # Try to get api_client from main_window, fallback to traversing parents
+    if main_window and hasattr(main_window, 'api_client'):
+        return main_window.api_client
+    # Fallback: traverse up the parent chain
+    parent = label.parent()
+    for _ in range(5):
+        if parent is None:
+            break
+        if hasattr(parent, 'api_client'):
+            return parent.api_client
+        parent = parent.parent() if hasattr(parent, 'parent') else None
+    return None
+
+def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
+    ensure_cache_dir()
+    cache_path = get_cache_path(image_url)
+    def set_pixmap(pixmap):
+        label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def worker():
+        from PyQt5.QtGui import QPixmap
+        print(f"[DEBUG] Start loading image: {image_url}")
+        if main_window and hasattr(main_window, 'loading_icon_controller'):
+            main_window.loading_icon_controller.show_icon.emit()
+        pix = QPixmap()
+        if os.path.exists(cache_path):
+            print(f"[DEBUG] Image found in cache: {cache_path}")
+            pix.load(cache_path)
+        else:
+            print(f"[DEBUG] Downloading image: {image_url}")
+            image_data = None
+            api_client = get_api_client_from_label(label, main_window)
+            try:
+                if api_client:
+                    image_data = api_client.get_image_data(image_url)
+                else:
+                    print("[DEBUG] Could not find api_client for image download!")
+            except Exception as e:
+                print(f"[DEBUG] Error downloading image: {e}")
+            if image_data:
+                loaded = pix.loadFromData(image_data)
+                if loaded and not pix.isNull():
+                    try:
+                        saved = pix.save(cache_path)
+                        print(f"[DEBUG] Image downloaded and cached: {cache_path}, save result: {saved}")
+                    except Exception as e:
+                        print(f"[DEBUG] Error saving image to cache: {e}")
+                else:
+                    print(f"[DEBUG] Failed to load image from data for: {image_url}")
+        if not pix or pix.isNull():
+            pix = default_pixmap
+        QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        if loading_counter is not None:
+            loading_counter['count'] -= 1
+            if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        else:
+            if main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        print(f"[DEBUG] Finished loading image: {image_url}")
+    # Set cached or placeholder immediately
+    if os.path.exists(cache_path):
+        pix = QPixmap()
+        pix.load(cache_path)
+        set_pixmap(pix)
+    else:
+        set_pixmap(default_pixmap)
+        if loading_counter is not None:
+            loading_counter['count'] += 1
+        threading.Thread(target=worker, daemon=True).start()
 
 class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):
@@ -142,217 +224,375 @@ class MoviesTab(QWidget):
         self.main_window = None  # Will be set by the main window
     
     def setup_ui(self):
-        """Set up the UI components"""
         layout = QVBoxLayout(self)
-        
         # Search bar
         search_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search movies...")
         self.search_input.textChanged.connect(self.search_movies)
         search_layout.addWidget(self.search_input)
-        
-        # Main content area with splitter
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # Categories and movies lists
-        lists_widget = QWidget()
-        lists_layout = QVBoxLayout(lists_widget)
-        lists_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.categories_list = QListWidget()
-        self.categories_list.setMinimumWidth(200)
-        self.categories_list.itemClicked.connect(self.category_clicked)
-        
-        self.movies_list = QListWidget()
-        self.movies_list.setMinimumWidth(300)
-        self.movies_list.itemDoubleClicked.connect(self.movie_double_clicked)
-        
-        lists_layout.addWidget(QLabel("Categories"))
-        lists_layout.addWidget(self.categories_list)
-        lists_layout.addWidget(QLabel("Movies"))
-        lists_layout.addWidget(self.movies_list)
-        
-        # Pagination controls
-        pagination_layout = QHBoxLayout()
-        self.prev_page_button = QPushButton("Previous")
-        self.prev_page_button.clicked.connect(self.go_to_previous_page)
-        self.page_label = QLabel("Page 1 of 1")
-        self.next_page_button = QPushButton("Next")
-        self.next_page_button.clicked.connect(self.go_to_next_page)
-        pagination_layout.addWidget(self.prev_page_button)
-        pagination_layout.addWidget(self.page_label)
-        pagination_layout.addWidget(self.next_page_button)
-        lists_layout.addLayout(pagination_layout)
-        
-        # Player and controls
-        player_widget = QWidget()
-        player_layout = QVBoxLayout(player_widget)
-        player_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.player = MediaPlayer(parent=self)
-        self.player.controls.play_pause_button.clicked.connect(self.play_movie)
-        self.movies_list.itemClicked.connect(self.player.controls.stop_clicked)
-
-        # Additional controls
-        controls_layout = QHBoxLayout()
-        
-        self.download_button = QPushButton("Download")
-        self.download_button.clicked.connect(self.download_movie)
-        
-        self.add_favorite_button = QPushButton("Add to Favorites")
-        self.add_favorite_button.clicked.connect(self.add_to_favorites_clicked)
-        
-        controls_layout.addWidget(self.download_button)
-        controls_layout.addWidget(self.add_favorite_button)
-        
-        player_layout.addWidget(self.player)
-        player_layout.addLayout(controls_layout)
-        
-        # Add widgets to splitter
-        splitter.addWidget(lists_widget)
-        splitter.addWidget(player_widget)
-        splitter.setSizes([400, 800])
-        
-        # Add all components to main layout
         layout.addLayout(search_layout)
-        layout.addWidget(splitter)
-    
+
+        # Stacked widget for grid/details views
+        from PyQt5.QtWidgets import QStackedWidget
+        self.stacked_widget = QStackedWidget()
+
+        # --- Left: Categories ---
+        self.categories_list = QListWidget()
+        self.categories_list.setMinimumWidth(220)
+        self.categories_list.itemClicked.connect(self.category_clicked)
+        self.categories_list.setStyleSheet("QListWidget::item:selected { background: #444; color: #fff; font-weight: bold; }")
+        left_panel = QVBoxLayout()
+        left_panel.addWidget(QLabel("Categories"))
+        left_panel.addWidget(self.categories_list)
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+        left_widget.setMaximumWidth(300)
+
+        # --- Movie Grid ---
+        self.movie_grid_widget = QWidget()
+        self.movie_grid_layout = QGridLayout(self.movie_grid_widget)
+        self.movie_grid_layout.setSpacing(16)
+        self.movie_grid_layout.setContentsMargins(8, 8, 8, 8)
+        self.movie_grid_widget.setStyleSheet("background: transparent;")
+        self.movie_grid_scroll = QScrollArea()
+        self.movie_grid_scroll.setWidgetResizable(True)
+        self.movie_grid_scroll.setWidget(self.movie_grid_widget)
+        grid_panel = QVBoxLayout()
+        grid_panel.addWidget(QLabel("Movies"))
+        grid_panel.addWidget(self.movie_grid_scroll)
+        grid_widget = QWidget()
+        grid_widget.setLayout(grid_panel)
+
+        # Splitter for left (categories) and right (grid/details)
+        from PyQt5.QtWidgets import QSplitter
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(left_widget)
+        splitter.addWidget(grid_widget)
+        splitter.setSizes([300, 900])
+        splitter_widget = QWidget()
+        splitter_layout = QVBoxLayout(splitter_widget)
+        splitter_layout.setContentsMargins(0, 0, 0, 0)
+        splitter_layout.addWidget(splitter)
+
+        self.stacked_widget.addWidget(splitter_widget)  # Index 0: grid view
+        self.details_widget = None
+        self.stacked_widget.addWidget(QWidget())  # Placeholder for details
+
+        layout.addWidget(self.stacked_widget)
+        self.setup_pagination_controls()
+        grid_panel.addWidget(self.pagination_panel)
+        self.page_size = 32
+        self.current_page = 1
+        self.total_pages = 1
+        self.update_pagination_controls()
+
+    def setup_pagination_controls(self):
+        self.pagination_panel = QWidget()
+        nav_layout = QHBoxLayout(self.pagination_panel)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setAlignment(Qt.AlignCenter)
+        self.prev_page_button = QPushButton("Previous")
+        self.next_page_button = QPushButton("Next")
+        self.page_label = QLabel()
+        self.prev_page_button.clicked.connect(self.go_to_previous_page)
+        self.next_page_button.clicked.connect(self.go_to_next_page)
+        nav_layout.addWidget(self.prev_page_button)
+        nav_layout.addWidget(self.page_label)
+        nav_layout.addWidget(self.next_page_button)
+        self.pagination_panel.setVisible(False)
+
     def load_categories(self):
         """Load movie categories from the API"""
         self.categories_list.clear()
-        
+        self.categories = []
         success, data = self.api_client.get_vod_categories()
         if success:
-            # Add "All" category at the beginning
-            self.categories_list.addItem("All")
-            
-            # Add the rest of the categories
+            self.categories = data
+            # Add "ALL" category at the top
+            all_item = QListWidgetItem("ALL")
+            all_item.setData(Qt.UserRole, None)
+            self.categories_list.addItem(all_item)
             for category in data:
-                self.categories_list.addItem(category['category_name'])
+                count = category.get('num', '')
+                item = QListWidgetItem(f"{category['category_name']} ({count})")
+                item.setData(Qt.UserRole, category['category_id'])
+                self.categories_list.addItem(item)
         else:
             QMessageBox.warning(self, "Error", f"Failed to load categories: {data}")
-    
+
     def category_clicked(self, item):
-        """Handle category selection"""
-        category_name = item.text()
-        
-        if category_name == "All":
-            # Load all movies across categories
-            self.load_all_movies()
+        category_id = item.data(Qt.UserRole)
+        self.load_movies(category_id)
+
+    def load_movies(self, category_id):
+        """Load movies for the selected category and display as grid"""
+        self.movies = []
+        for i in reversed(range(self.movie_grid_layout.count())):
+            widget = self.movie_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        if category_id is None:
+            # ALL category: load all movies
+            all_movies = []
+            for cat in self.categories:
+                success, data = self.api_client.get_vod_streams(cat['category_id'])
+                if success:
+                    all_movies.extend(data)
+            self.movies = all_movies
         else:
-            # Find category ID
-            success, categories = self.api_client.get_vod_categories()
-            if not success:
-                QMessageBox.warning(self, "Error", f"Failed to load categories: {categories}")
-                return
-            
-            category_id = None
-            for category in categories:
-                if category['category_name'] == category_name:
-                    category_id = category['category_id']
-                    break
-            
-            if category_id:
-                self.load_movies(category_id)
-    
-    def load_all_movies(self):
-        """Load all movies from all categories"""
-        self.movies_list.clear()
-        all_movies = []
-        
-        # Get all categories
-        success, categories = self.api_client.get_vod_categories()
-        if not success:
-            QMessageBox.warning(self, "Error", f"Failed to load categories: {categories}")
-            return
-        
-        # Get movies from each category
-        for category in categories:
-            success, movies = self.api_client.get_vod_streams(category['category_id'])
+            success, data = self.api_client.get_vod_streams(category_id)
             if success:
-                all_movies.extend(movies)
-        
-        # Update the movies list
-        self.all_movies = all_movies
-        self.filtered_movies = all_movies
+                self.movies = data
+            else:
+                QMessageBox.warning(self, "Error", f"Failed to load movies: {data}")
         self.current_page = 1
         self.display_current_page()
-    
-    def load_movies(self, category_id):
-        """Load movies for the selected category"""
-        self.movies_list.clear()
-        
-        success, data = self.api_client.get_vod_streams(category_id)
-        if success:
-            self.all_movies = data
-            self.filtered_movies = data
-            self.current_page = 1
-            self.display_current_page()
+
+    def display_movie_grid(self, movies):
+        """Display movies as a grid of tiles"""
+        cols = 4
+        row = 0
+        col = 0
+        main_window = self.main_window if hasattr(self, 'main_window') else None
+        for movie in movies:
+            tile = QFrame()
+            tile.setFrameShape(QFrame.StyledPanel)
+            # Recently added indicator
+            is_recent = False
+            if movie.get('added'):
+                from datetime import datetime, timedelta
+                try:
+                    added_time = datetime.fromtimestamp(int(movie['added']))
+                    if (datetime.now() - added_time) < timedelta(days=7):
+                        is_recent = True
+                except Exception:
+                    pass
+            tile.setStyleSheet("background: #222; border-radius: 12px;" + ("border: 2px solid #00e676;" if is_recent else ""))
+            tile_layout = QVBoxLayout(tile)
+            # Movie poster
+            poster = QLabel()
+            poster.setAlignment(Qt.AlignCenter)
+            default_pix = QPixmap('assets/movies.png')
+            # Show cached or placeholder immediately, then load async
+            if movie.get('stream_icon'):
+                load_image_async(movie['stream_icon'], poster, default_pix, update_size=(100, 140), main_window=main_window)
+            else:
+                poster.setPixmap(default_pix.scaled(100, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            tile_layout.addWidget(poster)
+            # Movie name
+            name = QLabel(movie['name'])
+            name.setAlignment(Qt.AlignCenter)
+            name.setWordWrap(True)
+            name.setFont(QFont('Arial', 11, QFont.Bold))
+            name.setStyleSheet("color: #fff;")
+            tile_layout.addWidget(name)
+            # Rating (if available)
+            if movie.get('rating'):
+                rating = QLabel(f"★ {movie['rating']}")
+                rating.setAlignment(Qt.AlignCenter)
+                rating.setStyleSheet("color: gold;")
+                tile_layout.addWidget(rating)
+            # Recently added label
+            if is_recent:
+                recent_label = QLabel("NEW")
+                recent_label.setAlignment(Qt.AlignCenter)
+                recent_label.setStyleSheet("color: #00e676; font-weight: bold;")
+                tile_layout.addWidget(recent_label)
+            tile.mousePressEvent = lambda e, mv=movie: self.movie_tile_clicked(mv)
+            self.movie_grid_layout.addWidget(tile, row, col)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+
+    def show_movie_details(self, movie):
+        # Remove old details widget if present
+        if self.details_widget:
+            self.stacked_widget.removeWidget(self.details_widget)
+            self.details_widget.deleteLater()
+            self.details_widget = None
+        # Create a new details widget (not a dialog)
+        self.details_widget = self._create_details_widget(movie)
+        self.stacked_widget.addWidget(self.details_widget)
+        self.stacked_widget.setCurrentWidget(self.details_widget)
+
+    def _create_details_widget(self, movie):
+        from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QTextEdit
+        from PyQt5.QtGui import QPixmap, QFont
+        details = QWidget()
+        layout = QHBoxLayout(details)
+        # --- Left: Poster and Back button ---
+        left_layout = QVBoxLayout()
+        # Back button at the top of the poster list
+        back_btn = QPushButton("← Back")
+        back_btn.setFixedWidth(80)
+        back_btn.clicked.connect(self.show_movie_grid)
+        left_layout.addWidget(back_btn, alignment=Qt.AlignLeft)
+        # Poster
+        poster = QLabel()
+        poster.setAlignment(Qt.AlignTop)
+        pix = QPixmap()
+        if movie.get('stream_icon'):
+            load_image_async(movie['stream_icon'], poster, QPixmap('assets/movies.png'), update_size=(180, 260))
         else:
-            QMessageBox.warning(self, "Error", f"Failed to load movies: {data}")
-    
+            poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        left_layout.addWidget(poster)
+        layout.addLayout(left_layout)
+        # --- Right: Metadata and actions ---
+        right_layout = QVBoxLayout()
+        # Title
+        title = QLabel(movie.get('name', ''))
+        title.setFont(QFont('Arial', 16, QFont.Bold))
+        right_layout.addWidget(title)
+        # Metadata
+        meta = QLabel()
+        meta.setText(f"Year: {movie.get('year', '--')} | Genre: {movie.get('genre', '--')} | Duration: {movie.get('duration', '--')} min")
+        right_layout.addWidget(meta)
+        # Director, cast, rating
+        director = movie.get('director', '--')
+        cast = movie.get('cast', '--')
+        rating = movie.get('rating', '--')
+        right_layout.addWidget(QLabel(f"Director: {director}"))
+        if rating and rating != '--':
+            right_layout.addWidget(QLabel(f"★ {rating}"))
+        # Description
+        desc = QTextEdit(movie.get('plot', ''))
+        desc.setReadOnly(True)
+        desc.setMaximumHeight(80)
+        right_layout.addWidget(desc)
+        # Cast photos (if available)
+        cast_photos = movie.get('cast_photos', [])
+        if cast_photos:
+            cast_layout = QHBoxLayout()
+            for cast_member in cast_photos:
+                vbox = QVBoxLayout()
+                photo_label = QLabel()
+                photo_pix = QPixmap()
+                if cast_member.get('photo_url'):
+                    load_image_async(cast_member['photo_url'], photo_label, QPixmap(), update_size=(48, 48))
+                if not photo_pix.isNull():
+                    photo_label.setPixmap(photo_pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                name_label = QLabel(cast_member.get('name', ''))
+                name_label.setAlignment(Qt.AlignCenter)
+                vbox.addWidget(photo_label)
+                vbox.addWidget(name_label)
+                cast_layout.addLayout(vbox)
+            right_layout.addLayout(cast_layout)
+        elif cast and cast != '--':
+            right_layout.addWidget(QLabel(f"Cast: {cast}"))
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        play_btn = QPushButton("PLAY")
+        play_btn.clicked.connect(lambda: self._play_movie_from_details(movie))
+        trailer_btn = QPushButton("WATCH TRAILER")
+        trailer_btn.clicked.connect(lambda: self._watch_trailer(movie))
+        btn_layout.addWidget(play_btn)
+        btn_layout.addWidget(trailer_btn)
+        right_layout.addLayout(btn_layout)
+        
+        # Fetch detailed metadata
+        stream_id = movie.get('stream_id')
+        print(f"Debug: Fetching detailed metadata for stream_id: {stream_id}")  # Log to console for debugging
+        try:
+            success, vod_info = self.api_client.get_vod_info(stream_id)
+            #print(f"Debug: vod_info: {vod_info}")  # Log to console for debugging
+            if success and vod_info:
+                movie_info = vod_info['info']
+                print("Detailed Movie info Metadata:", movie_info)  # Log to console for debugging
+
+                # Update UI with detailed metadata
+                meta.setText(f"Year: {movie_info.get('releasedate', '--')} \nGenre: {movie_info.get('genre', '--')} \nDuration: {movie_info.get('duration', '--')}")
+                director = movie_info.get('director', '--')
+                cast = ', '.join(movie_info.get('cast', [])) if isinstance(movie_info.get('cast'), list) else movie_info.get('cast', '--')
+                desc.setPlainText(movie_info.get('plot', ''))
+
+                # Update director and cast labels
+                right_layout.addWidget(QLabel(f"Director: {director}"))
+                right_layout.addWidget(QLabel(f"Cast: {cast}"))
+
+                # Update poster if available
+                if 'movie_image' in vod_info['info']:
+                    image_data = self.api_client.get_image_data(vod_info['info']['movie_image'])
+                    if image_data:
+                        pix = QPixmap()
+                        pix.loadFromData(image_data)
+                        if not pix.isNull():
+                            poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception as e:
+            print("Error fetching detailed metadata:", e)
+        
+        layout.addLayout(right_layout)
+        return details
+
+    def show_movie_grid(self):
+        self.stacked_widget.setCurrentIndex(0)
+
+    def movie_tile_clicked(self, movie):
+        self.current_movie = movie
+        self.show_movie_details(movie)
+
+    def _play_movie_from_details(self, movie):
+        # Reuse the logic from the dialog, but adapted for tab context
+        main_window = self.window()
+        from src.ui.widgets.dialogs import MovieDetailsDialog
+        dlg = MovieDetailsDialog(movie, self.api_client, parent=self, main_window=main_window)
+        dlg.play_movie()  # Play directly, don't show dialog
+
+    def _watch_trailer(self, movie):
+        QMessageBox.information(self, "Trailer", "Trailer playback not implemented.")
+
+    def search_movies(self, text):
+        """Search movies based on input text (grid view)"""
+        if not self.movies:
+            return
+        text = text.lower()
+        filtered = [mv for mv in self.movies if text in mv['name'].lower()]
+        self.display_movie_grid(filtered)
+
     def paginate_items(self, items, page):
-        """Paginate items with specified items per page"""
         total_items = len(items)
         total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
-        
         if page < 1:
             page = 1
         if page > total_pages:
             page = total_pages
-        
         start = (page - 1) * self.page_size
         end = min(start + self.page_size, total_items)
-        
         return items[start:end], total_pages
-    
+
     def update_pagination_controls(self):
-        """Update pagination controls based on current state"""
-        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
-        self.prev_page_button.setEnabled(self.current_page > 1)
-        self.next_page_button.setEnabled(self.current_page < self.total_pages)
-    
+        if self.total_pages > 1:
+            self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+            self.prev_page_button.setEnabled(self.current_page > 1)
+            self.next_page_button.setEnabled(self.current_page < self.total_pages)
+            self.pagination_panel.setVisible(True)
+        else:
+            self.pagination_panel.setVisible(False)
+        # Update pagination controls visibility
+        if hasattr(self, 'prev_page_button') and hasattr(self, 'next_page_button'):
+            self.prev_page_button.setVisible(self.current_page > 1)
+            self.next_page_button.setVisible(self.current_page < self.total_pages)
+
     def go_to_previous_page(self):
-        """Go to the previous page"""
         if self.current_page > 1:
             self.current_page -= 1
             self.display_current_page()
-    
+
     def go_to_next_page(self):
-        """Go to the next page"""
         if self.current_page < self.total_pages:
             self.current_page += 1
             self.display_current_page()
-    
+
     def display_current_page(self):
-        """Display the current page of items"""
-        self.movies_list.clear()
-        page_items, self.total_pages = self.paginate_items(self.filtered_movies, self.current_page)
-        
-        for item in page_items:
-            self.movies_list.addItem(item['name'])
-        
+        for i in reversed(range(self.movie_grid_layout.count())):
+            widget = self.movie_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        page_items, self.total_pages = self.paginate_items(self.movies, self.current_page)
+        self.display_movie_grid(page_items)
         self.update_pagination_controls()
-    
-    def search_movies(self, text):
-        """Search movies based on input text"""
-        if not self.all_movies:
-            return
-        
-        text = text.lower()
-        
-        if not text:
-            # If search is cleared, show all items with pagination
-            self.filtered_movies = self.all_movies
-        else:
-            # Filter items based on search text
-            self.filtered_movies = [item for item in self.all_movies if text in item['name'].lower()]
-        
-        # Reset to first page and display results
-        self.current_page = 1
-        self.display_current_page()
-    
+
     def movie_double_clicked(self, item):
         """Handle movie double-click"""
         self.play_movie()

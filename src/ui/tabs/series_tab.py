@@ -3,13 +3,82 @@ Series tab for the application
 """
 import time
 import os
+import hashlib
+import threading
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel, QProgressBar)
-from PyQt5.QtCore import Qt, pyqtSignal
+                            QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget)
+from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, Q_ARG
+from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
+from src.utils.image_cache import ensure_cache_dir, get_cache_path
+
+CACHE_DIR = 'assets/cache/'
+
+def get_api_client_from_label(label, main_window):
+    if main_window and hasattr(main_window, 'api_client'):
+        return main_window.api_client
+    parent = label.parent()
+    for _ in range(5):
+        if parent is None:
+            break
+        if hasattr(parent, 'api_client'):
+            return parent.api_client
+        parent = parent.parent() if hasattr(parent, 'parent') else None
+    return None
+
+def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
+    ensure_cache_dir()
+    cache_path = get_cache_path(image_url)
+    def set_pixmap(pixmap):
+        label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def worker():
+        from PyQt5.QtGui import QPixmap
+        print(f"[DEBUG] Start loading image: {image_url}")
+        if main_window and hasattr(main_window, 'loading_icon_controller'):
+            main_window.loading_icon_controller.show_icon.emit()
+        pix = QPixmap()
+        if os.path.exists(cache_path):
+            print(f"[DEBUG] Image found in cache: {cache_path}")
+            pix.load(cache_path)
+        else:
+            print(f"[DEBUG] Downloading image: {image_url}")
+            image_data = None
+            api_client = get_api_client_from_label(label, main_window)
+            try:
+                if api_client:
+                    image_data = api_client.get_image_data(image_url)
+                else:
+                    print("[DEBUG] Could not find api_client for image download!")
+            except Exception as e:
+                print(f"[DEBUG] Error downloading image: {e}")
+            if image_data:
+                pix.loadFromData(image_data)
+                pix.save(cache_path)
+                print(f"[DEBUG] Image downloaded and cached: {cache_path}")
+        if not pix or pix.isNull():
+            pix = default_pixmap
+        QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        if loading_counter is not None:
+            loading_counter['count'] -= 1
+            if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        else:
+            if main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        print(f"[DEBUG] Finished loading image: {image_url}")
+    # Set cached or placeholder immediately
+    if os.path.exists(cache_path):
+        pix = QPixmap()
+        pix.load(cache_path)
+        set_pixmap(pix)
+    else:
+        set_pixmap(default_pixmap)
+        if loading_counter is not None:
+            loading_counter['count'] += 1
+        threading.Thread(target=worker, daemon=True).start()
 
 class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):
@@ -105,308 +174,340 @@ class DownloadItem:
             return f"{hours}h {minutes}m"
 
 class SeriesTab(QWidget):
-    """Series tab widget"""
     add_to_favorites = pyqtSignal(dict)
-    add_to_downloads = pyqtSignal(object)  # Signal to add download to downloads tab
-    
+    add_to_downloads = pyqtSignal(object)
+
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
         self.api_client = api_client
-        self.series_data = []
-        self.all_series = []  # Store all series across categories
-        self.filtered_series = []  # Store filtered series for search
+        self.series = []
         self.current_series = None
-        self.current_episodes = []
-        self.current_episode = None
-        self.download_thread = None
-        self.batch_download_thread = None
-        
-        # Pagination
-        self.current_page = 1
-        self.total_pages = 1
-        self.page_size = 30
-        
         self.setup_ui()
-        self.main_window = None  # Will be set by the main window
-    
+        self.main_window = None
+
     def setup_ui(self):
-        """Set up the UI components"""
         layout = QVBoxLayout(self)
-        
         # Search bar
         search_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search series...")
         self.search_input.textChanged.connect(self.search_series)
         search_layout.addWidget(self.search_input)
-        
-        # Main content area with splitter
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # Lists widget
-        lists_widget = QWidget()
-        lists_layout = QHBoxLayout(lists_widget)
-        lists_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Categories, series, seasons, episodes
-        categories_widget = QWidget()
-        categories_layout = QVBoxLayout(categories_widget)
-        categories_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.categories_list = QListWidget()
-        self.categories_list.setMinimumWidth(150)
-        self.categories_list.itemClicked.connect(self.category_clicked)
-        
-        categories_layout.addWidget(QLabel("Categories"))
-        categories_layout.addWidget(self.categories_list)
-        
-        series_widget = QWidget()
-        series_layout = QVBoxLayout(series_widget)
-        series_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.series_list = QListWidget()
-        self.series_list.setMinimumWidth(200)
-        self.series_list.itemClicked.connect(self.series_clicked)
-        
-        # Pagination controls for series
-        series_pagination_layout = QHBoxLayout()
-        self.series_prev_button = QPushButton("Previous")
-        self.series_prev_button.clicked.connect(self.go_to_previous_series_page)
-        self.series_page_label = QLabel("Page 1 of 1")
-        self.series_next_button = QPushButton("Next")
-        self.series_next_button.clicked.connect(self.go_to_next_series_page)
-        series_pagination_layout.addWidget(self.series_prev_button)
-        series_pagination_layout.addWidget(self.series_page_label)
-        series_pagination_layout.addWidget(self.series_next_button)
-        
-        series_layout.addWidget(QLabel("Series"))
-        series_layout.addWidget(self.series_list)
-        series_layout.addLayout(series_pagination_layout)
-        
-        seasons_widget = QWidget()
-        seasons_layout = QVBoxLayout(seasons_widget)
-        seasons_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.seasons_list = QListWidget()
-        self.seasons_list.setMinimumWidth(100)
-        self.seasons_list.itemClicked.connect(self.season_clicked)
-        
-        seasons_layout.addWidget(QLabel("Seasons"))
-        seasons_layout.addWidget(self.seasons_list)
-        
-        episodes_widget = QWidget()
-        episodes_layout = QVBoxLayout(episodes_widget)
-        episodes_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.episodes_list = QListWidget()
-        self.episodes_list.setMinimumWidth(200)
-        self.episodes_list.itemDoubleClicked.connect(self.episode_double_clicked)
-        
-        episodes_layout.addWidget(QLabel("Episodes"))
-        episodes_layout.addWidget(self.episodes_list)
-        
-        lists_layout.addWidget(categories_widget)
-        lists_layout.addWidget(series_widget)
-        lists_layout.addWidget(seasons_widget)
-        lists_layout.addWidget(episodes_widget)
-        
-        # Player and controls
-        player_widget = QWidget()
-        player_layout = QVBoxLayout(player_widget)
-        player_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.player = MediaPlayer(parent=self)
-        self.player.controls.play_pause_button.clicked.connect(self.play_episode)
-        self.episodes_list.itemClicked.connect(self.player.controls.stop_clicked)
-
-        # Additional controls
-        controls_layout = QHBoxLayout()
-        
-        self.download_episode_button = QPushButton("Download Episode")
-        self.download_episode_button.clicked.connect(self.download_episode)
-        
-        self.download_season_button = QPushButton("Download Season")
-        self.download_season_button.clicked.connect(self.download_season)
-
-        self.export_season_button = QPushButton("Export Season")
-        self.export_season_button.clicked.connect(self.export_season)
-        
-        self.add_favorite_button = QPushButton("Add to Favorites")
-        self.add_favorite_button.clicked.connect(self.add_to_favorites_clicked)
-        
-        controls_layout.addWidget(self.download_episode_button)
-        controls_layout.addWidget(self.download_season_button)
-        controls_layout.addWidget(self.export_season_button)
-        controls_layout.addWidget(self.add_favorite_button)
-        
-        player_layout.addWidget(self.player)
-        player_layout.addLayout(controls_layout)
-        
-        # Add widgets to splitter
-        splitter.addWidget(lists_widget)
-        splitter.addWidget(player_widget)
-        splitter.setSizes([600, 800])
-        
-        # Add all components to main layout
         layout.addLayout(search_layout)
-        layout.addWidget(splitter)
-    
+
+        # Stacked widget for grid/details views
+        self.stacked_widget = QStackedWidget()
+
+        # --- Left: Categories ---
+        self.categories_list = QListWidget()
+        self.categories_list.setMinimumWidth(220)
+        self.categories_list.itemClicked.connect(self.category_clicked)
+        self.categories_list.setStyleSheet("QListWidget::item:selected { background: #444; color: #fff; font-weight: bold; }")
+        left_panel = QVBoxLayout()
+        left_panel.addWidget(QLabel("Categories"))
+        left_panel.addWidget(self.categories_list)
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+        left_widget.setMaximumWidth(300)
+
+        # --- Series Grid ---
+        self.series_grid_widget = QWidget()
+        self.series_grid_layout = QGridLayout(self.series_grid_widget)
+        self.series_grid_layout.setSpacing(16)
+        self.series_grid_layout.setContentsMargins(8, 8, 8, 8)
+        self.series_grid_widget.setStyleSheet("background: transparent;")
+        self.series_grid_scroll = QScrollArea()
+        self.series_grid_scroll.setWidgetResizable(True)
+        self.series_grid_scroll.setWidget(self.series_grid_widget)
+        grid_panel = QVBoxLayout()
+        grid_panel.addWidget(QLabel("Series"))
+        grid_panel.addWidget(self.series_grid_scroll)
+        self.setup_pagination_controls()
+        grid_panel.addWidget(self.pagination_panel)
+        grid_widget = QWidget()
+        grid_widget.setLayout(grid_panel)
+
+        # Splitter for left (categories) and right (grid/details)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(left_widget)
+        splitter.addWidget(grid_widget)
+        splitter.setSizes([300, 900])
+        splitter_widget = QWidget()
+        splitter_layout = QVBoxLayout(splitter_widget)
+        splitter_layout.setContentsMargins(0, 0, 0, 0)
+        splitter_layout.addWidget(splitter)
+
+        self.stacked_widget.addWidget(splitter_widget)  # Index 0: grid view
+        self.details_widget = None
+        self.stacked_widget.addWidget(QWidget())  # Placeholder for details
+
+        layout.addWidget(self.stacked_widget)
+        self.page_size = 32
+        self.current_page = 1
+        self.total_pages = 1
+        self.update_pagination_controls()
+        self.setLayout(layout)
+
+    def show_series_details(self, series):
+        # Remove old details widget if present
+        if self.details_widget:
+            self.stacked_widget.removeWidget(self.details_widget)
+            self.details_widget.deleteLater()
+            self.details_widget = None
+        # Create a new details widget (not a dialog)
+        self.details_widget = self._create_details_widget(series)
+        self.stacked_widget.addWidget(self.details_widget)
+        self.stacked_widget.setCurrentWidget(self.details_widget)
+
+    def _create_details_widget(self, series):
+        from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QListWidget
+        from PyQt5.QtGui import QPixmap, QFont
+        details = QWidget()
+        layout = QHBoxLayout(details)
+        # --- Left: Poster and Back button ---
+        left_layout = QVBoxLayout()
+        back_btn = QPushButton("← Back")
+        back_btn.setFixedWidth(80)
+        back_btn.clicked.connect(self.show_series_grid)
+        left_layout.addWidget(back_btn, alignment=Qt.AlignLeft)
+        # Poster
+        poster = QLabel()
+        poster.setAlignment(Qt.AlignTop)
+        pix = QPixmap()
+        if series.get('cover'):
+            image_data = self.api_client.get_image_data(series['cover'])
+            if image_data:
+                pix.loadFromData(image_data)
+        if not pix or pix.isNull():
+            pix = QPixmap('assets/series.png')
+        if not pix.isNull():
+            poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        left_layout.addWidget(poster)
+        layout.addLayout(left_layout)
+        # --- Right: Metadata, seasons, episodes ---
+        right_layout = QVBoxLayout()
+        # Title
+        title = QLabel(series.get('name', ''))
+        title.setFont(QFont('Arial', 16, QFont.Bold))
+        right_layout.addWidget(title)
+        # Metadata
+        meta = QLabel()
+        meta.setText(f"Year: {series.get('year', '--')} | Genre: {series.get('genre', '--')}")
+        right_layout.addWidget(meta)
+        # Description
+        desc = QTextEdit(series.get('plot', ''))
+        desc.setReadOnly(True)
+        desc.setMaximumHeight(80)
+        right_layout.addWidget(desc)
+        # Seasons and episodes
+        self.seasons_list = QListWidget()
+        self.episodes_list = QListWidget()
+        self.seasons_list.itemClicked.connect(self.season_clicked)
+        self.episodes_list.itemDoubleClicked.connect(self.episode_double_clicked)
+        right_layout.addWidget(QLabel("Seasons"))
+        right_layout.addWidget(self.seasons_list)
+        right_layout.addWidget(QLabel("Episodes"))
+        right_layout.addWidget(self.episodes_list)
+        # Play button for selected episode
+        self.play_episode_btn = QPushButton("Play Episode")
+        self.play_episode_btn.setEnabled(False)
+        self.play_episode_btn.clicked.connect(self.play_selected_episode)
+        right_layout.addWidget(self.play_episode_btn)
+        self.episodes_list.currentItemChanged.connect(self.update_play_button_state)
+        layout.addLayout(right_layout)
+        # Load seasons for this series
+        self.load_seasons(series['series_id'])
+
+        # Fetch detailed metadata
+        series_id = series.get('series_id')
+        print(f"Debug: Fetching detailed metadata for series_id: {series_id}")  # Log to console for debugging
+        try:
+            success, series_info = self.api_client.get_series_info(series_id)
+            print(f"Debug: series_info: {series_info}")  # Log to console for debugging
+            if success and series_info:
+                info = series_info['info']
+                print("Detailed Series Metadata:", info)  # Log to console for debugging
+
+                # Update UI with detailed metadata
+                meta.setText(f"Year: {info.get('releaseDate', '--')} | Genre: {info.get('genre', '--')}")
+                desc.setPlainText(info.get('plot', ''))
+
+                # Update poster if available
+                if 'cover' in info:
+                    image_data = self.api_client.get_image_data(info['cover'])
+                    if image_data:
+                        pix = QPixmap()
+                        pix.loadFromData(image_data)
+                        if not pix.isNull():
+                            poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception as e:
+            print("Error fetching detailed metadata:", e)
+
+        return details
+
+    def update_play_button_state(self):
+        # Enable play button if an episode is selected and set the user role data
+        item = self.episodes_list.currentItem()
+        self.play_episode_btn.setEnabled(item is not None)
+        if item and hasattr(self, 'current_episodes'):
+            # Find the episode dict and set as user data
+            ep_num = item.text().split(' ')[0].lstrip('E')
+            for ep in self.current_episodes:
+                if str(ep.get('episode_num')) == ep_num:
+                    item.setData(Qt.UserRole, ep)
+                    break
+
+    def play_selected_episode(self):
+        item = self.episodes_list.currentItem()
+        if item:
+            self._play_episode(item)
+
+    def episode_double_clicked(self, item):
+        # Ensure user role data is set
+        self.update_play_button_state()
+        self._play_episode(item)
+
+    def _play_episode(self, item):
+        ep = item.data(Qt.UserRole)
+        if not ep:
+            QMessageBox.warning(self, "Error", "Episode data not found.")
+            return
+        main_window = self.window()
+        if hasattr(main_window, 'player_window'):
+            stream_id = ep.get('id') or ep.get('stream_id')
+            container_extension = ep.get('container_extension', 'mp4')
+            try:
+                # Try to get container extension from episode info (if available)
+                success, info = self.api_client.get_episode_info(stream_id)
+                if success and 'container_extension' in info:
+                    container_extension = info['container_extension']
+            except Exception:
+                pass
+            # Use the correct method for series/episodes
+            stream_url = self.api_client.get_series_url(stream_id, container_extension)
+            if stream_url:
+                main_window.player_window.play(stream_url)
+            else:
+                QMessageBox.warning(self, "Error", "Unable to get episode stream URL.")
+        else:
+            QMessageBox.warning(self, "Error", "Player window not available.")
+
+    def show_series_grid(self):
+        self.stacked_widget.setCurrentIndex(0)
+
     def load_categories(self):
-        """Load series categories from the API"""
         self.categories_list.clear()
-        
+        self.categories = []
         success, data = self.api_client.get_series_categories()
         if success:
-            # Add "All" category at the beginning
-            self.categories_list.addItem("All")
-            
-            # Add the rest of the categories
+            self.categories = data
+            # Add "ALL" category at the top
+            all_item = QListWidgetItem("ALL")
+            all_item.setData(Qt.UserRole, None)
+            self.categories_list.addItem(all_item)
             for category in data:
-                self.categories_list.addItem(category['category_name'])
+                count = category.get('num', '')
+                item = QListWidgetItem(f"{category['category_name']} ({count})")
+                item.setData(Qt.UserRole, category['category_id'])
+                self.categories_list.addItem(item)
         else:
             QMessageBox.warning(self, "Error", f"Failed to load categories: {data}")
-    
+
     def category_clicked(self, item):
-        """Handle category selection"""
-        category_name = item.text()
-        
-        if category_name == "All":
-            # Load all series across categories
-            self.load_all_series()
-        else:
-            # Find category ID
-            success, categories = self.api_client.get_series_categories()
-            if not success:
-                QMessageBox.warning(self, "Error", f"Failed to load categories: {categories}")
-                return
-            
-            category_id = None
-            for category in categories:
-                if category['category_name'] == category_name:
-                    category_id = category['category_id']
-                    break
-            
-            if category_id:
-                self.load_series(category_id)
-    
-    def load_all_series(self):
-        """Load all series from all categories"""
-        self.series_list.clear()
-        self.seasons_list.clear()
-        self.episodes_list.clear()
-        all_series = []
-        
-        # Get all categories
-        success, categories = self.api_client.get_series_categories()
-        if not success:
-            QMessageBox.warning(self, "Error", f"Failed to load categories: {categories}")
-            return
-        
-        # Get series from each category
-        for category in categories:
-            success, series = self.api_client.get_series(category['category_id'])
-            if success:
-                all_series.extend(series)
-        
-        # Update the series list
-        self.all_series = all_series
-        self.filtered_series = all_series
-        self.current_page = 1
-        self.display_current_series_page()
-    
+        category_id = item.data(Qt.UserRole)
+        self.load_series(category_id)
+
     def load_series(self, category_id):
-        """Load series for the selected category"""
-        self.series_list.clear()
-        self.seasons_list.clear()
-        self.episodes_list.clear()
-        
-        success, data = self.api_client.get_series(category_id)
-        if success:
-            self.all_series = data
-            self.filtered_series = data
-            self.current_page = 1
-            self.display_current_series_page()
+        self.series = []
+        for i in reversed(range(self.series_grid_layout.count())):
+            widget = self.series_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        if category_id is None:
+            # ALL category: load all series
+            all_series = []
+            for cat in self.categories:
+                success, data = self.api_client.get_series(cat['category_id'])
+                if success:
+                    all_series.extend(data)
+            self.series = all_series
         else:
-            QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
-    
-    def paginate_items(self, items, page):
-        """Paginate items with specified items per page"""
-        total_items = len(items)
-        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
-        
-        if page < 1:
-            page = 1
-        if page > total_pages:
-            page = total_pages
-        
-        start = (page - 1) * self.page_size
-        end = min(start + self.page_size, total_items)
-        
-        return items[start:end], total_pages
-    
-    def update_series_pagination_controls(self):
-        """Update series pagination controls based on current state"""
-        self.series_page_label.setText(f"Page {self.current_page} of {self.total_pages}")
-        self.series_prev_button.setEnabled(self.current_page > 1)
-        self.series_next_button.setEnabled(self.current_page < self.total_pages)
-    
-    def go_to_previous_series_page(self):
-        """Go to the previous page of series"""
-        if self.current_page > 1:
-            self.current_page -= 1
-            self.display_current_series_page()
-    
-    def go_to_next_series_page(self):
-        """Go to the next page of series"""
-        if self.current_page < self.total_pages:
-            self.current_page += 1
-            self.display_current_series_page()
-    
-    def display_current_series_page(self):
-        """Display the current page of series"""
-        self.series_list.clear()
-        page_items, self.total_pages = self.paginate_items(self.filtered_series, self.current_page)
-        
-        for item in page_items:
-            self.series_list.addItem(item['name'])
-        
-        self.update_series_pagination_controls()
-    
-    def search_series(self, text):
-        """Search series based on input text"""
-        if not self.all_series:
-            return
-        
-        text = text.lower()
-        
-        if not text:
-            # If search is cleared, show all items with pagination
-            self.filtered_series = self.all_series
-        else:
-            # Filter items based on search text
-            self.filtered_series = [item for item in self.all_series if text in item['name'].lower()]
-        
-        # Reset to first page and display results
+            success, data = self.api_client.get_series(category_id)
+            if success:
+                self.series = data
+            else:
+                QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
         self.current_page = 1
-        self.display_current_series_page()
-    
-    def series_clicked(self, item):
-        """Handle series selection"""
-        series_name = item.text()
-        
-        # Find series in data
-        series = None
-        for s in self.filtered_series:
-            if s['name'] == series_name:
-                series = s
-                break
-        
-        if not series:
-            return
-        
+        self.display_current_page()
+
+    def display_series_grid(self, series_list):
+        cols = 4
+        row = 0
+        col = 0
+        main_window = self.main_window if hasattr(self, 'main_window') else None
+        loading_counter = getattr(main_window, 'loading_counter', None) if main_window else None
+        for series in series_list:
+            tile = QFrame()
+            tile.setFrameShape(QFrame.StyledPanel)
+            # Recently added indicator
+            is_recent = False
+            if series.get('added'):
+                from datetime import datetime, timedelta
+                try:
+                    added_time = datetime.fromtimestamp(int(series['added']))
+                    if (datetime.now() - added_time) < timedelta(days=7):
+                        is_recent = True
+                except Exception:
+                    pass
+            tile.setStyleSheet("background: #222; border-radius: 12px;" + ("border: 2px solid #00e676;" if is_recent else ""))
+            tile_layout = QVBoxLayout(tile)
+            # Series poster
+            poster = QLabel()
+            poster.setAlignment(Qt.AlignCenter)
+            default_pix = QPixmap('assets/series.png')
+            # Show cached or placeholder immediately, then load async
+            if series.get('cover'):
+                load_image_async(series['cover'], poster, default_pix, update_size=(100, 140), main_window=main_window, loading_counter=loading_counter)
+            else:
+                poster.setPixmap(default_pix.scaled(100, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            tile_layout.addWidget(poster)
+            # Series name
+            name = QLabel(series['name'])
+            name.setAlignment(Qt.AlignCenter)
+            name.setWordWrap(True)
+            name.setFont(QFont('Arial', 11, QFont.Bold))
+            name.setStyleSheet("color: #fff;")
+            tile_layout.addWidget(name)
+            # Rating (if available)
+            if series.get('rating'):
+                rating = QLabel(f"★ {series['rating']}")
+                rating.setAlignment(Qt.AlignCenter)
+                rating.setStyleSheet("color: gold;")
+                tile_layout.addWidget(rating)
+            # Recently added label
+            if is_recent:
+                recent_label = QLabel("NEW")
+                recent_label.setAlignment(Qt.AlignCenter)
+                recent_label.setStyleSheet("color: #00e676; font-weight: bold;")
+                tile_layout.addWidget(recent_label)
+            tile.mousePressEvent = lambda e, s=series: self.series_tile_clicked(s)
+            self.series_grid_layout.addWidget(tile, row, col)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+
+    def series_tile_clicked(self, series):
         self.current_series = series
-        self.load_seasons(series['series_id'])
-    
+        self.show_series_details(series)
+
+    def search_series(self, text):
+        if not self.series:
+            return
+        text = text.lower()
+        filtered = [s for s in self.series if text in s['name'].lower()]
+        self.display_series_grid(filtered)
+
     def load_seasons(self, series_id):
         """Load seasons for the selected series"""
         self.seasons_list.clear()
@@ -438,48 +539,8 @@ class SeriesTab(QWidget):
     
     def episode_double_clicked(self, item):
         """Handle episode double-click"""
-        self.play_episode()
+        self._play_episode(item)
     
-    def play_episode(self):
-        if(self.player.play_started == False):
-            """Play the selected episode"""
-            if not self.episodes_list.currentItem():
-                QMessageBox.warning(self, "Error", "No episode selected")
-                return
-            
-            episode_text = self.episodes_list.currentItem().text()
-            episode = None
-            for ep in self.current_episodes:
-                if episode_text.startswith(f"E{ep['episode_num']}"):
-                    episode = ep
-                    break
-            
-            if not episode:
-                return
-            
-            episode_id = episode['id']
-            
-            # Get container extension (default to mp4)
-            container_extension = episode.get('container_extension', 'mp4')
-            
-            stream_url = self.api_client.get_series_url(episode_id, container_extension)
-            
-            if self.player.play(stream_url):
-                self.current_episode = {
-                    'name': f"{self.current_series['name']} - S{episode['season']}E{episode['episode_num']} - {episode['title']}",
-                    'stream_url': stream_url,
-                    'episode_id': episode_id,
-                    'stream_type': 'series',
-                    'series_id': self.current_series['series_id'],
-                    'season': episode['season'],
-                    'episode_num': episode['episode_num'],
-                    'title': episode['title'],
-                    'container_extension': container_extension
-                }
-                self.player.controls.play_pause_button.clicked.disconnect(self.play_episode)
-        else:
-                self.player.play_pause(True)
-
     def download_episode(self):
         """Download the selected episode"""
         if not self.episodes_list.currentItem():
@@ -718,3 +779,61 @@ class SeriesTab(QWidget):
             return
         
         self.add_to_favorites.emit(self.current_episode)
+
+    # --- Pagination for series grid ---
+    def setup_pagination_controls(self):
+        self.pagination_panel = QWidget()
+        nav_layout = QHBoxLayout(self.pagination_panel)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setAlignment(Qt.AlignCenter)
+        self.prev_page_button = QPushButton("Previous")
+        self.next_page_button = QPushButton("Next")
+        self.page_label = QLabel()
+        self.prev_page_button.clicked.connect(self.go_to_previous_page)
+        self.next_page_button.clicked.connect(self.go_to_next_page)
+        nav_layout.addWidget(self.prev_page_button)
+        nav_layout.addWidget(self.page_label)
+        nav_layout.addWidget(self.next_page_button)
+        self.pagination_panel.setVisible(False)
+
+    def update_pagination_controls(self):
+        if self.total_pages > 1:
+            self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+            self.prev_page_button.setEnabled(self.current_page > 1)
+            self.next_page_button.setEnabled(self.current_page < self.total_pages)
+            self.pagination_panel.setVisible(True)
+        else:
+            self.pagination_panel.setVisible(False)
+        if hasattr(self, 'prev_button') and hasattr(self, 'next_button'):
+            self.prev_button.setVisible(self.current_page > 1)
+            self.next_button.setVisible(self.current_page < self.total_pages)
+
+    def paginate_items(self, items, page):
+        total_items = len(items)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
+        start = (page - 1) * self.page_size
+        end = min(start + self.page_size, total_items)
+        return items[start:end], total_pages
+
+    def go_to_previous_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.display_current_page()
+
+    def go_to_next_page(self):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.display_current_page()
+
+    def display_current_page(self):
+        for i in reversed(range(self.series_grid_layout.count())):
+            widget = self.series_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        page_items, self.total_pages = self.paginate_items(self.series, self.current_page)
+        self.display_series_grid(page_items)
+        self.update_pagination_controls()

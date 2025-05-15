@@ -6,7 +6,7 @@ from PyQt5.QtCore import QSize
 
 # Application settings
 APP_NAME = "Sahab IPTV"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 DARK_MODE = True
 DEFAULT_LANGUAGE = "en"  # en or ar
 
