@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QMessageBox,
                             QAction, QMenu, QMenuBar, QToolBar, QStatusBar, QLabel)
 from PyQt5.QtCore import Qt, QSettings, QSize, pyqtSignal, QObject
 from PyQt5.QtGui import QIcon
+from PyQt5.QtSvg import QSvgWidget
 from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
@@ -123,24 +124,12 @@ class MainWindow(QMainWindow):
         self.statusBar.addPermanentWidget(self.expiry_label)
         self.update_account_label()
         # Add loading icon label and loading counter for image loading
-        from PyQt5.QtGui import QMovie
-        self.loading_icon_label = QLabel()
+        self.loading_icon_label = QSvgWidget('assets/infinite-spinner.svg')
+        self.loading_icon_label.setFixedSize(24, 24)  # Adjust size as needed for status bar
         self.loading_icon_label.setVisible(False)
-        self.loading_icon = QMovie('assets/loading.gif')
-        self.loading_icon_label.setMovie(self.loading_icon)
-        self.loading_icon.start()
+        self.statusBar.addPermanentWidget(self.loading_icon_label, 1)
         self.loading_counter = {'count': 0}
         self.loading_icon_controller = LoadingIconController(self)
-        # Add loading icon label (hidden by default) at the rightmost of the status bar
-        self.loading_icon_label = QLabel()
-        self.loading_icon_label.setVisible(False)
-        loading_movie = QMovie('assets/loading.gif')
-        # Resize the loading icon to match the status bar height
-        statusbar_height = self.statusBar.sizeHint().height()
-        loading_movie.setScaledSize(QSize(statusbar_height, statusbar_height))
-        self.loading_icon_label.setMovie(loading_movie)
-        loading_movie.start()
-        self.statusBar.addPermanentWidget(self.loading_icon_label, 1)  # 1 = stretch factor, rightmost
 
     def handle_tab_changed(self, index):
         # If Home tab selected, update home screen info if needed
