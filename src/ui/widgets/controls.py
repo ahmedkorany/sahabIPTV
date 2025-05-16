@@ -110,7 +110,21 @@ class PlayerControls(QWidget):
         
         main_layout.addLayout(seek_layout)
         main_layout.addLayout(controls_layout)
-    
+        
+        # Set play control buttons (play, stop, fast forward, backward) to white (icon and text)
+        for btn in [self.play_pause_button, self.stop_button, self.rewind_button, self.forward_button, self.fullscreen_button]:
+            btn.setStyleSheet("color: white; background: transparent;")
+            icon = btn.icon()
+            if not icon.isNull():
+                pixmap = icon.pixmap(btn.iconSize())
+                from PyQt5.QtGui import QPainter, QColor
+                white_pixmap = pixmap.copy()
+                painter = QPainter(white_pixmap)
+                painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                painter.fillRect(white_pixmap.rect(), QColor('white'))
+                painter.end()
+                btn.setIcon(QIcon(white_pixmap))
+
     def play_pause_clicked_handler(self):
         """Handle play/pause button click"""
         self.is_playing = not self.is_playing
@@ -124,10 +138,18 @@ class PlayerControls(QWidget):
     
     def update_play_pause_button(self):
         """Update play/pause button icon based on state"""
+        from PyQt5.QtGui import QPainter, QColor
         if self.is_playing:
-            self.play_pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            icon = self.style().standardIcon(QStyle.SP_MediaPause)
         else:
-            self.play_pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            icon = self.style().standardIcon(QStyle.SP_MediaPlay)
+        pixmap = icon.pixmap(self.play_pause_button.iconSize())
+        white_pixmap = pixmap.copy()
+        painter = QPainter(white_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(white_pixmap.rect(), QColor('white'))
+        painter.end()
+        self.play_pause_button.setIcon(QIcon(white_pixmap))
     
     def mute_clicked_handler(self):
         """Handle mute button click"""

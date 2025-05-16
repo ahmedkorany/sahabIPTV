@@ -315,21 +315,26 @@ class MainWindow(QMainWindow):
             self.movies_tab.load_categories()
             self.series_tab.load_categories()
             # Get expiry date from user_info if available
-            if data and 'user_info' in data and 'exp_date' in data['user_info']:
-                import datetime
-                exp_ts = int(data['user_info']['exp_date'])
-                expiry = datetime.datetime.fromtimestamp(exp_ts)
-                self.expiry_str = expiry.strftime('%Y-%m-%d')
-                if hasattr(self, 'home_screen') and self.home_screen:
-                    try:
-                        self.home_screen.update_expiry_date(self.expiry_str)
-                    except RuntimeError:
-                        print("Warning: Attempted to update expiry date on a deleted HomeScreen instance.")
-                if hasattr(self, 'expiry_label') and self.expiry_label:
-                    self.expiry_label.setText(f"Expiry: {self.expiry_str}")
-            else:
-                if hasattr(self, 'expiry_label') and self.expiry_label:
-                    self.expiry_label.setText("")
+            from PyQt5.QtCore import QTimer
+
+            def update_expiry():
+                if data and 'user_info' in data and 'exp_date' in data['user_info']:
+                    import datetime
+                    exp_ts = int(data['user_info']['exp_date'])
+                    expiry = datetime.datetime.fromtimestamp(exp_ts)
+                    self.expiry_str = expiry.strftime('%Y-%m-%d')
+                    if hasattr(self, 'home_screen') and self.home_screen:
+                        try:
+                            self.home_screen.update_expiry_date(self.expiry_str)
+                        except RuntimeError:
+                            print("Warning: Attempted to update expiry date on a deleted HomeScreen instance.")
+                    if hasattr(self, 'expiry_label') and self.expiry_label:
+                        self.expiry_label.setText(f"Expiry: {self.expiry_str}")
+                else:
+                    if hasattr(self, 'expiry_label') and self.expiry_label:
+                        self.expiry_label.setText("")
+
+            QTimer.singleShot(100, update_expiry)
             self.update_account_label()
             self._load_account_data()
         else:
