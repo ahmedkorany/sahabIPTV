@@ -197,51 +197,13 @@ class MainWindow(QMainWindow):
         home_action.triggered.connect(self.show_home_screen)
         menubar.addAction(home_action)
     
+    def show_account_management_screen(self):
+        from src.ui.widgets.account_management import AccountManagementScreen
+        screen = AccountManagementScreen(self, self.accounts, self.current_account)
+        self.setCentralWidget(screen)
+
     def show_account_switch_dialog(self):
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Select IPTV Account")
-        layout = QVBoxLayout(dlg)
-        label = QLabel("Choose an account or add a new one:")
-        layout.addWidget(label)
-        combo = QComboBox()
-        combo.addItems(list(self.accounts.keys()) + ["Add new account..."])
-        layout.addWidget(combo)
-        btns = QHBoxLayout()
-        ok_btn = QPushButton("OK")
-        cancel_btn = QPushButton("Cancel")
-        edit_btn = QPushButton("Edit")
-        btns.addWidget(ok_btn)
-        btns.addWidget(edit_btn)
-        btns.addWidget(cancel_btn)
-        layout.addLayout(btns)
-        def on_ok():
-            idx = combo.currentIndex()
-            if idx == len(self.accounts):
-                self.show_login_dialog(account_switch=True)
-            else:
-                name = combo.currentText()
-                self.current_account = name
-                self.settings.setValue("current_account", name)
-                acc = self.accounts[name]
-                self.api_client.set_credentials(acc['server'], acc['username'], acc['password'])
-                success, _ = self.api_client.authenticate()
-                if success:
-                    self.connect_to_server(acc['server'], acc['username'], acc['password'])
-                else:
-                    self.show_login_dialog(account_switch=True, prefill=acc)
-            dlg.accept()
-        def on_edit():
-            idx = combo.currentIndex()
-            if idx < len(self.accounts):
-                name = combo.currentText()
-                acc = self.accounts[name]
-                self.edit_account(name, acc)
-                dlg.accept()
-        ok_btn.clicked.connect(on_ok)
-        edit_btn.clicked.connect(on_edit)
-        cancel_btn.clicked.connect(dlg.reject)
-        dlg.exec_()
+        self.show_account_management_screen()
 
     def show_login_dialog(self, account_switch=False, prefill=None):
         # Get saved credentials or prefill
@@ -302,26 +264,48 @@ class MainWindow(QMainWindow):
     def clear_grids(self):
         # Clear Live grid
         if hasattr(self, 'live_tab') and hasattr(self.live_tab, 'channel_grid_layout'):
-            for i in reversed(range(self.live_tab.channel_grid_layout.count())):
-                widget = self.live_tab.channel_grid_layout.itemAt(i).widget()
-                if widget:
-                    widget.setParent(None)
+            layout = self.live_tab.channel_grid_layout
+            if layout is not None and hasattr(layout, 'count'):
+                try:
+                    for i in reversed(range(layout.count())):
+                        item = layout.itemAt(i)
+                        if item is not None:
+                            widget = item.widget()
+                            if widget:
+                                widget.setParent(None)
+                except RuntimeError:
+                    pass  # Layout was deleted
         # Clear Movies grid
         if hasattr(self, 'movies_tab') and hasattr(self.movies_tab, 'movie_grid_layout'):
-            for i in reversed(range(self.movies_tab.movie_grid_layout.count())):
-                widget = self.movies_tab.movie_grid_layout.itemAt(i).widget()
-                if widget:
-                    widget.setParent(None)
+            layout = self.movies_tab.movie_grid_layout
+            if layout is not None and hasattr(layout, 'count'):
+                try:
+                    for i in reversed(range(layout.count())):
+                        item = layout.itemAt(i)
+                        if item is not None:
+                            widget = item.widget()
+                            if widget:
+                                widget.setParent(None)
+                except RuntimeError:
+                    pass
         # Clear Series grid
         if hasattr(self, 'series_tab') and hasattr(self.series_tab, 'series_grid_layout'):
-            for i in reversed(range(self.series_tab.series_grid_layout.count())):
-                widget = self.series_tab.series_grid_layout.itemAt(i).widget()
-                if widget:
-                    widget.setParent(None)
+            layout = self.series_tab.series_grid_layout
+            if layout is not None and hasattr(layout, 'count'):
+                try:
+                    for i in reversed(range(layout.count())):
+                        item = layout.itemAt(i)
+                        if item is not None:
+                            widget = item.widget()
+                            if widget:
+                                widget.setParent(None)
+                except RuntimeError:
+                    pass
 
     def connect_to_server(self, server, username, password):
         self.statusBar.showMessage("Connecting to server...")
-        self.clear_grids()
+        # Recreate all tabs and UI to avoid using deleted widgets
+        self.setup_ui()  # This will recreate tabs, home_screen, etc.
         self.api_client.set_credentials(server, username, password)
         success, data = self.api_client.authenticate()
         expiry_str = ""
@@ -341,9 +325,11 @@ class MainWindow(QMainWindow):
                         self.home_screen.update_expiry_date(self.expiry_str)
                     except RuntimeError:
                         print("Warning: Attempted to update expiry date on a deleted HomeScreen instance.")
-                self.expiry_label.setText(f"Expiry: {self.expiry_str}")
+                if hasattr(self, 'expiry_label') and self.expiry_label:
+                    self.expiry_label.setText(f"Expiry: {self.expiry_str}")
             else:
-                self.expiry_label.setText("")
+                if hasattr(self, 'expiry_label') and self.expiry_label:
+                    self.expiry_label.setText("")
             self.update_account_label()
             self._load_account_data()
         else:

@@ -92,7 +92,7 @@ class HomeScreenWidget(QWidget):
         self.expiry_label.setText(f"Subscription expires: {self.expiry_date or 'N/A'}")
 
     def handle_switch_account(self):
-        # Show the account switch dialog via parent MainWindow
+        # Show the account management screen via parent MainWindow
         main_window = self.window()
-        if hasattr(main_window, 'show_account_switch_dialog'):
-            main_window.show_account_switch_dialog()
+        if hasattr(main_window, 'show_account_management_screen'):
+            main_window.show_account_management_screen()
