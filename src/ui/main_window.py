@@ -57,9 +57,8 @@ class MainWindow(QMainWindow):
         self.player_window = PlayerWindow()  # Persistent player window
         self.player_window.add_to_favorites.connect(self.add_to_favorites)  # Connect player window favorites signal
         self.expiry_str = ""
-        self.setup_ui()
-        self.load_favorites()
-        self.load_settings()
+        self.setup_ui()  # Ensure UI is set up before loading favorites
+        self.load_favorites()  # Now load favorites after UI is ready
         auto_login_success = False
         if self.current_account and self.current_account in self.accounts:
             acc = self.accounts[self.current_account]
@@ -307,6 +306,7 @@ class MainWindow(QMainWindow):
         self.statusBar.showMessage("Connecting to server...")
         # Recreate all tabs and UI to avoid using deleted widgets
         self.setup_ui()  # This will recreate tabs, home_screen, etc.
+        self.load_favorites()  # Ensure favorites are loaded for the new tab instance
         self.api_client.set_credentials(server, username, password)
         success, data = self.api_client.authenticate()
         expiry_str = ""
@@ -345,39 +345,64 @@ class MainWindow(QMainWindow):
             self.show_login_dialog(account_switch=True)
 
     def load_favorites(self):
-        """Load favorites from file"""
-        self.favorites = load_json_file(FAVORITES_FILE, [])
-        self.favorites_tab.set_favorites(self.favorites)
-    
-    def save_favorites(self):
-        from src.utils.helpers import save_json_file
-        fav_file = self._account_data_key('favorites.json')
-        save_json_file(fav_file, self.favorites)
-    
-    def add_to_favorites(self, item):
-        """Add an item to favorites"""
-        # Check if already in favorites
-        for favorite in self.favorites:
-            if (favorite['stream_type'] == item['stream_type'] and
-                ((item['stream_type'] == 'live' and favorite.get('stream_id') == item.get('stream_id')) or
-                 (item['stream_type'] == 'movie' and favorite.get('stream_id') == item.get('stream_id')) or
-                 (item['stream_type'] == 'series' and favorite.get('episode_id') == item.get('episode_id')))):
-                self.statusBar.showMessage(f"{item['name']} is already in your favorites", 3000)
-                return
-        
-        # Add to favorites
-        self.favorites.append(item)
-        self.favorites_tab.set_favorites(self.favorites)
-        self.save_favorites()
-        
-        self.statusBar.showMessage(f"{item['name']} has been added to your favorites", 3000)  # Show for 3 seconds
-    
-    def remove_from_favorites(self, index):
-        """Remove an item from favorites"""
-        if 0 <= index < len(self.favorites):
-            del self.favorites[index]
+        """Load favorites from file with error handling"""
+        try:
+            data = load_json_file(FAVORITES_FILE, default={})
+            if isinstance(data, dict):
+                self.favorites_by_account = data
+                self.favorites = data.get(self.current_account, [])
+            elif isinstance(data, list):
+                # Legacy: if file is a list, treat as favorites for current account
+                self.favorites_by_account = {self.current_account: data}
+                self.favorites = data
+            else:
+                self.favorites_by_account = {}
+                self.favorites = []
+        except Exception as e:
+            QMessageBox.warning(self, "Favorites Error", f"Failed to load favorites: {e}\nFavorites will be reset.")
+            self.favorites_by_account = {}
+            self.favorites = []
+        print(f"[DEBUG] Loaded favorites for account '{self.current_account}': {self.favorites}")
+        if hasattr(self, 'favorites_tab'):
             self.favorites_tab.set_favorites(self.favorites)
-            self.save_favorites()
+
+    def save_favorites(self):
+        """Save favorites to file, keyed by account"""
+        if not hasattr(self, 'favorites_by_account'):
+            self.favorites_by_account = {}
+        self.favorites_by_account[self.current_account] = self.favorites
+        save_json_file(FAVORITES_FILE, self.favorites_by_account)
+
+    def add_to_favorites(self, item):
+        """Add an item to favorites for the current account"""
+        if not hasattr(self, 'favorites'):
+            self.favorites = []
+        # Avoid duplicates by stream_id
+        if any(f.get('stream_id') == item.get('stream_id') for f in self.favorites):
+            QMessageBox.information(self, "Favorites", "Already in favorites.")
+            return
+        self.favorites.append(item)
+        if hasattr(self, 'favorites_tab'):
+            self.favorites_tab.set_favorites(self.favorites)
+        self.save_favorites()
+        #QMessageBox.information(self, "Favorites", f"Added '{item.get('name', 'Item')}' to favorites.")
+
+    def remove_from_favorites(self, index):
+        """Remove an item from favorites for the current account"""
+        if not hasattr(self, 'favorites') or index < 0 or index >= len(self.favorites):
+            return
+        removed = self.favorites.pop(index)
+        if hasattr(self, 'favorites_tab'):
+            self.favorites_tab.set_favorites(self.favorites)
+        self.save_favorites()
+        QMessageBox.information(self, "Favorites", f"Removed '{removed.get('name', 'Item')}' from favorites.")
+    def switch_account(self, name):
+        """Switch to a different account and reload favorites"""
+        self.current_account = name
+        self.settings.setValue("current_account", name)
+        self.load_favorites()
+        if hasattr(self, 'favorites_tab'):
+            self.favorites_tab.set_favorites(self.favorites)
     
     def load_settings(self):
         """Load application settings"""
@@ -479,15 +504,9 @@ class MainWindow(QMainWindow):
         return f"{self.current_account}_{suffix}" if self.current_account else suffix
 
     def _load_account_data(self):
-        # Load favorites and downloads for the current account
-        from src.utils.helpers import load_json_file
-        fav_file = self._account_data_key('favorites.json')
-        try:
-            self.favorites = load_json_file(fav_file, [])
-        except Exception:
-            self.favorites = []
-        self.favorites_tab.set_favorites(self.favorites)
+        # Load downloads for the current account (favorites are already loaded by load_favorites)
         # TODO: Implement per-account downloads loading if needed
+        pass
 
     def show_home_screen(self):
         """Return to the home screen from any tab"""
