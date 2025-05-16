@@ -3,7 +3,7 @@ Favorites tab for the application
 """
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QLabel)
+                            QLabel, QListWidgetItem)
 from PyQt5.QtCore import Qt, pyqtSignal
 from src.ui.player import MediaPlayer
 
@@ -80,10 +80,22 @@ class FavoritesTab(QWidget):
         self.update_favorites_list()
     
     def update_favorites_list(self):
-        """Update the favorites list widget"""
+        """Update the favorites list widget with icons"""
+        from PyQt5.QtGui import QIcon
         self.favorites_list.clear()
         for favorite in self.favorites:
-            self.favorites_list.addItem(favorite['name'])
+            name = favorite.get('name', '')
+            stream_type = favorite.get('stream_type', '')
+            if stream_type == 'movie':
+                icon = QIcon('assets/movies.png')
+            elif stream_type == 'episode':
+                icon = QIcon('assets/series.png')
+            elif stream_type == 'live':
+                icon = QIcon('assets/live.png')
+            else:
+                icon = QIcon()
+            item = QListWidgetItem(icon, name)
+            self.favorites_list.addItem(item)
     
     def search_favorites(self, text):
         """Search favorites based on input text"""
