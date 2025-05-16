@@ -394,7 +394,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'favorites_tab'):
             self.favorites_tab.set_favorites(self.favorites)
         self.save_favorites()
-        QMessageBox.information(self, "Favorites", f"Removed '{removed.get('name', 'Item')}' from favorites.")
+        #QMessageBox.information(self, "Favorites", f"Removed '{removed.get('name', 'Item')}' from favorites.")
     def switch_account(self, name):
         """Switch to a different account and reload favorites"""
         self.current_account = name
