@@ -57,8 +57,7 @@ class MainWindow(QMainWindow):
         self.player_window = PlayerWindow()  # Persistent player window
         self.player_window.add_to_favorites.connect(self.add_to_favorites)  # Connect player window favorites signal
         self.expiry_str = ""
-        self.setup_ui()  # Ensure UI is set up before loading favorites
-        self.load_favorites()  # Now load favorites after UI is ready
+        self.setup_ui()  # Only call setup_ui here
         auto_login_success = False
         if self.current_account and self.current_account in self.accounts:
             acc = self.accounts[self.current_account]
