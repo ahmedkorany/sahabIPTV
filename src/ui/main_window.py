@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self.accounts = self.settings.value("accounts", {}, type=dict)
         self.current_account = self.settings.value("current_account", "", type=str)
         self.player_window = PlayerWindow()  # Persistent player window
+        self.player_window.add_to_favorites.connect(self.add_to_favorites)  # Connect player window favorites signal
         self.expiry_str = ""
         self.setup_ui()
         self.load_favorites()
@@ -361,7 +362,7 @@ class MainWindow(QMainWindow):
                 ((item['stream_type'] == 'live' and favorite.get('stream_id') == item.get('stream_id')) or
                  (item['stream_type'] == 'movie' and favorite.get('stream_id') == item.get('stream_id')) or
                  (item['stream_type'] == 'series' and favorite.get('episode_id') == item.get('episode_id')))):
-                QMessageBox.information(self, "Already in Favorites", f"{item['name']} is already in your favorites")
+                self.statusBar.showMessage(f"{item['name']} is already in your favorites", 3000)
                 return
         
         # Add to favorites
@@ -369,7 +370,7 @@ class MainWindow(QMainWindow):
         self.favorites_tab.set_favorites(self.favorites)
         self.save_favorites()
         
-        QMessageBox.information(self, "Added to Favorites", f"{item['name']} has been added to your favorites")
+        self.statusBar.showMessage(f"{item['name']} has been added to your favorites", 3000)  # Show for 3 seconds
     
     def remove_from_favorites(self, index):
         """Remove an item from favorites"""

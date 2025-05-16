@@ -110,8 +110,13 @@ class FavoritesTab(QWidget):
         
         favorite = self.favorites[index]
         
+        stream_url = favorite.get('stream_url')
+        stream_id = favorite.get('stream_id')
+        container_extension = favorite.get('container_extension')
+        if not stream_url:
+            stream_url = self.api_client.get_movie_url(stream_id, container_extension)
         # Play the stream
-        self.player.play(favorite['stream_url'])
+        self.player.play(stream_url, favorite)
     
     def remove_favorite(self):
         """Remove the selected favorite"""

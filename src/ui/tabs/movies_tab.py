@@ -43,15 +43,15 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     def worker():
         from PyQt5.QtGui import QPixmap
-        print(f"[DEBUG] Start loading image: {image_url}")
+       # print(f"[DEBUG] Start loading image: {image_url}")
         if main_window and hasattr(main_window, 'loading_icon_controller'):
             main_window.loading_icon_controller.show_icon.emit()
         pix = QPixmap()
         if os.path.exists(cache_path):
-            print(f"[DEBUG] Image found in cache: {cache_path}")
+            #print(f"[DEBUG] Image found in cache: {cache_path}")
             pix.load(cache_path)
         else:
-            print(f"[DEBUG] Downloading image: {image_url}")
+            #print(f"[DEBUG] Downloading image: {image_url}")
             image_data = None
             api_client = get_api_client_from_label(label, main_window)
             try:
@@ -66,7 +66,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                 if loaded and not pix.isNull():
                     try:
                         saved = pix.save(cache_path)
-                        print(f"[DEBUG] Image downloaded and cached: {cache_path}, save result: {saved}")
+                        #print(f"[DEBUG] Image downloaded and cached: {cache_path}, save result: {saved}")
                     except Exception as e:
                         print(f"[DEBUG] Error saving image to cache: {e}")
                 else:
@@ -81,7 +81,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         else:
             if main_window and hasattr(main_window, 'loading_icon_controller'):
                 main_window.loading_icon_controller.hide_icon.emit()
-        print(f"[DEBUG] Finished loading image: {image_url}")
+        #print(f"[DEBUG] Finished loading image: {image_url}")
     # Set cached or placeholder immediately
     if os.path.exists(cache_path):
         pix = QPixmap()
@@ -493,13 +493,13 @@ class MoviesTab(QWidget):
         
         # Fetch detailed metadata
         stream_id = movie.get('stream_id')
-        print(f"Debug: Fetching detailed metadata for stream_id: {stream_id}")  # Log to console for debugging
+        #print(f"Debug: Fetching detailed metadata for stream_id: {stream_id}")  # Log to console for debugging
         try:
             success, vod_info = self.api_client.get_vod_info(stream_id)
             #print(f"Debug: vod_info: {vod_info}")  # Log to console for debugging
             if success and vod_info:
                 movie_info = vod_info['info']
-                print("Detailed Movie info Metadata:", movie_info)  # Log to console for debugging
+                #print("Detailed Movie info Metadata:", movie_info)  # Log to console for debugging
 
                 # Update UI with detailed metadata
                 meta.setText(f"Year: {movie_info.get('releasedate', '--')} \nGenre: {movie_info.get('genre', '--')} \nDuration: {movie_info.get('duration', '--')}")
@@ -529,6 +529,7 @@ class MoviesTab(QWidget):
         self.stacked_widget.setCurrentIndex(0)
 
     def movie_tile_clicked(self, movie):
+        """Handle movie tile click"""
         self.current_movie = movie
         self.show_movie_details(movie)
 
@@ -537,7 +538,14 @@ class MoviesTab(QWidget):
         main_window = self.window()
         from src.ui.widgets.dialogs import MovieDetailsDialog
         dlg = MovieDetailsDialog(movie, self.api_client, parent=self, main_window=main_window)
-        dlg.play_movie()  # Play directly, don't show dialog
+        # Create movie item with necessary information for favorites
+        movie_item = {
+            'name': movie['name'],
+            'stream_id': movie['stream_id'],
+            'container_extension': movie['container_extension'],
+            'stream_type': 'movie'
+        }
+        dlg.play_movie(movie_item)  # Play directly, don't show dialog
 
     def _watch_trailer(self, movie):
         QMessageBox.information(self, "Trailer", "Trailer playback not implemented.")
@@ -595,7 +603,14 @@ class MoviesTab(QWidget):
 
     def movie_double_clicked(self, item):
         """Handle movie double-click"""
-        self.play_movie()
+        movie_item = {
+            'name': item['name'],
+            'stream_id': item['stream_id'],
+            'container_extension': item['container_extension'],
+            'stream_url': item['stream_url'],
+            'stream_type': 'movie'
+        }
+        self.play_movie(movie_item)
     
     def play_movie(self):
         if(self.player.play_started == False):
@@ -738,5 +753,7 @@ class MoviesTab(QWidget):
         if not self.current_movie:
             QMessageBox.warning(self, "Error", "No movie is playing")
             return
-        
-        self.add_to_favorites.emit(self.current_movie)
+        movie = dict(self.current_movie)
+        if 'name' not in movie:
+            movie['name'] = movie.get('title', 'Movie')
+        self.add_to_favorites.emit(movie)

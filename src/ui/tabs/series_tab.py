@@ -36,15 +36,15 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     def worker():
         from PyQt5.QtGui import QPixmap
-        print(f"[DEBUG] Start loading image: {image_url}")
+        #print(f"[DEBUG] Start loading image: {image_url}")
         if main_window and hasattr(main_window, 'loading_icon_controller'):
             main_window.loading_icon_controller.show_icon.emit()
         pix = QPixmap()
         if os.path.exists(cache_path):
-            print(f"[DEBUG] Image found in cache: {cache_path}")
+            #print(f"[DEBUG] Image found in cache: {cache_path}")
             pix.load(cache_path)
         else:
-            print(f"[DEBUG] Downloading image: {image_url}")
+            #print(f"[DEBUG] Downloading image: {image_url}")
             image_data = None
             api_client = get_api_client_from_label(label, main_window)
             try:
@@ -57,7 +57,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
             if image_data:
                 pix.loadFromData(image_data)
                 pix.save(cache_path)
-                print(f"[DEBUG] Image downloaded and cached: {cache_path}")
+                #print(f"[DEBUG] Image downloaded and cached: {cache_path}")
         if not pix or pix.isNull():
             pix = default_pixmap
         QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
@@ -68,7 +68,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         else:
             if main_window and hasattr(main_window, 'loading_icon_controller'):
                 main_window.loading_icon_controller.hide_icon.emit()
-        print(f"[DEBUG] Finished loading image: {image_url}")
+        #print(f"[DEBUG] Finished loading image: {image_url}")
     # Set cached or placeholder immediately
     if os.path.exists(cache_path):
         pix = QPixmap()
@@ -320,13 +320,13 @@ class SeriesTab(QWidget):
 
         # Fetch detailed metadata
         series_id = series.get('series_id')
-        print(f"Debug: Fetching detailed metadata for series_id: {series_id}")  # Log to console for debugging
+        #print(f"Debug: Fetching detailed metadata for series_id: {series_id}")  # Log to console for debugging
         try:
             success, series_info = self.api_client.get_series_info(series_id)
-            print(f"Debug: series_info: {series_info}")  # Log to console for debugging
+            #print(f"Debug: series_info: {series_info}")  # Log to console for debugging
             if success and series_info:
                 info = series_info['info']
-                print("Detailed Series Metadata:", info)  # Log to console for debugging
+                #print("Detailed Series Metadata:", info)  # Log to console for debugging
 
                 # Update UI with detailed metadata
                 meta.setText(f"Year: {info.get('releaseDate', '--')} | Genre: {info.get('genre', '--')}")
@@ -386,7 +386,21 @@ class SeriesTab(QWidget):
             # Use the correct method for series/episodes
             stream_url = self.api_client.get_series_url(stream_id, container_extension)
             if stream_url:
-                main_window.player_window.play(stream_url)
+                self.current_episode = ep  # Track the current episode for favorites
+                self.current_series = getattr(self, 'current_series', None) or getattr(self, 'series', None)
+                self.episode_num = getattr(self, 'episode_num', None) or getattr(self, 'episode', None)
+                self.season = getattr(self, 'season_num', None) or getattr(self, 'season', None)
+                episode_item = {
+                    'name': f"{self.current_series['name']}-{self.current_episode['title']}",
+                    'stream_id': stream_id,
+                    'stream_url': stream_url,
+                    'container_extension': container_extension,
+                    'stream_type': 'episode'
+                }
+                main_window.player_window.play(stream_url, episode_item)
+                # Provide the current episode to the player window for favorites context
+                if hasattr(main_window.player_window, 'set_current_episode'):
+                    main_window.player_window.set_current_episode(ep)
             else:
                 QMessageBox.warning(self, "Error", "Unable to get episode stream URL.")
         else:
@@ -774,11 +788,19 @@ class SeriesTab(QWidget):
     
     def add_to_favorites_clicked(self):
         """Add current episode to favorites"""
-        if not self.current_episode:
-            QMessageBox.warning(self, "Error", "No episode is playing")
-            return
-        
-        self.add_to_favorites.emit(self.current_episode)
+        episode = dict(self.current_episode)
+        if 'name' not in episode:
+            # Use title, season, and episode number for name
+            title = episode.get('title', episode.get('name', 'Episode'))
+            season = episode.get('season') or episode.get('season_number')
+            episode_num = episode.get('episode_num')
+            # Fallback to series name if available
+            series_name = self.current_series['name'] if hasattr(self, 'current_series') and self.current_series else ''
+            if series_name:
+                episode['name'] = f"{series_name} - {title} S{season}E{episode_num}" if season and episode_num else f"{series_name} - {title}"
+            else:
+                episode['name'] = f"{title} S{season}E{episode_num}" if season and episode_num else title
+        self.add_to_favorites.emit(episode)
 
     # --- Pagination for series grid ---
     def setup_pagination_controls(self):

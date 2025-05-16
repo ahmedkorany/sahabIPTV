@@ -45,15 +45,15 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     def worker():
         from PyQt5.QtGui import QPixmap
-        print(f"[DEBUG] Start loading image: {image_url}")
+        #print(f"[DEBUG] Start loading image: {image_url}")
         if main_window and hasattr(main_window, 'loading_icon_controller'):
             main_window.loading_icon_controller.show_icon.emit()
         pix = QPixmap()
         if os.path.exists(cache_path):
-            print(f"[DEBUG] Image found in cache: {cache_path}")
+            #print(f"[DEBUG] Image found in cache: {cache_path}")
             pix.load(cache_path)
         else:
-            print(f"[DEBUG] Downloading image: {image_url}")
+            #print(f"[DEBUG] Downloading image: {image_url}")
             image_data = None
             api_client = get_api_client_from_label(label, main_window)
             try:
@@ -66,7 +66,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
             if image_data:
                 pix.loadFromData(image_data)
                 pix.save(cache_path)
-                print(f"[DEBUG] Image downloaded and cached: {cache_path}")
+                #print(f"[DEBUG] Image downloaded and cached: {cache_path}")
         if not pix or pix.isNull():
             pix = default_pixmap
         QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
@@ -341,7 +341,7 @@ class LiveTab(QWidget):
         try:
             if main_window and hasattr(main_window, 'player_window'):
                 player_window = main_window.player_window
-                player_window.play(stream_url)
+                player_window.play(stream_url, self.current_channel)
                 player_window.show()
                 player_window.raise_()
                 player_window.activateWindow()
@@ -409,8 +409,10 @@ class LiveTab(QWidget):
         if not self.current_channel:
             QMessageBox.warning(self, "Error", "No channel is playing")
             return
-        
-        self.add_to_favorites.emit(self.current_channel)
+        channel = dict(self.current_channel)
+        if 'name' not in channel:
+            channel['name'] = channel.get('title', channel.get('name', 'Channel'))
+        self.add_to_favorites.emit(channel)
 
     def update_pagination_controls(self):
         if self.total_pages > 1:

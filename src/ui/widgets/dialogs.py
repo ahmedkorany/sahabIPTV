@@ -348,8 +348,8 @@ class MovieDetailsDialog(QDialog):
         right_layout.addLayout(btn_layout)
         layout.addLayout(right_layout)
 
-    def play_movie(self):
-        stream_id = self.movie.get('stream_id')
+    def play_movie(self, movie_item):
+        stream_id = movie_item.get('stream_id')
         container_extension = "mp4"
         try:
             success, vod_info = self.api_client.get_vod_info(stream_id)
@@ -363,7 +363,8 @@ class MovieDetailsDialog(QDialog):
             # Use the persistent player window from MainWindow
             if self.main_window and hasattr(self.main_window, 'player_window'):
                 player_window = self.main_window.player_window
-                player_window.play(stream_url)
+                # Pass the movie item to the player so it can handle favorites
+                player_window.play(stream_url, movie_item)
                 player_window.show()
                 self.hide()
             else:
