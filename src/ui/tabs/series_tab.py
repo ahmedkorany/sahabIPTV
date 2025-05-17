@@ -7,9 +7,10 @@ import hashlib
 import threading
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget)
+                            QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QStackedLayout)
 from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, Q_ARG
 from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtSvg import QSvgWidget
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
@@ -421,7 +422,10 @@ class SeriesTab(QWidget):
             self.categories_list.addItem(all_item)
             for category in data:
                 count = category.get('num', '')
-                item = QListWidgetItem(f"{category['category_name']} ({count})")
+                if count and str(count).strip() not in ('', '0'):
+                    item = QListWidgetItem(f"{category['category_name']} ({count})")
+                else:
+                    item = QListWidgetItem(f"{category['category_name']}")
                 item.setData(Qt.UserRole, category['category_id'])
                 self.categories_list.addItem(item)
         else:
@@ -463,7 +467,22 @@ class SeriesTab(QWidget):
         for series in series_list:
             tile = QFrame()
             tile.setFrameShape(QFrame.StyledPanel)
-            # Recently added indicator
+            tile.setStyleSheet("background: #222; border-radius: 12px;")
+            tile_layout = QVBoxLayout(tile)
+            tile_layout.setContentsMargins(0, 0, 0, 0)
+            tile_layout.setSpacing(0)
+            # Series poster with overlay using absolute positioning
+            poster_container = QWidget()
+            poster_container.setFixedSize(100, 140)
+            poster = QLabel(poster_container)
+            poster.setAlignment(Qt.AlignCenter)
+            poster.setGeometry(0, 0, 100, 140)
+            default_pix = QPixmap('assets/series.png')
+            if series.get('cover'):
+                load_image_async(series['cover'], poster, default_pix, update_size=(100, 140), main_window=main_window, loading_counter=loading_counter)
+            else:
+                poster.setPixmap(default_pix.scaled(100, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            # Overlay 'new.png' if the series is new
             is_recent = False
             if series.get('added'):
                 from datetime import datetime, timedelta
@@ -473,18 +492,13 @@ class SeriesTab(QWidget):
                         is_recent = True
                 except Exception:
                     pass
-            tile.setStyleSheet("background: #222; border-radius: 12px;" + ("border: 2px solid #00e676;" if is_recent else ""))
-            tile_layout = QVBoxLayout(tile)
-            # Series poster
-            poster = QLabel()
-            poster.setAlignment(Qt.AlignCenter)
-            default_pix = QPixmap('assets/series.png')
-            # Show cached or placeholder immediately, then load async
-            if series.get('cover'):
-                load_image_async(series['cover'], poster, default_pix, update_size=(100, 140), main_window=main_window, loading_counter=loading_counter)
-            else:
-                poster.setPixmap(default_pix.scaled(100, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            tile_layout.addWidget(poster)
+            if is_recent:
+                new_icon = QLabel(poster_container)
+                new_icon.setPixmap(QPixmap('assets/new.png').scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                new_icon.setStyleSheet("background: transparent;")
+                new_icon.move(0, 0)
+                new_icon.raise_()
+            tile_layout.addWidget(poster_container, alignment=Qt.AlignCenter)
             # Series name
             name = QLabel(series['name'])
             name.setAlignment(Qt.AlignCenter)
@@ -498,12 +512,6 @@ class SeriesTab(QWidget):
                 rating.setAlignment(Qt.AlignCenter)
                 rating.setStyleSheet("color: gold;")
                 tile_layout.addWidget(rating)
-            # Recently added label
-            if is_recent:
-                recent_label = QLabel("NEW")
-                recent_label.setAlignment(Qt.AlignCenter)
-                recent_label.setStyleSheet("color: #00e676; font-weight: bold;")
-                tile_layout.addWidget(recent_label)
             tile.mousePressEvent = lambda e, s=series: self.series_tile_clicked(s)
             self.series_grid_layout.addWidget(tile, row, col)
             col += 1

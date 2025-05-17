@@ -203,7 +203,10 @@ class LiveTab(QWidget):
             self.categories = data
             for category in data:
                 count = category.get('num', '')
-                item = QListWidgetItem(f"{category['category_name']} ({count})")
+                if count and str(count).strip() not in ('', '0'):
+                    item = QListWidgetItem(f"{category['category_name']} ({count})")
+                else:
+                    item = QListWidgetItem(f"{category['category_name']}")
                 item.setData(Qt.UserRole, category['category_id'])
                 self.categories_list.addItem(item)
         else:

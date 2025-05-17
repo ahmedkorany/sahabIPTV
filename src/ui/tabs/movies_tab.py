@@ -5,7 +5,7 @@ import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QProgressBar, QHeaderView, 
-                            QTableWidget, QTableWidgetItem, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
+                            QTableWidget, QTableWidgetItem, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedLayout)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer
@@ -18,6 +18,7 @@ import threading
 from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
 import os
 from src.utils.image_cache import ensure_cache_dir, get_cache_path
+from PyQt5.QtSvg import QSvgWidget
 
 CACHE_DIR = 'assets/cache/'
 LOADING_ICON = 'assets/loading.gif'
@@ -315,7 +316,10 @@ class MoviesTab(QWidget):
             self.categories_list.addItem(all_item)
             for category in data:
                 count = category.get('num', '')
-                item = QListWidgetItem(f"{category['category_name']} ({count})")
+                if count and str(count).strip() not in ('', '0'):
+                    item = QListWidgetItem(f"{category['category_name']} ({count})")
+                else:
+                    item = QListWidgetItem(f"{category['category_name']}")
                 item.setData(Qt.UserRole, category['category_id'])
                 self.categories_list.addItem(item)
         else:
@@ -358,7 +362,22 @@ class MoviesTab(QWidget):
         for movie in movies:
             tile = QFrame()
             tile.setFrameShape(QFrame.StyledPanel)
-            # Recently added indicator
+            tile.setStyleSheet("background: #222; border-radius: 12px;")
+            tile_layout = QVBoxLayout(tile)
+            tile_layout.setContentsMargins(0, 0, 0, 0)
+            tile_layout.setSpacing(0)
+            # Movie poster with overlay using absolute positioning
+            poster_container = QWidget()
+            poster_container.setFixedSize(100, 140)
+            poster = QLabel(poster_container)
+            poster.setAlignment(Qt.AlignCenter)
+            poster.setGeometry(0, 0, 100, 140)
+            default_pix = QPixmap('assets/movies.png')
+            if movie.get('stream_icon'):
+                load_image_async(movie['stream_icon'], poster, default_pix, update_size=(100, 140), main_window=main_window)
+            else:
+                poster.setPixmap(default_pix.scaled(100, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            # Overlay 'new.png' if the movie is new
             is_recent = False
             if movie.get('added'):
                 from datetime import datetime, timedelta
@@ -368,18 +387,13 @@ class MoviesTab(QWidget):
                         is_recent = True
                 except Exception:
                     pass
-            tile.setStyleSheet("background: #222; border-radius: 12px;" + ("border: 2px solid #00e676;" if is_recent else ""))
-            tile_layout = QVBoxLayout(tile)
-            # Movie poster
-            poster = QLabel()
-            poster.setAlignment(Qt.AlignCenter)
-            default_pix = QPixmap('assets/movies.png')
-            # Show cached or placeholder immediately, then load async
-            if movie.get('stream_icon'):
-                load_image_async(movie['stream_icon'], poster, default_pix, update_size=(100, 140), main_window=main_window)
-            else:
-                poster.setPixmap(default_pix.scaled(100, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            tile_layout.addWidget(poster)
+            if is_recent:
+                new_icon = QLabel(poster_container)
+                new_icon.setPixmap(QPixmap('assets/new.png').scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                new_icon.setStyleSheet("background: transparent;")
+                new_icon.move(0, 0)
+                new_icon.raise_()
+            tile_layout.addWidget(poster_container, alignment=Qt.AlignCenter)
             # Movie name
             name = QLabel(movie['name'])
             name.setAlignment(Qt.AlignCenter)
@@ -393,12 +407,6 @@ class MoviesTab(QWidget):
                 rating.setAlignment(Qt.AlignCenter)
                 rating.setStyleSheet("color: gold;")
                 tile_layout.addWidget(rating)
-            # Recently added label
-            if is_recent:
-                recent_label = QLabel("NEW")
-                recent_label.setAlignment(Qt.AlignCenter)
-                recent_label.setStyleSheet("color: #00e676; font-weight: bold;")
-                tile_layout.addWidget(recent_label)
             tile.mousePressEvent = lambda e, mv=movie: self.movie_tile_clicked(mv)
             self.movie_grid_layout.addWidget(tile, row, col)
             col += 1
