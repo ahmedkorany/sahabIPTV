@@ -509,4 +509,12 @@ class MainWindow(QMainWindow):
 
     def show_home_screen(self):
         """Return to the home screen from any tab"""
+        # Always create a new HomeScreenWidget to avoid using a deleted instance
+        from src.ui.widgets.home_screen import HomeScreenWidget
+        self.home_screen = HomeScreenWidget(
+            parent=self,
+            on_tile_clicked=self.handle_home_tile_clicked,
+            user_info={'username': self.current_account or ''},
+            expiry_date=getattr(self, 'expiry_str', None)
+        )
         self.setCentralWidget(self.home_screen)
