@@ -315,25 +315,20 @@ class SeriesTab(QWidget):
         self.play_episode_btn.clicked.connect(self.play_selected_episode)
         right_layout.addWidget(self.play_episode_btn)
         self.episodes_list.currentItemChanged.connect(self.update_play_button_state)
-        layout.addLayout(right_layout)
-        # Load seasons for this series
-        self.load_seasons(series['series_id'])
 
-        # Fetch detailed metadata
+        # --- Add trailer button if available ---
+        trailer_url = series.get('trailer_url')
+        # Try to get trailer_url from detailed info if not present
         series_id = series.get('series_id')
-        #print(f"Debug: Fetching detailed metadata for series_id: {series_id}")  # Log to console for debugging
         try:
             success, series_info = self.api_client.get_series_info(series_id)
-            #print(f"Debug: series_info: {series_info}")  # Log to console for debugging
             if success and series_info:
-                info = series_info['info']
-                #print("Detailed Series Metadata:", info)  # Log to console for debugging
-
-                # Update UI with detailed metadata
+                info = series_info.get('info', {})
+                if not trailer_url:
+                    trailer_url = info.get('trailer_url')
+                # ...existing code for updating meta, desc, poster...
                 meta.setText(f"Year: {info.get('releaseDate', '--')} | Genre: {info.get('genre', '--')}")
                 desc.setPlainText(info.get('plot', ''))
-
-                # Update poster if available
                 if 'cover' in info:
                     image_data = self.api_client.get_image_data(info['cover'])
                     if image_data:
@@ -344,7 +339,25 @@ class SeriesTab(QWidget):
         except Exception as e:
             print("Error fetching detailed metadata:", e)
 
+        # Add trailer button if trailer_url is available
+        if trailer_url:
+            trailer_btn = QPushButton("WATCH TRAILER")
+            trailer_btn.clicked.connect(lambda: self._play_trailer(trailer_url))
+            right_layout.addWidget(trailer_btn)
+
+        layout.addLayout(right_layout)
+        # Load seasons for this series
+        self.load_seasons(series['series_id'])
         return details
+
+    def _play_trailer(self, trailer_url):
+        main_window = self.window()
+        if hasattr(main_window, 'player_window'):
+            player_window = main_window.player_window
+            player_window.play(trailer_url, {'name': 'Trailer', 'stream_type': 'trailer'})
+            player_window.show()
+        else:
+            QMessageBox.warning(self, "Error", "Player window not available.")
 
     def update_play_button_state(self):
         # Enable play button if an episode is selected and set the user role data

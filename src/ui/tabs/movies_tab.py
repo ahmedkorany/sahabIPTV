@@ -493,10 +493,23 @@ class MoviesTab(QWidget):
         btn_layout = QHBoxLayout()
         play_btn = QPushButton("PLAY")
         play_btn.clicked.connect(lambda: self._play_movie_from_details(movie))
-        trailer_btn = QPushButton("WATCH TRAILER")
-        trailer_btn.clicked.connect(lambda: self._watch_trailer(movie))
         btn_layout.addWidget(play_btn)
-        btn_layout.addWidget(trailer_btn)
+        # Show trailer button only if available
+        trailer_url = movie.get('trailer_url')
+        # Try to get trailer_url from detailed info if not present
+        stream_id = movie.get('stream_id')
+        try:
+            success, vod_info = self.api_client.get_vod_info(stream_id)
+            if success and vod_info:
+                movie_info = vod_info.get('info', {})
+                if not trailer_url:
+                    trailer_url = movie_info.get('trailer_url')
+        except Exception:
+            pass
+        if trailer_url:
+            trailer_btn = QPushButton("WATCH TRAILER")
+            trailer_btn.clicked.connect(lambda: self._play_trailer(trailer_url))
+            btn_layout.addWidget(trailer_btn)
         right_layout.addLayout(btn_layout)
         
         # Fetch detailed metadata
@@ -555,8 +568,14 @@ class MoviesTab(QWidget):
         }
         dlg.play_movie(movie_item)  # Play directly, don't show dialog
 
-    def _watch_trailer(self, movie):
-        QMessageBox.information(self, "Trailer", "Trailer playback not implemented.")
+    def _play_trailer(self, trailer_url):
+        main_window = self.window()
+        if hasattr(main_window, 'player_window'):
+            player_window = main_window.player_window
+            player_window.play(trailer_url, {'name': 'Trailer', 'stream_type': 'trailer'})
+            player_window.show()
+        else:
+            QMessageBox.warning(self, "Error", "Player window not available.")
 
     def search_movies(self, text):
         """Search movies based on input text (grid view)"""
