@@ -56,23 +56,37 @@ class AccountManagementScreen(QWidget):
 
     def add_account(self):
         dialog = AccountEditDialog(self, is_edit=False)
-        if dialog.exec_() == dialog.Accepted:
-            data = dialog.get_account_data()
-            name = data['name'].strip()
-            if not name:
-                QMessageBox.warning(self, "Add Account", "Account name cannot be empty.")
-                return
-            if name in self.accounts:
-                QMessageBox.warning(self, "Add Account", "Account already exists.")
-                return
-            self.accounts[name] = {
-                'server': data['server'],
-                'username': data['username'],
-                'password': data['password']
-            }
-            self.main_window.accounts = self.accounts
-            self.main_window.settings.setValue("accounts", self.accounts)
-            self.refresh_list()
+        while True:
+            if dialog.exec_() == dialog.Accepted:
+                data = dialog.get_account_data()
+                name = data['name'].strip()
+                if not name:
+                    QMessageBox.warning(self, "Add Account", "Account name cannot be empty.")
+                    continue
+                if name in self.accounts:
+                    QMessageBox.warning(self, "Add Account", "Account already exists.")
+                    continue
+                # Validate credentials before saving
+                from src.api.xtream import XtreamClient
+                client = XtreamClient()
+                client.set_credentials(data['server'], data['username'], data['password'])
+                success, error = client.authenticate()
+                if not success:
+                    QMessageBox.critical(self, "Add Account", f"Failed to connect: {error}")
+                    # Reopen dialog with previous data for editing
+                    dialog = AccountEditDialog(self, name=data['name'], server=data['server'], username=data['username'], password=data['password'], is_edit=False)
+                    continue
+                self.accounts[name] = {
+                    'server': data['server'],
+                    'username': data['username'],
+                    'password': data['password']
+                }
+                self.main_window.accounts = self.accounts
+                self.main_window.settings.setValue("accounts", self.accounts)
+                self.refresh_list()
+                break
+            else:
+                break
 
     def edit_account(self):
         item = self.list_widget.currentItem()
