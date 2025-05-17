@@ -140,20 +140,25 @@ class AccountManagementScreen(QWidget):
         if name == self.current_account:
             QMessageBox.information(self, "Switch Account", "Already using this account.")
             return
-        self.main_window.current_account = name
-        self.main_window.settings.setValue("current_account", name)
         acc = self.accounts[name]
-        self.main_window.api_client.set_credentials(acc['server'], acc['username'], acc['password'])
-        success, _ = self.main_window.api_client.authenticate()
+        # Validate credentials before switching
+        from src.api.xtream import XtreamClient
+        client = XtreamClient()
+        client.set_credentials(acc['server'], acc['username'], acc['password'])
+        success, error = client.authenticate()
         if success:
+            self.main_window.current_account = name
+            self.main_window.settings.setValue("current_account", name)
+            self.main_window.api_client.set_credentials(acc['server'], acc['username'], acc['password'])
             self.main_window.connect_to_server(acc['server'], acc['username'], acc['password'])
             self.main_window.update_account_label()
             QMessageBox.information(self, "Switch Account", f"Switched to account '{name}'.")
+            self.accounts = self.main_window.accounts
+            self.current_account = self.main_window.current_account
+            self.refresh_list()
         else:
-            QMessageBox.warning(self, "Switch Account", "Authentication failed. Please check credentials.")
-        self.accounts = self.main_window.accounts
-        self.current_account = self.main_window.current_account
-        self.refresh_list()
+            QMessageBox.warning(self, "Switch Account", f"Authentication failed: {error}\nPlease check credentials.")
+        # Do not switch if authentication fails
 
     def go_back(self):
         if hasattr(self.main_window, 'show_home_screen'):
