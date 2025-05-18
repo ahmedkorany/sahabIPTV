@@ -12,6 +12,7 @@ from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
 from src.ui.widgets.dialogs import MovieDetailsDialog
+from src.ui.widgets.movie_details_widget import MovieDetailsWidget
 from PyQt5.QtWidgets import QPushButton
 import hashlib
 import threading
@@ -440,47 +441,70 @@ class MoviesTab(QWidget):
         # Poster
         poster = QLabel()
         poster.setAlignment(Qt.AlignTop)
-        pix = QPixmap()
         if movie.get('stream_icon'):
             load_image_async(movie['stream_icon'], poster, QPixmap('assets/movies.png'), update_size=(180, 260))
         else:
             poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         left_layout.addWidget(poster)
+        # --- Favorites button under poster ---
+        favorite_btn = QPushButton()
+        favorite_btn.setFont(QFont('Arial', 16))
+        favorite_btn.setStyleSheet("QPushButton { background: transparent; }")
+        main_window = getattr(self, 'main_window', None)
+        favs = getattr(main_window, 'favorites', []) if main_window else []
+        def is_favorite():
+            return any(fav.get('stream_id') == movie.get('stream_id') for fav in favs)
+        def update_favorite_btn():
+            if is_favorite():
+                favorite_btn.setText("★")
+                favorite_btn.setStyleSheet("QPushButton { color: gold; background: transparent; }")
+                favorite_btn.setToolTip("Remove from favorites")
+            else:
+                favorite_btn.setText("☆")
+                favorite_btn.setStyleSheet("QPushButton { color: white; background: transparent; }")
+                favorite_btn.setToolTip("Add to favorites")
+        update_favorite_btn()
+        def on_favorite_clicked():
+            if main_window and hasattr(main_window, 'toggle_favorite'):
+                main_window.toggle_favorite(movie)
+            else:
+                if hasattr(self, 'add_to_favorites'):
+                    if not is_favorite():
+                        self.add_to_favorites.emit(movie)
+                    else:
+                        if hasattr(main_window, 'remove_from_favorites') and hasattr(main_window, 'favorites'):
+                            idx = next((i for i, fav in enumerate(main_window.favorites) if fav.get('stream_id') == movie.get('stream_id')), -1)
+                            if idx != -1:
+                                main_window.remove_from_favorites(idx)
+            update_favorite_btn()
+        favorite_btn.clicked.connect(on_favorite_clicked)
+        left_layout.addWidget(favorite_btn, alignment=Qt.AlignHCenter)
         layout.addLayout(left_layout)
         # --- Right: Metadata and actions ---
         right_layout = QVBoxLayout()
-        # Title
         title = QLabel(movie.get('name', ''))
         title.setFont(QFont('Arial', 16, QFont.Bold))
         right_layout.addWidget(title)
-        # Metadata
         meta = QLabel()
         meta.setText(f"Year: {movie.get('year', '--')} | Genre: {movie.get('genre', '--')} | Duration: {movie.get('duration', '--')} min")
         right_layout.addWidget(meta)
-        # Director, cast, rating
         director = movie.get('director', '--')
         cast = movie.get('cast', '--')
         rating = movie.get('rating', '--')
-        right_layout.addWidget(QLabel(f"Director: {director}"))
         if rating and rating != '--':
-            right_layout.addWidget(QLabel(f"★ {rating}"))
-        # Description
+            right_layout.addWidget(QLabel(f"User's rating: ★ {rating}"))
         desc = QTextEdit(movie.get('plot', ''))
         desc.setReadOnly(True)
         desc.setMaximumHeight(80)
         right_layout.addWidget(desc)
-        # Cast photos (if available)
         cast_photos = movie.get('cast_photos', [])
         if cast_photos:
             cast_layout = QHBoxLayout()
             for cast_member in cast_photos:
                 vbox = QVBoxLayout()
                 photo_label = QLabel()
-                photo_pix = QPixmap()
                 if cast_member.get('photo_url'):
                     load_image_async(cast_member['photo_url'], photo_label, QPixmap(), update_size=(48, 48))
-                if not photo_pix.isNull():
-                    photo_label.setPixmap(photo_pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
                 name_label = QLabel(cast_member.get('name', ''))
                 name_label.setAlignment(Qt.AlignCenter)
                 vbox.addWidget(photo_label)
@@ -489,14 +513,11 @@ class MoviesTab(QWidget):
             right_layout.addLayout(cast_layout)
         elif cast and cast != '--':
             right_layout.addWidget(QLabel(f"Cast: {cast}"))
-        # Action buttons
         btn_layout = QHBoxLayout()
         play_btn = QPushButton("PLAY")
         play_btn.clicked.connect(lambda: self._play_movie_from_details(movie))
         btn_layout.addWidget(play_btn)
-        # Show trailer button only if available
         trailer_url = movie.get('trailer_url')
-        # Try to get trailer_url from detailed info if not present
         stream_id = movie.get('stream_id')
         try:
             success, vod_info = self.api_client.get_vod_info(stream_id)
@@ -511,28 +532,17 @@ class MoviesTab(QWidget):
             trailer_btn.clicked.connect(lambda: self._play_trailer(trailer_url))
             btn_layout.addWidget(trailer_btn)
         right_layout.addLayout(btn_layout)
-        
         # Fetch detailed metadata
-        stream_id = movie.get('stream_id')
-        #print(f"Debug: Fetching detailed metadata for stream_id: {stream_id}")  # Log to console for debugging
         try:
             success, vod_info = self.api_client.get_vod_info(stream_id)
-            #print(f"Debug: vod_info: {vod_info}")  # Log to console for debugging
             if success and vod_info:
                 movie_info = vod_info['info']
-                #print("Detailed Movie info Metadata:", movie_info)  # Log to console for debugging
-
-                # Update UI with detailed metadata
                 meta.setText(f"Year: {movie_info.get('releasedate', '--')} \nGenre: {movie_info.get('genre', '--')} \nDuration: {movie_info.get('duration', '--')}")
                 director = movie_info.get('director', '--')
                 cast = ', '.join(movie_info.get('cast', [])) if isinstance(movie_info.get('cast'), list) else movie_info.get('cast', '--')
                 desc.setPlainText(movie_info.get('plot', ''))
-
-                # Update director and cast labels
                 right_layout.addWidget(QLabel(f"Director: {director}"))
                 right_layout.addWidget(QLabel(f"Cast: {cast}"))
-
-                # Update poster if available
                 if 'movie_image' in vod_info['info']:
                     image_data = self.api_client.get_image_data(vod_info['info']['movie_image'])
                     if image_data:
@@ -542,7 +552,6 @@ class MoviesTab(QWidget):
                             poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         except Exception as e:
             print("Error fetching detailed metadata:", e)
-        
         layout.addLayout(right_layout)
         return details
 

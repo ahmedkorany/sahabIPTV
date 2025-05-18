@@ -293,6 +293,42 @@ class MovieDetailsDialog(QDialog):
         if not pix.isNull():
             poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         layout.addWidget(poster)
+        # --- Favorites button under poster ---
+        favorite_btn = QPushButton()
+        favorite_btn.setFont(QFont('Arial', 16))
+        favorite_btn.setStyleSheet("QPushButton { background: transparent; }")
+        # Determine favorite state
+        is_favorite = False
+        main_window = self.main_window if hasattr(self, 'main_window') else None
+        if main_window and hasattr(main_window, 'favorites'):
+            favs = main_window.favorites
+            is_favorite = any(fav.get('stream_id') == self.movie.get('stream_id') for fav in favs)
+        def update_favorite_btn():
+            if is_favorite:
+                favorite_btn.setText("★")
+                favorite_btn.setStyleSheet("QPushButton { color: gold; background: transparent; }")
+                favorite_btn.setToolTip("Remove from favorites")
+            else:
+                favorite_btn.setText("☆")
+                favorite_btn.setStyleSheet("QPushButton { color: white; background: transparent; }")
+                favorite_btn.setToolTip("Add to favorites")
+        update_favorite_btn()
+        def on_favorite_clicked():
+            nonlocal is_favorite
+            if main_window and hasattr(main_window, 'toggle_favorite'):
+                main_window.toggle_favorite(self.movie)
+            else:
+                # Fallback: emit signal if available
+                if hasattr(self, 'add_to_favorites'):
+                    if not is_favorite:
+                        self.add_to_favorites.emit(self.movie)
+                    else:
+                        if hasattr(main_window, 'remove_from_favorites'):
+                            main_window.remove_from_favorites(self.movie)
+            is_favorite = not is_favorite
+            update_favorite_btn()
+        favorite_btn.clicked.connect(on_favorite_clicked)
+        layout.addWidget(favorite_btn)
         # Metadata and actions
         right_layout = QVBoxLayout()
         # Title
