@@ -13,87 +13,18 @@ from src.utils.download import DownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
 from src.ui.widgets.dialogs import MovieDetailsDialog
 from src.ui.widgets.movie_details_widget import MovieDetailsWidget
+from src.utils.helpers import load_image_async # Ensure it's imported if used elsewhere in this file
 from PyQt5.QtWidgets import QPushButton
 import hashlib
-import threading
-from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
+# import threading # No longer needed here if load_image_async is moved
+# from PyQt5.QtCore import QMetaObject, Qt, Q_ARG # No longer needed here
 import os
-from src.utils.image_cache import ensure_cache_dir, get_cache_path
+# from src.utils.image_cache import ensure_cache_dir, get_cache_path # No longer needed here
+from src.utils.helpers import load_image_async # Import from helpers
 from PyQt5.QtSvg import QSvgWidget
 
 CACHE_DIR = 'assets/cache/'
 LOADING_ICON = 'assets/loading.gif'
-
-def get_api_client_from_label(label, main_window):
-    # Try to get api_client from main_window, fallback to traversing parents
-    if main_window and hasattr(main_window, 'api_client'):
-        return main_window.api_client
-    # Fallback: traverse up the parent chain
-    parent = label.parent()
-    for _ in range(5):
-        if parent is None:
-            break
-        if hasattr(parent, 'api_client'):
-            return parent.api_client
-        parent = parent.parent() if hasattr(parent, 'parent') else None
-    return None
-
-def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
-    ensure_cache_dir()
-    cache_path = get_cache_path(image_url)
-    def set_pixmap(pixmap):
-        label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-    def worker():
-        from PyQt5.QtGui import QPixmap
-       # print(f"[DEBUG] Start loading image: {image_url}")
-        if main_window and hasattr(main_window, 'loading_icon_controller'):
-            main_window.loading_icon_controller.show_icon.emit()
-        pix = QPixmap()
-        if os.path.exists(cache_path):
-            #print(f"[DEBUG] Image found in cache: {cache_path}")
-            pix.load(cache_path)
-        else:
-            #print(f"[DEBUG] Downloading image: {image_url}")
-            image_data = None
-            api_client = get_api_client_from_label(label, main_window)
-            try:
-                if api_client:
-                    image_data = api_client.get_image_data(image_url)
-                else:
-                    print("[DEBUG] Could not find api_client for image download!")
-            except Exception as e:
-                print(f"[DEBUG] Error downloading image: {e}")
-            if image_data:
-                loaded = pix.loadFromData(image_data)
-                if loaded and not pix.isNull():
-                    try:
-                        saved = pix.save(cache_path)
-                        #print(f"[DEBUG] Image downloaded and cached: {cache_path}, save result: {saved}")
-                    except Exception as e:
-                        print(f"[DEBUG] Error saving image to cache: {e}")
-                else:
-                    print(f"[DEBUG] Failed to load image from data for: {image_url}")
-        if not pix or pix.isNull():
-            pix = default_pixmap
-        QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
-        if loading_counter is not None:
-            loading_counter['count'] -= 1
-            if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
-                main_window.loading_icon_controller.hide_icon.emit()
-        else:
-            if main_window and hasattr(main_window, 'loading_icon_controller'):
-                main_window.loading_icon_controller.hide_icon.emit()
-        #print(f"[DEBUG] Finished loading image: {image_url}")
-    # Set cached or placeholder immediately
-    if os.path.exists(cache_path):
-        pix = QPixmap()
-        pix.load(cache_path)
-        set_pixmap(pix)
-    else:
-        set_pixmap(default_pixmap)
-        if loading_counter is not None:
-            loading_counter['count'] += 1
-        threading.Thread(target=worker, daemon=True).start()
 
 class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):
@@ -421,139 +352,19 @@ class MoviesTab(QWidget):
             self.stacked_widget.removeWidget(self.details_widget)
             self.details_widget.deleteLater()
             self.details_widget = None
-        # Create a new details widget (not a dialog)
-        self.details_widget = self._create_details_widget(movie)
+        # Create a new details widget using MovieDetailsWidget
+        self.details_widget = MovieDetailsWidget(
+            movie,
+            api_client=self.api_client,
+            main_window=self.main_window,
+            parent=self
+        )
+        self.details_widget.back_btn.clicked.connect(self.show_movie_grid)
+        self.details_widget.play_clicked.connect(self._play_movie_from_details)
+        self.details_widget.trailer_clicked.connect(self._play_trailer)
+        self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
         self.stacked_widget.addWidget(self.details_widget)
         self.stacked_widget.setCurrentWidget(self.details_widget)
-
-    def _create_details_widget(self, movie):
-        from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QTextEdit
-        from PyQt5.QtGui import QPixmap, QFont
-        details = QWidget()
-        layout = QHBoxLayout(details)
-        # --- Left: Poster and Back button ---
-        left_layout = QVBoxLayout()
-        # Back button at the top of the poster list
-        back_btn = QPushButton("← Back")
-        back_btn.setFixedWidth(80)
-        back_btn.clicked.connect(self.show_movie_grid)
-        left_layout.addWidget(back_btn, alignment=Qt.AlignLeft)
-        # Poster
-        poster = QLabel()
-        poster.setAlignment(Qt.AlignTop)
-        if movie.get('stream_icon'):
-            load_image_async(movie['stream_icon'], poster, QPixmap('assets/movies.png'), update_size=(180, 260))
-        else:
-            poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        left_layout.addWidget(poster)
-        # --- Favorites button under poster ---
-        favorite_btn = QPushButton()
-        favorite_btn.setFont(QFont('Arial', 16))
-        favorite_btn.setStyleSheet("QPushButton { background: transparent; }")
-        main_window = getattr(self, 'main_window', None)
-        favs = getattr(main_window, 'favorites', []) if main_window else []
-        def is_favorite():
-            return any(fav.get('stream_id') == movie.get('stream_id') for fav in favs)
-        def update_favorite_btn():
-            if is_favorite():
-                favorite_btn.setText("★")
-                favorite_btn.setStyleSheet("QPushButton { color: gold; background: transparent; }")
-                favorite_btn.setToolTip("Remove from favorites")
-            else:
-                favorite_btn.setText("☆")
-                favorite_btn.setStyleSheet("QPushButton { color: white; background: transparent; }")
-                favorite_btn.setToolTip("Add to favorites")
-        update_favorite_btn()
-        def on_favorite_clicked():
-            if main_window and hasattr(main_window, 'toggle_favorite'):
-                main_window.toggle_favorite(movie)
-            else:
-                if hasattr(self, 'add_to_favorites'):
-                    if not is_favorite():
-                        self.add_to_favorites.emit(movie)
-                    else:
-                        if hasattr(main_window, 'remove_from_favorites') and hasattr(main_window, 'favorites'):
-                            idx = next((i for i, fav in enumerate(main_window.favorites) if fav.get('stream_id') == movie.get('stream_id')), -1)
-                            if idx != -1:
-                                main_window.remove_from_favorites(idx)
-            update_favorite_btn()
-        favorite_btn.clicked.connect(on_favorite_clicked)
-        left_layout.addWidget(favorite_btn, alignment=Qt.AlignHCenter)
-        layout.addLayout(left_layout)
-        # --- Right: Metadata and actions ---
-        right_layout = QVBoxLayout()
-        title = QLabel(movie.get('name', ''))
-        title.setFont(QFont('Arial', 16, QFont.Bold))
-        right_layout.addWidget(title)
-        meta = QLabel()
-        meta.setText(f"Year: {movie.get('year', '--')} | Genre: {movie.get('genre', '--')} | Duration: {movie.get('duration', '--')} min")
-        right_layout.addWidget(meta)
-        director = movie.get('director', '--')
-        cast = movie.get('cast', '--')
-        rating = movie.get('rating', '--')
-        if rating and rating != '--':
-            right_layout.addWidget(QLabel(f"User's rating: ★ {rating}"))
-        desc = QTextEdit(movie.get('plot', ''))
-        desc.setReadOnly(True)
-        desc.setMaximumHeight(80)
-        right_layout.addWidget(desc)
-        cast_photos = movie.get('cast_photos', [])
-        if cast_photos:
-            cast_layout = QHBoxLayout()
-            for cast_member in cast_photos:
-                vbox = QVBoxLayout()
-                photo_label = QLabel()
-                if cast_member.get('photo_url'):
-                    load_image_async(cast_member['photo_url'], photo_label, QPixmap(), update_size=(48, 48))
-                name_label = QLabel(cast_member.get('name', ''))
-                name_label.setAlignment(Qt.AlignCenter)
-                vbox.addWidget(photo_label)
-                vbox.addWidget(name_label)
-                cast_layout.addLayout(vbox)
-            right_layout.addLayout(cast_layout)
-        elif cast and cast != '--':
-            right_layout.addWidget(QLabel(f"Cast: {cast}"))
-        btn_layout = QHBoxLayout()
-        play_btn = QPushButton("PLAY")
-        play_btn.clicked.connect(lambda: self._play_movie_from_details(movie))
-        btn_layout.addWidget(play_btn)
-        trailer_url = movie.get('trailer_url')
-        stream_id = movie.get('stream_id')
-        try:
-            success, vod_info = self.api_client.get_vod_info(stream_id)
-            if success and vod_info:
-                movie_info = vod_info.get('info', {})
-                if not trailer_url:
-                    trailer_url = movie_info.get('trailer_url')
-        except Exception:
-            pass
-        if trailer_url:
-            trailer_btn = QPushButton("WATCH TRAILER")
-            trailer_btn.clicked.connect(lambda: self._play_trailer(trailer_url))
-            btn_layout.addWidget(trailer_btn)
-        right_layout.addLayout(btn_layout)
-        # Fetch detailed metadata
-        try:
-            success, vod_info = self.api_client.get_vod_info(stream_id)
-            if success and vod_info:
-                movie_info = vod_info['info']
-                meta.setText(f"Year: {movie_info.get('releasedate', '--')} \nGenre: {movie_info.get('genre', '--')} \nDuration: {movie_info.get('duration', '--')}")
-                director = movie_info.get('director', '--')
-                cast = ', '.join(movie_info.get('cast', [])) if isinstance(movie_info.get('cast'), list) else movie_info.get('cast', '--')
-                desc.setPlainText(movie_info.get('plot', ''))
-                right_layout.addWidget(QLabel(f"Director: {director}"))
-                right_layout.addWidget(QLabel(f"Cast: {cast}"))
-                if 'movie_image' in vod_info['info']:
-                    image_data = self.api_client.get_image_data(vod_info['info']['movie_image'])
-                    if image_data:
-                        pix = QPixmap()
-                        pix.loadFromData(image_data)
-                        if not pix.isNull():
-                            poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        except Exception as e:
-            print("Error fetching detailed metadata:", e)
-        layout.addLayout(right_layout)
-        return details
 
     def show_movie_grid(self):
         self.stacked_widget.setCurrentIndex(0)

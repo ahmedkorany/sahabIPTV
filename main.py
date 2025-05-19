@@ -6,7 +6,7 @@ from PyQt5.QtGui import QIcon
 from src.ui.main_window import MainWindow
 from src.config import DARK_MODE
 
-# Set locale to C for VLC compatibility
+# Set locale to C for VLC compatibilityp
 locale.setlocale(locale.LC_NUMERIC, 'C')
 
 if __name__ == "__main__":

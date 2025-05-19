@@ -3,8 +3,10 @@ Helper functions for the application
 """
 import os
 import json
-from PyQt5.QtGui import QPalette, QColor
-from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPalette, QColor, QPixmap
+from PyQt5.QtCore import Qt, QMetaObject, Q_ARG
+import threading
+from .image_cache import ensure_cache_dir, get_cache_path
 
 def load_json_file(file_path, default=None):
     """Load JSON data from a file"""
@@ -219,3 +221,73 @@ def get_translations(language):
     }
     
     return translations.get(language, translations["en"])
+
+def get_api_client_from_label(label, main_window):
+    # Try to get api_client from main_window, fallback to traversing parents
+    if main_window and hasattr(main_window, 'api_client'):
+        return main_window.api_client
+    # Fallback: traverse up the parent chain
+    parent = label.parent()
+    for _ in range(5):
+        if parent is None:
+            break
+        if hasattr(parent, 'api_client'):
+            return parent.api_client
+        parent = parent.parent() if hasattr(parent, 'parent') else None
+    return None
+
+def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
+    ensure_cache_dir()
+    cache_path = get_cache_path(image_url)
+    def set_pixmap(pixmap):
+        label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def worker():
+       # print(f"[DEBUG] Start loading image: {image_url}")
+        if main_window and hasattr(main_window, 'loading_icon_controller'):
+            main_window.loading_icon_controller.show_icon.emit()
+        pix = QPixmap()
+        if os.path.exists(cache_path):
+            #print(f"[DEBUG] Image found in cache: {cache_path}")
+            pix.load(cache_path)
+        else:
+            #print(f"[DEBUG] Downloading image: {image_url}")
+            image_data = None
+            api_client = get_api_client_from_label(label, main_window)
+            try:
+                if api_client:
+                    image_data = api_client.get_image_data(image_url)
+                else:
+                    print("[DEBUG] Could not find api_client for image download!")
+            except Exception as e:
+                print(f"[DEBUG] Error downloading image: {e}")
+            if image_data:
+                loaded = pix.loadFromData(image_data)
+                if loaded and not pix.isNull():
+                    try:
+                        saved = pix.save(cache_path)
+                        #print(f"[DEBUG] Image downloaded and cached: {cache_path}, save result: {saved}")
+                    except Exception as e:
+                        print(f"[DEBUG] Error saving image to cache: {e}")
+                else:
+                    print(f"[DEBUG] Failed to load image from data for: {image_url}")
+        if not pix or pix.isNull():
+            pix = default_pixmap
+        QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        if loading_counter is not None:
+            loading_counter['count'] -= 1
+            if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        else:
+            if main_window and hasattr(main_window, 'loading_icon_controller'):
+                main_window.loading_icon_controller.hide_icon.emit()
+        #print(f"[DEBUG] Finished loading image: {image_url}")
+    # Set cached or placeholder immediately
+    if os.path.exists(cache_path):
+        pix = QPixmap()
+        pix.load(cache_path)
+        set_pixmap(pix)
+    else:
+        set_pixmap(default_pixmap)
+        if loading_counter is not None:
+            loading_counter['count'] += 1
+        threading.Thread(target=worker, daemon=True).start()
