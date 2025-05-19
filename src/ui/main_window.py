@@ -3,8 +3,9 @@ Main application window
 """
 import os
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QMessageBox, 
-                            QAction, QMenu, QMenuBar, QToolBar, QStatusBar, QLabel)
-from PyQt5.QtCore import Qt, QSettings, QSize, pyqtSignal, QObject
+                            QAction, QMenu, QMenuBar, QToolBar, QStatusBar, QLabel,
+                            QProgressDialog) # Added QProgressDialog
+from PyQt5.QtCore import Qt, QSettings, QSize, pyqtSignal, QObject, QThread # Added QThread
 from PyQt5.QtGui import QIcon
 from PyQt5.QtSvg import QSvgWidget
 from src.api.xtream import XtreamClient
@@ -17,6 +18,24 @@ from src.utils.helpers import load_json_file, save_json_file, get_translations
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
 from src.ui.widgets.home_screen import HomeScreenWidget
 from src.ui.player import PlayerWindow
+
+class CachePopulationThread(QThread):
+    progress_updated = pyqtSignal(int, int, str, bool)  # current_step, total_steps, message, is_error
+    population_finished = pyqtSignal(bool, str) # success, message
+
+    def __init__(self, api_client, parent=None):
+        super().__init__(parent)
+        self.api_client = api_client
+
+    def run(self):
+        try:
+            success, message = self.api_client.populate_full_cache(self.progress_callback)
+            self.population_finished.emit(success, message)
+        except Exception as e:
+            self.population_finished.emit(False, f"Error during cache population: {str(e)}")
+
+    def progress_callback(self, current_step, total_steps, message, is_error):
+        self.progress_updated.emit(current_step, total_steps, message, is_error)
 
 class LoadingIconController(QObject):
     show_icon = pyqtSignal()
@@ -57,6 +76,9 @@ class MainWindow(QMainWindow):
         self.player_window = PlayerWindow()  # Persistent player window
         self.player_window.add_to_favorites.connect(self.add_to_favorites)  # Connect player window favorites signal
         self.expiry_str = ""
+        self.cache_thread = None
+        self.progress_dialog = None
+
         self.setup_ui()  # Only call setup_ui here
         auto_login_success = False
         if self.current_account and self.current_account in self.accounts:
@@ -197,20 +219,88 @@ class MainWindow(QMainWindow):
         home_action.triggered.connect(self.show_home_screen)
         menubar.addAction(home_action)
     
+    def start_full_cache_population(self, force_reload=False):
+        if not self.api_client or not self.api_client.server_url:
+            self.show_status_message("API client not configured. Cannot populate cache.")
+            return
+
+        if self.cache_thread and self.cache_thread.isRunning():
+            self.show_status_message("Cache population is already in progress.")
+            return
+
+        if force_reload:
+            self.api_client.invalidate_cache()
+            print("[CACHE] Full cache invalidated due to forced reload.")
+
+        self.progress_dialog = QProgressDialog("Populating cache...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Caching Data")
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(False) # We will close it manually
+        self.progress_dialog.setAutoReset(False) # We will reset it manually
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.show()
+
+        self.cache_thread = CachePopulationThread(self.api_client)
+        self.cache_thread.progress_updated.connect(self.update_progress_dialog)
+        self.cache_thread.population_finished.connect(self.on_cache_population_finished)
+        self.cache_thread.start()
+
+    def update_progress_dialog(self, current_step, total_steps, message, is_error):
+        dlg = self.progress_dialog
+        if not dlg:
+            return
+        if total_steps > 0:
+            dlg.setMaximum(total_steps)
+            dlg.setValue(current_step)
+        else:
+            dlg.setMaximum(0)
+            dlg.setValue(0)
+        dlg.setLabelText(message)
+        if dlg.wasCanceled():
+            if self.cache_thread and self.cache_thread.isRunning():
+                self.cache_thread.requestInterruption()
+                print("[CACHE POPULATE] Cache population canceled by user.")
+                # self.on_cache_population_finished(False, "Cache population canceled.")
+    
+    def on_cache_population_finished(self, success, message):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        # Always reload favorites from file after cache population to ensure they persist
+        self.load_favorites()
+        if success:
+            self.show_status_message("Full cache population completed successfully.")
+            self.reload_tab_categories()
+        else:
+            self.show_status_message(f"Cache population failed: {message}")
+        self.cache_thread = None # Allow re-creation
+
+    def reload_tab_categories(self):
+        """Reloads categories in all relevant tabs."""
+        if hasattr(self, 'live_tab') and self.live_tab:
+            self.live_tab.load_categories()
+        if hasattr(self, 'movies_tab') and self.movies_tab:
+            self.movies_tab.load_categories()
+        if hasattr(self, 'series_tab') and self.series_tab:
+            self.series_tab.load_categories()
+        print("[UI] Tab categories reloaded after cache population.")
+
     def handle_reload_requested(self):
         """Handles the reload request from the home screen."""
-        if self.api_client:
-            self.api_client.invalidate_cache()
-            # Reload categories in each tab
-            if hasattr(self, 'live_tab') and self.live_tab:
-                self.live_tab.load_categories()
-            if hasattr(self, 'movies_tab') and self.movies_tab:
-                self.movies_tab.load_categories()
-            if hasattr(self, 'series_tab') and self.series_tab:
-                self.series_tab.load_categories()
-            QMessageBox.information(self, "Reload", "Cache cleared and data refresh initiated.")
+        if self.api_client and self.api_client.server_url:
+            # self.api_client.invalidate_cache() # invalidate_cache is now called within start_full_cache_population if force_reload is True
+            # # Reload categories in each tab - This will be handled by on_cache_population_finished
+            # if hasattr(self, 'live_tab') and self.live_tab:
+            #     self.live_tab.load_categories()
+            # if hasattr(self, 'movies_tab') and self.movies_tab:
+            #     self.movies_tab.load_categories()
+            # if hasattr(self, 'series_tab') and self.series_tab:
+            #     self.series_tab.load_categories()
+            # QMessageBox.information(self, "Reload", "Cache cleared and data refresh initiated.")
+            self.start_full_cache_population(force_reload=True)
+            self.show_status_message("Cache cleared and data refresh initiated.")
         else:
-            QMessageBox.warning(self, "Reload", "API client not available. Cannot reload data.")
+            self.show_status_message("API client not available or not configured. Cannot reload data.")
 
     def show_account_management_screen(self):
         from src.ui.widgets.account_management import AccountManagementScreen
@@ -320,16 +410,19 @@ class MainWindow(QMainWindow):
     def connect_to_server(self, server, username, password):
         self.statusBar.showMessage("Connecting to server...")
         # Recreate all tabs and UI to avoid using deleted widgets
-        self.setup_ui()  # This will recreate tabs, home_screen, etc.
-        self.load_favorites()  # Ensure favorites are loaded for the new tab instance
+        # self.setup_ui()  # This will recreate tabs, home_screen, etc. - Let's see if this is still needed or if selective updates are better
+        # self.load_favorites()  # Ensure favorites are loaded for the new tab instance
         self.api_client.set_credentials(server, username, password)
         success, data = self.api_client.authenticate()
         expiry_str = ""
         if success:
-            self.statusBar.showMessage("Connected successfully")
-            self.live_tab.load_categories()
-            self.movies_tab.load_categories()
-            self.series_tab.load_categories()
+            self.statusBar.showMessage("Connected successfully. Populating cache...")
+            # Instead of loading categories directly, start the full cache population
+            # self.live_tab.load_categories()
+            # self.movies_tab.load_categories()
+            # self.series_tab.load_categories()
+            self.start_full_cache_population() # This will also reload tab categories upon completion
+            
             # Get expiry date from user_info if available
             from PyQt5.QtCore import QTimer
 
@@ -392,15 +485,16 @@ class MainWindow(QMainWindow):
         """Add an item to favorites for the current account"""
         if not hasattr(self, 'favorites'):
             self.favorites = []
-        # Avoid duplicates by stream_id
-        if any(f.get('series_id') == item.get('series_id') for f in self.favorites):
+        # Use is_favorite for robust duplicate check
+        if self.is_favorite(item):
+            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.information(self, "Favorites", "Already in favorites.")
             return
         self.favorites.append(item)
         if hasattr(self, 'favorites_tab'):
             self.favorites_tab.set_favorites(self.favorites)
         self.save_favorites()
-        item_name = item.get('name', 'Item') # Define item_name
+        item_name = item.get('name', 'Item')
         self.statusBar.showMessage(f"'{item_name}' added to favorites.", 3000)
         self.favorites_changed.emit()
 
@@ -589,3 +683,7 @@ class MainWindow(QMainWindow):
     def show_home_screen(self):
         """Return to the home screen from any tab"""
         self.setCentralWidget(self.home_screen)
+
+    def show_status_message(self, message, timeout=5000):
+        if hasattr(self, 'statusBar') and self.statusBar:
+            self.statusBar.showMessage(message, timeout)
