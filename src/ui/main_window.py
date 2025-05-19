@@ -11,7 +11,6 @@ from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
-from src.ui.tabs.favorites_tab import FavoritesTab
 from src.ui.tabs.downloads_tab import DownloadsTab
 from src.ui.widgets.dialogs import LoginDialog
 from src.utils.helpers import load_json_file, save_json_file, get_translations
@@ -44,6 +43,7 @@ class LoadingIconController(QObject):
 
 class MainWindow(QMainWindow):
     """Main application window"""
+    favorites_changed = pyqtSignal()
     
     def __init__(self):
         super().__init__()
@@ -70,8 +70,9 @@ class MainWindow(QMainWindow):
                     auto_login_success = True
         if not auto_login_success:
             self.show_account_switch_dialog()
-        self.downloads_tab = DownloadsTab()
-        self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
+        # Only add DownloadsTab once
+        # self.downloads_tab = DownloadsTab()  # Already added in setup_ui
+        # self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
 
     def setup_ui(self):
         """Set up the UI components"""
@@ -92,16 +93,15 @@ class MainWindow(QMainWindow):
         self.live_tab = LiveTab(self.api_client, parent=self)
         self.movies_tab = MoviesTab(self.api_client, parent=self)
         self.series_tab = SeriesTab(self.api_client, parent=self)
-        self.favorites_tab = FavoritesTab(self.api_client, parent=self)
         self.downloads_tab = DownloadsTab()
+        self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
         self.live_tab.add_to_favorites.connect(self.add_to_favorites)
         self.movies_tab.add_to_favorites.connect(self.add_to_favorites)
         self.series_tab.add_to_favorites.connect(self.add_to_favorites)
-        self.favorites_tab.remove_from_favorites.connect(self.remove_from_favorites)
         self.tabs.addTab(self.live_tab, self.translations["Live TV"])
         self.tabs.addTab(self.movies_tab, self.translations["Movies"])
         self.tabs.addTab(self.series_tab, self.translations["Series"])
-        self.tabs.addTab(self.favorites_tab, self.translations["Favorites"])
+        self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
         self.live_tab.main_window = self
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
@@ -377,14 +377,16 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'favorites'):
             self.favorites = []
         # Avoid duplicates by stream_id
-        if any(f.get('stream_id') == item.get('stream_id') for f in self.favorites):
+        if any(f.get('series_id') == item.get('series_id') for f in self.favorites):
             QMessageBox.information(self, "Favorites", "Already in favorites.")
             return
         self.favorites.append(item)
         if hasattr(self, 'favorites_tab'):
             self.favorites_tab.set_favorites(self.favorites)
         self.save_favorites()
-        #QMessageBox.information(self, "Favorites", f"Added '{item.get('name', 'Item')}' to favorites.")
+        item_name = item.get('name', 'Item') # Define item_name
+        self.statusBar.showMessage(f"'{item_name}' added to favorites.", 3000)
+        self.favorites_changed.emit()
 
     def remove_from_favorites(self, index):
         """Remove an item from favorites for the current account"""
@@ -394,7 +396,69 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'favorites_tab'):
             self.favorites_tab.set_favorites(self.favorites)
         self.save_favorites()
-        #QMessageBox.information(self, "Favorites", f"Removed '{removed.get('name', 'Item')}' from favorites.")
+        item_name = removed.get('name', 'Item') # Use the 'removed' item
+        self.statusBar.showMessage(f"'{item_name}' removed from favorites.", 3000)
+        self.favorites_changed.emit()
+
+    def is_favorite(self, item_to_check):
+        """Check if an item is in favorites for the current account, considering item type."""
+        if not hasattr(self, 'favorites') or not self.favorites:
+            return False
+
+        item_id_to_check = None
+        # stream_type should ideally be present in item_to_check.
+        # It can be 'movie', 'series', or 'live'.
+        item_type_to_check = item_to_check.get('stream_type')
+
+        # Determine the primary ID for item_to_check
+        if item_to_check.get('series_id') is not None:
+            item_id_to_check = item_to_check.get('series_id')
+            # If series_id is present, the type must be 'series'.
+            # If item_type_to_check is different, it's a data inconsistency. Prioritize series_id.
+            if item_type_to_check != 'series':
+                # print(f"[WARN] is_favorite: Item has series_id {item_id_to_check} but stream_type is '{item_type_to_check}'. Assuming 'series'.")
+                item_type_to_check = 'series'
+        elif item_to_check.get('stream_id') is not None:
+            item_id_to_check = item_to_check.get('stream_id')
+            # If only stream_id is present, item_type_to_check should be 'movie' or 'live'.
+            # If item_type_to_check is None here, it's problematic for typed comparison.
+            # add_to_favorites should ensure stream_type is set.
+            if item_type_to_check is None:
+                # print(f"[WARN] is_favorite: Item with stream_id {item_id_to_check} has no stream_type. Type comparison might be unreliable.")
+                pass # Keep item_type_to_check as None for now.
+        else:
+            # No usable ID found in item_to_check
+            return False
+
+        if item_id_to_check is None: # Should be caught above, but as a safeguard.
+            return False
+
+        for favorite_item in self.favorites:
+            fav_item_id = None
+            # Favorites are expected to have 'stream_type' stored by add_to_favorites.
+            fav_item_type = favorite_item.get('stream_type')
+
+            if fav_item_type == 'series':
+                fav_item_id = favorite_item.get('series_id')
+            elif fav_item_type == 'movie' or fav_item_type == 'live': # Assuming 'live' is also a possible type
+                fav_item_id = favorite_item.get('stream_id')
+            else:
+                # This favorite_item might be from an older version or has an unknown/missing type.
+                # If both the item_to_check and the favorite_item lack a specific type,
+                # fall back to the original generic ID comparison.
+                if not item_type_to_check and not fav_item_type:
+                    # Original untyped comparison logic
+                    generic_id_to_check = item_to_check.get('stream_id') or item_to_check.get('series_id')
+                    generic_fav_id = favorite_item.get('stream_id') or favorite_item.get('series_id')
+                    if generic_fav_id is not None and generic_fav_id == generic_id_to_check:
+                        return True
+                continue # Skip if types are inconsistent or fav_item_type is unknown for typed comparison
+
+            # Now compare with type
+            if fav_item_id is not None and fav_item_id == item_id_to_check and fav_item_type == item_type_to_check:
+                return True
+        
+        return False
     def switch_account(self, name):
         """Switch to a different account and reload favorites"""
         self.current_account = name
@@ -430,8 +494,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(1, self.translations["Live TV"])
         self.tabs.setTabText(2, self.translations["Movies"])
         self.tabs.setTabText(3, self.translations["Series"])
-        self.tabs.setTabText(4, self.translations["Favorites"])
-        self.tabs.setTabText(5, self.translations.get("Downloads", "Downloads"))
+        self.tabs.setTabText(4, self.translations.get("Downloads", "Downloads"))
         
         # Set layout direction
         if self.language == "ar":

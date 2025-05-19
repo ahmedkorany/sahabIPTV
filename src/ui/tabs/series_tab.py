@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QStackedLayout)
 from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, Q_ARG
-from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtSvg import QSvgWidget
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread, BatchDownloadThread
@@ -182,6 +182,7 @@ class SeriesTab(QWidget):
         super().__init__(parent)
         self.api_client = api_client
         self.series = []
+        self.all_series = []  # Store all series across categories
         self.current_series = None
         self.setup_ui()
         self.main_window = None
@@ -275,8 +276,9 @@ class SeriesTab(QWidget):
         poster = QLabel()
         poster.setAlignment(Qt.AlignTop)
         pix = QPixmap()
-        if series.get('cover'):
-            image_data = self.api_client.get_image_data(series['cover'])
+        series_cover_url = series.get('cover') # Store for favorite item
+        if series_cover_url:
+            image_data = self.api_client.get_image_data(series_cover_url)
             if image_data:
                 pix.loadFromData(image_data)
         if not pix or pix.isNull():
@@ -284,6 +286,15 @@ class SeriesTab(QWidget):
         if not pix.isNull():
             poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         left_layout.addWidget(poster)
+
+        # Favorite button
+        self.favorite_series_btn = QPushButton()
+        self.favorite_series_btn.setFixedWidth(180) # Match poster width
+        # Pass the original series dict from the grid, which includes 'cover'
+        self._update_favorite_series_button_text(series) 
+        self.favorite_series_btn.clicked.connect(lambda _, s=series: self._toggle_favorite_series(s))
+        left_layout.addWidget(self.favorite_series_btn)
+
         layout.addLayout(left_layout)
         # --- Right: Metadata, seasons, episodes ---
         right_layout = QVBoxLayout()
@@ -348,7 +359,62 @@ class SeriesTab(QWidget):
         layout.addLayout(right_layout)
         # Load seasons for this series
         self.load_seasons(series['series_id'])
+        self.current_detailed_series = series # Store for reference if needed
         return details
+
+    def _update_favorite_series_button_text(self, series_data):
+        main_window = self.window()
+        if not main_window or not hasattr(main_window, 'is_favorite') or not hasattr(self, 'favorite_series_btn'):
+            if hasattr(self, 'favorite_series_btn'): self.favorite_series_btn.setText("Favorite N/A")
+            return
+
+        # Use series_id and stream_type for checking favorite status
+        favorite_item_check = {
+            'series_id': series_data.get('series_id'),
+            'stream_type': 'series'
+        }
+
+        if main_window.is_favorite(favorite_item_check):
+            self.favorite_series_btn.setText("★")
+            self.favorite_series_btn.setStyleSheet("QPushButton { color: gold; background: transparent; font-size: 16px; }")
+            self.favorite_series_btn.setToolTip("Remove from favorites")
+        else:
+            self.favorite_series_btn.setText("☆")
+            self.favorite_series_btn.setStyleSheet("QPushButton { color: white; background: transparent; font-size: 16px; }")
+            self.favorite_series_btn.setToolTip("Add to favorites")
+
+    def _toggle_favorite_series(self, series_data):
+        main_window = self.window()
+        if not main_window or not hasattr(main_window, 'add_to_favorites') or not hasattr(main_window, 'remove_from_favorites'):
+            QMessageBox.warning(self, "Error", "Favorite functionality not available in main window.")
+            return
+
+        series_id = series_data.get('series_id')
+        series_name = series_data.get('name')
+        series_cover = series_data.get('cover') # Get cover from the series_data passed
+
+        if not series_id or not series_name:
+            QMessageBox.warning(self, "Error", "Series data is incomplete for favorites.")
+            return
+
+        favorite_item = {
+            'name': series_name,
+            'series_id': series_id,
+            'cover': series_cover, # Ensure cover is included
+            'stream_type': 'series',
+            'stream_url': '',  # As per example
+            'stream_id': ''    # As per example, or use series_id if preferred for consistency
+        }
+        
+        # Check item for is_favorite should only contain identifying keys
+        favorite_item_check = {'series_id': series_id, 'stream_type': 'series'}
+
+        if main_window.is_favorite(favorite_item_check):
+            main_window.remove_from_favorites(favorite_item) # Pass full item for potential name display in status
+        else:
+            main_window.add_to_favorites(favorite_item)
+        
+        self._update_favorite_series_button_text(series_data) # Update button after action
 
     def _play_trailer(self, trailer_url):
         main_window = self.window()
@@ -425,14 +491,20 @@ class SeriesTab(QWidget):
 
     def load_categories(self):
         self.categories_list.clear()
-        self.categories = []
+        self.categories_api_data = [] # To store raw API category data
         success, data = self.api_client.get_series_categories()
         if success:
-            self.categories = data
+            self.categories_api_data = data
             # Add "ALL" category at the top
             all_item = QListWidgetItem("ALL")
-            all_item.setData(Qt.UserRole, None)
+            all_item.setData(Qt.UserRole, None) # None for ALL category_id
             self.categories_list.addItem(all_item)
+
+            # Add "Favorites" category
+            favorites_item = QListWidgetItem("Favorites")
+            favorites_item.setData(Qt.UserRole, "favorites") # Special ID for favorites
+            self.categories_list.addItem(favorites_item)
+
             for category in data:
                 count = category.get('num', '')
                 if count and str(count).strip() not in ('', '0'):
@@ -446,7 +518,10 @@ class SeriesTab(QWidget):
 
     def category_clicked(self, item):
         category_id = item.data(Qt.UserRole)
-        self.load_series(category_id)
+        if category_id == "favorites":
+            self.load_favorite_series()
+        else:
+            self.load_series(category_id)
 
     def load_series(self, category_id):
         self.series = []
@@ -456,20 +531,58 @@ class SeriesTab(QWidget):
                 widget.setParent(None)
         if category_id is None:
             # ALL category: load all series
-            all_series = []
-            for cat in self.categories:
-                success, data = self.api_client.get_series(cat['category_id'])
-                if success:
-                    all_series.extend(data)
+            if not self.all_series: # Check if all_series is already populated
+                temp_all_series = []
+                # Use self.categories_api_data which stores the raw category list from the API
+                for cat in self.categories_api_data:
+                    if cat.get('category_id'): # Ensure valid category_id
+                        # Changed from get_series_streams to get_series
+                        success, data = self.api_client.get_series(cat['category_id'])
+                        if success:
+                            temp_all_series.extend(data)
+                self.all_series = temp_all_series # Store all series
+            all_series = list(self.all_series) # Use a copy for current display
             self.series = all_series
+            if not self.all_series: # Populate self.all_series if it's empty and ALL was clicked
+                self.all_series = list(self.series)
         else:
-            success, data = self.api_client.get_series(category_id)
+            success, data = self.api_client.get_series(category_id) # Changed from get_series_streams
             if success:
                 self.series = data
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
         self.current_page = 1
         self.display_current_page()
+
+    def load_favorite_series(self):
+        main_window = self.window()
+        if not main_window or not hasattr(main_window, 'favorites'):
+            self.series = []
+            self.current_page = 1
+            self.total_pages = 1
+            self.display_series_grid(self.series) # Pass the series list to display # Display empty page
+            self.update_pagination_controls()
+            QMessageBox.information(self, "Favorites", "Could not load favorites from main window.")
+            return
+
+        # Filter favorite items that are series and have a series_id
+        # These items should already have 'name', 'cover', 'series_id', 'stream_type'
+        self.series = [
+            fav for fav in main_window.favorites
+            if fav.get('stream_type') == 'series' and fav.get('series_id')
+        ]
+
+        self.current_page = 1
+        self.total_pages = (len(self.series) + self.page_size - 1) // self.page_size
+        if self.total_pages == 0:
+            self.total_pages = 1 # Ensure at least one page if series list is empty
+        
+        self.display_series_grid(self.series) # Pass the series list to display
+        self.update_pagination_controls()
+        if not self.series:
+            # Optionally, show a message in the grid area if no favorites
+            # For now, an empty grid will be shown by display_series_page
+            pass
 
     def display_series_grid(self, series_list):
         cols = 4

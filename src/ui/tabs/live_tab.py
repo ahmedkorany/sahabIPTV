@@ -121,6 +121,8 @@ class LiveTab(QWidget):
         super().__init__(parent)
         self.api_client = api_client
         self.live_channels = []
+        self.all_channels = []  # Store all channels across categories
+        self.categories_api_data = [] # Store raw API category data
         self.current_channel = None
         self.recording_thread = None
         self.page_size = 32
@@ -197,10 +199,20 @@ class LiveTab(QWidget):
     def load_categories(self):
         """Load live TV categories from the API"""
         self.categories_list.clear()
-        self.categories = []
+        self.categories_api_data = []
         success, data = self.api_client.get_live_categories()
         if success:
-            self.categories = data
+            self.categories_api_data = data
+            # Add "ALL" category at the top
+            all_item = QListWidgetItem("ALL")
+            all_item.setData(Qt.UserRole, None) # None for ALL category_id
+            self.categories_list.addItem(all_item)
+
+            # Add "Favorites" category
+            favorites_item = QListWidgetItem("Favorites")
+            favorites_item.setData(Qt.UserRole, "favorites") # Special ID for favorites
+            self.categories_list.addItem(favorites_item)
+
             for category in data:
                 count = category.get('num', '')
                 if count and str(count).strip() not in ('', '0'):
@@ -214,7 +226,10 @@ class LiveTab(QWidget):
 
     def category_clicked(self, item):
         category_id = item.data(Qt.UserRole)
-        self.load_channels(category_id)
+        if category_id == "favorites":
+            self.load_favorite_channels()
+        else:
+            self.load_channels(category_id)
 
     def load_channels(self, category_id):
         """Load channels for the selected category and display as grid (synchronously, like movies tab)"""
@@ -227,14 +242,48 @@ class LiveTab(QWidget):
             if widget:
                 widget.setParent(None)
         self.show_loading(True)
-        # Synchronous loading, no threading
-        success, data = self.api_client.get_live_streams(category_id)
-        if success:
-            self.live_channels = data
-            self.display_current_page()
-        else:
-            QMessageBox.warning(self, "Error", f"Failed to load channels: {data}")
+        if category_id is None:  # ALL category
+            if not self.all_channels:
+                temp_all_channels = []
+                for cat in self.categories_api_data:
+                    if cat.get('category_id'): # Ensure valid category_id
+                        success, data = self.api_client.get_live_streams(cat['category_id'])
+                        if success:
+                            temp_all_channels.extend(data)
+                self.all_channels = temp_all_channels
+            self.live_channels = list(self.all_channels)
+        else: # Specific category
+            success, data = self.api_client.get_live_streams(category_id)
+            if success:
+                self.live_channels = data
+            else:
+                QMessageBox.warning(self, "Error", f"Failed to load channels: {data}")
+        self.display_current_page()
         self.show_loading(False)
+
+    def load_favorite_channels(self):
+        """Load and display favorite live channels"""
+        if not self.main_window or not hasattr(self.main_window, 'favorites'):
+            QMessageBox.warning(self, "Error", "Favorites list not available.")
+            self.live_channels = []
+            self.display_current_page()
+            return
+
+        favorite_live_ids = [fav['stream_id'] for fav in self.main_window.favorites if fav.get('stream_type') == 'live']
+
+        if not self.all_channels:
+            # If all_channels is not populated, load them
+            temp_all_channels = []
+            for cat in self.categories_api_data: # Use stored API category data
+                if cat.get('category_id'): # Ensure valid category_id
+                    success, data = self.api_client.get_live_streams(cat['category_id'])
+                    if success:
+                        temp_all_channels.extend(data)
+            self.all_channels = temp_all_channels
+
+        self.live_channels = [channel for channel in self.all_channels if channel.get('stream_id') in favorite_live_ids]
+        self.current_page = 1
+        self.display_current_page()
 
     # Remove ChannelLoaderWorker and all threading-related code
     # Remove load_channels_page, on_channels_loaded, on_channels_failed, on_channel_grid_scroll, loader_threads, etc.

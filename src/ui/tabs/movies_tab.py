@@ -244,8 +244,14 @@ class MoviesTab(QWidget):
             self.categories = data
             # Add "ALL" category at the top
             all_item = QListWidgetItem("ALL")
-            all_item.setData(Qt.UserRole, None)
+            all_item.setData(Qt.UserRole, None) # None for ALL category_id
             self.categories_list.addItem(all_item)
+
+            # Add "Favorites" category
+            favorites_item = QListWidgetItem("Favorites")
+            favorites_item.setData(Qt.UserRole, "favorites") # Special ID for favorites
+            self.categories_list.addItem(favorites_item)
+
             for category in data:
                 count = category.get('num', '')
                 if count and str(count).strip() not in ('', '0'):
@@ -259,7 +265,10 @@ class MoviesTab(QWidget):
 
     def category_clicked(self, item):
         category_id = item.data(Qt.UserRole)
-        self.load_movies(category_id)
+        if category_id == "favorites":
+            self.load_favorite_movies()
+        else:
+            self.load_movies(category_id)
 
     def load_movies(self, category_id):
         """Load movies for the selected category and display as grid"""
@@ -270,18 +279,49 @@ class MoviesTab(QWidget):
                 widget.setParent(None)
         if category_id is None:
             # ALL category: load all movies
-            all_movies = []
-            for cat in self.categories:
-                success, data = self.api_client.get_vod_streams(cat['category_id'])
-                if success:
-                    all_movies.extend(data)
-            self.movies = all_movies
+            if not self.all_movies: # Check if all_movies is already populated
+                all_movies_temp = []
+                for cat in self.categories:
+                    # Ensure category_id is not None or 'favorites' before fetching
+                    # self.categories contains API category dicts, so cat['category_id'] won't be 'favorites'.
+                    # This check is harmless but redundant for 'favorites' if self.categories is clean.
+                    if cat.get('category_id') is not None and cat.get('category_id') != 'favorites':
+                        success, data = self.api_client.get_vod_streams(cat['category_id'])
+                        if success:
+                            all_movies_temp.extend(data)
+                self.all_movies = all_movies_temp # Store all movies
+            self.movies = list(self.all_movies) # Use a copy for current display
         else:
+            # This branch handles specific category_id (not None and not 'favorites')
             success, data = self.api_client.get_vod_streams(category_id)
             if success:
                 self.movies = data
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load movies: {data}")
+        self.current_page = 1
+        self.display_current_page()
+
+    def load_favorite_movies(self):
+        """Load and display favorite movies"""
+        if not self.main_window or not hasattr(self.main_window, 'favorites'):
+            QMessageBox.warning(self, "Error", "Favorites list not available.")
+            self.movies = []
+            self.display_current_page()
+            return
+
+        favorite_movie_ids = [fav['stream_id'] for fav in self.main_window.favorites if fav.get('stream_type') == 'movie']
+
+        if not self.all_movies:
+            # If all_movies is not populated, load them (similar to 'ALL' category logic)
+            # This ensures we have a base list to filter from
+            temp_all_movies = []
+            for cat in self.categories: # self.categories should be populated by load_categories
+                success, data = self.api_client.get_vod_streams(cat['category_id'])
+                if success:
+                    temp_all_movies.extend(data)
+            self.all_movies = temp_all_movies
+
+        self.movies = [movie for movie in self.all_movies if movie.get('stream_id') in favorite_movie_ids]
         self.current_page = 1
         self.display_current_page()
 
