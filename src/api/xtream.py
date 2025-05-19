@@ -5,6 +5,48 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from src.config import API_TIMEOUT, API_RETRIES
+import time
+import pickle
+import os
+import hashlib
+
+CACHE_DIR = os.path.join(os.path.dirname(__file__), '../../assets/cache/data')
+CACHE_EXPIRATION_SECONDS = 24 * 60 * 60  # 1 day
+
+def _get_cache_path(key):
+    # Use MD5 hash of the key to create a safe filename
+    key_hash = hashlib.md5(key.encode('utf-8')).hexdigest()
+    return os.path.join(CACHE_DIR, f"xtream_{key_hash}.pkl")
+
+def _load_cache(key):
+    path = _get_cache_path(key)
+    print(f"[CACHE] Loading cache from: {path}")
+    if not os.path.exists(path):
+        print(f"[CACHE] Cache file does not exist: {path}")
+        return None
+    try:
+        with open(path, 'rb') as f:
+            data = pickle.load(f)
+        if time.time() - data['timestamp'] < CACHE_EXPIRATION_SECONDS:
+            print(f"[CACHE] Cache hit for key: {key}")
+            return data['value']
+        else:
+            print(f"[CACHE] Cache expired for key: {key}")
+    except Exception as e:
+        print(f"[CACHE] Error loading cache for key {key}: {e}")
+    return None
+
+def _save_cache(key, value):
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+    path = _get_cache_path(key)
+    print(f"[CACHE] Saving cache to: {path}")
+    try:
+        with open(path, 'wb') as f:
+            pickle.dump({'timestamp': time.time(), 'value': value}, f)
+        print(f"[CACHE] Cache saved for key: {key}")
+    except Exception as e:
+        print(f"[CACHE] Error saving cache for key {key}: {e}")
 
 class XtreamClient:
     """Client for Xtream Codes API"""
@@ -66,6 +108,10 @@ class XtreamClient:
     
     def get_live_categories(self):
         """Get live TV categories"""
+        cache_key = f'live_categories_{self.server_url}_{self.username}'
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            return True, cached
         try:
             url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_live_categories"
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
@@ -73,12 +119,18 @@ class XtreamClient:
             if response.status_code != 200:
                 return False, f"Server returned status code {response.status_code}"
             
-            return True, response.json()
+            data = response.json()
+            _save_cache(cache_key, data)
+            return True, data
         except Exception as e:
             return False, str(e)
     
     def get_live_streams(self, category_id=None):
         """Get live streams for a category"""
+        key = f'live_streams_{self.server_url}_{self.username}_{category_id or "all"}'
+        cached = _load_cache(key)
+        if cached is not None:
+            return True, cached
         try:
             url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_live_streams"
             if category_id:
@@ -89,12 +141,18 @@ class XtreamClient:
             if response.status_code != 200:
                 return False, f"Server returned status code {response.status_code}"
             
-            return True, response.json()
+            data = response.json()
+            _save_cache(key, data)
+            return True, data
         except Exception as e:
             return False, str(e)
     
     def get_vod_categories(self):
         """Get VOD (movie) categories"""
+        cache_key = f'vod_categories_{self.server_url}_{self.username}'
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            return True, cached
         try:
             url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_vod_categories"
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
@@ -102,12 +160,18 @@ class XtreamClient:
             if response.status_code != 200:
                 return False, f"Server returned status code {response.status_code}"
             
-            return True, response.json()
+            data = response.json()
+            _save_cache(cache_key, data)
+            return True, data
         except Exception as e:
             return False, str(e)
     
     def get_vod_streams(self, category_id=None):
         """Get VOD (movie) streams for a category"""
+        key = f'vod_streams_{self.server_url}_{self.username}_{category_id or "all"}'
+        cached = _load_cache(key)
+        if cached is not None:
+            return True, cached
         try:
             url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_vod_streams"
             if category_id:
@@ -118,7 +182,9 @@ class XtreamClient:
             if response.status_code != 200:
                 return False, f"Server returned status code {response.status_code}"
             
-            return True, response.json()
+            data = response.json()
+            _save_cache(key, data)
+            return True, data
         except Exception as e:
             return False, str(e)
     
@@ -137,6 +203,10 @@ class XtreamClient:
     
     def get_series_categories(self):
         """Get series categories"""
+        cache_key = f'series_categories_{self.server_url}_{self.username}'
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            return True, cached
         try:
             url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_series_categories"
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
@@ -144,12 +214,18 @@ class XtreamClient:
             if response.status_code != 200:
                 return False, f"Server returned status code {response.status_code}"
             
-            return True, response.json()
+            data = response.json()
+            _save_cache(cache_key, data)
+            return True, data
         except Exception as e:
             return False, str(e)
     
     def get_series(self, category_id=None):
         """Get series for a category"""
+        key = f'series_{self.server_url}_{self.username}_{category_id or "all"}'
+        cached = _load_cache(key)
+        if cached is not None:
+            return True, cached
         try:
             url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_series"
             if category_id:
@@ -160,7 +236,9 @@ class XtreamClient:
             if response.status_code != 200:
                 return False, f"Server returned status code {response.status_code}"
             
-            return True, response.json()
+            data = response.json()
+            _save_cache(key, data)
+            return True, data
         except Exception as e:
             return False, str(e)
     
@@ -199,3 +277,15 @@ class XtreamClient:
             return b''
         except Exception:
             return b''
+    
+    def invalidate_cache(self):
+        """Delete all .pkl cache files in the cache directory."""
+        if not os.path.exists(CACHE_DIR):
+            return
+        for fname in os.listdir(CACHE_DIR):
+            if fname.endswith('.pkl'):
+                try:
+                    os.remove(os.path.join(CACHE_DIR, fname))
+                    print(f"[CACHE] Deleted cache file: {fname}")
+                except Exception as e:
+                    print(f"[CACHE] Error deleting cache file {fname}: {e}")

@@ -250,7 +250,8 @@ class MovieDetailsDialog(QDialog):
         self.setup_ui()
 
     def get_cached_pixmap(self, image_url, fallback_path):
-        from src.ui.tabs.movies_tab import get_api_client_from_label
+        from PyQt5.QtGui import QPixmap
+        from src.utils.image_cache import ensure_cache_dir, get_cache_path
         ensure_cache_dir()
         cache_path = get_cache_path(image_url)
         pix = QPixmap()
@@ -260,7 +261,7 @@ class MovieDetailsDialog(QDialog):
             image_data = None
             api_client = getattr(self, 'api_client', None)
             if not api_client and hasattr(self, 'main_window'):
-                api_client = get_api_client_from_label(self, self.main_window)
+                api_client = getattr(self.main_window, 'api_client', None)
             try:
                 if api_client:
                     image_data = api_client.get_image_data(image_url)
@@ -272,9 +273,7 @@ class MovieDetailsDialog(QDialog):
                 pix.loadFromData(image_data)
                 pix.save(cache_path)
         # If pix is still null, try to load the grid's cached image (if any)
-        if (not pix or pix.isNull()) and os.path.exists(cache_path):
-            pix.load(cache_path)
-        if not pix or pix.isNull():
+        if pix.isNull():
             pix = QPixmap(fallback_path)
         return pix
 

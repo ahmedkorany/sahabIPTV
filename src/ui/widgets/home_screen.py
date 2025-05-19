@@ -1,10 +1,11 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QSizePolicy
 from PyQt5.QtGui import QIcon, QPixmap, QFont, QLinearGradient, QBrush, QPalette, QColor
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QSize, pyqtSignal
 import os
 
 class HomeScreenWidget(QWidget):
     """Custom home screen with tiles and navigation bar"""
+    reload_requested = pyqtSignal()
     def __init__(self, parent=None, on_tile_clicked=None, user_info=None, expiry_date=None):
         super().__init__(parent)
         self.on_tile_clicked = on_tile_clicked
@@ -29,6 +30,13 @@ class HomeScreenWidget(QWidget):
         # Top navigation bar
         nav_bar = QHBoxLayout()
         nav_bar.addStretch()
+        reload_btn = QPushButton()
+        reload_btn.setIcon(QIcon(os.path.join('assets', 'reload.svg')))
+        reload_btn.setIconSize(QSize(48, 48))
+        reload_btn.setToolTip('Reload Data')
+        reload_btn.setFlat(True)
+        reload_btn.clicked.connect(self.reload_requested.emit)
+        nav_bar.addWidget(reload_btn)
         search_btn = QPushButton()
         search_btn.setIcon(QIcon(os.path.join('assets', 'search.png')))
         search_btn.setIconSize(QSize(48, 48))

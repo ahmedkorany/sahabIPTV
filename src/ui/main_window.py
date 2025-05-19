@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
             user_info={'username': self.current_account or ''},
             expiry_date=self.expiry_str
         )
+        self.home_screen.reload_requested.connect(self.handle_reload_requested)
 
         # --- Prepare tabs ---
         self.tabs = QTabWidget()
@@ -196,6 +197,21 @@ class MainWindow(QMainWindow):
         home_action.triggered.connect(self.show_home_screen)
         menubar.addAction(home_action)
     
+    def handle_reload_requested(self):
+        """Handles the reload request from the home screen."""
+        if self.api_client:
+            self.api_client.invalidate_cache()
+            # Reload categories in each tab
+            if hasattr(self, 'live_tab') and self.live_tab:
+                self.live_tab.load_categories()
+            if hasattr(self, 'movies_tab') and self.movies_tab:
+                self.movies_tab.load_categories()
+            if hasattr(self, 'series_tab') and self.series_tab:
+                self.series_tab.load_categories()
+            QMessageBox.information(self, "Reload", "Cache cleared and data refresh initiated.")
+        else:
+            QMessageBox.warning(self, "Reload", "API client not available. Cannot reload data.")
+
     def show_account_management_screen(self):
         from src.ui.widgets.account_management import AccountManagementScreen
         screen = AccountManagementScreen(self, self.accounts, self.current_account)
