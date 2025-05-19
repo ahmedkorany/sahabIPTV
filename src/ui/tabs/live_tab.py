@@ -262,7 +262,7 @@ class LiveTab(QWidget):
         self.show_loading(False)
 
     def load_favorite_channels(self):
-        """Load and display favorite live channels"""
+        """Load and display favorite live channels (optimized for performance)"""
         if not self.main_window or not hasattr(self.main_window, 'favorites'):
             QMessageBox.warning(self, "Error", "Favorites list not available.")
             self.live_channels = []
@@ -271,16 +271,18 @@ class LiveTab(QWidget):
 
         favorite_live_ids = [fav['stream_id'] for fav in self.main_window.favorites if fav.get('stream_type') == 'live']
 
-        if not self.all_channels:
-            # If all_channels is not populated, load them
+        # Only fetch all_channels from API if not already cached
+        if not hasattr(self, 'all_channels') or not self.all_channels:
             temp_all_channels = []
-            for cat in self.categories_api_data: # Use stored API category data
-                if cat.get('category_id'): # Ensure valid category_id
-                    success, data = self.api_client.get_live_streams(cat['category_id'])
+            for cat in getattr(self, 'categories_api_data', []):
+                cat_id = cat.get('category_id')
+                if cat_id:
+                    success, data = self.api_client.get_live_streams(cat_id)
                     if success:
                         temp_all_channels.extend(data)
             self.all_channels = temp_all_channels
 
+        # Use cached all_channels for filtering
         self.live_channels = [channel for channel in self.all_channels if channel.get('stream_id') in favorite_live_ids]
         self.current_page = 1
         self.display_current_page()
