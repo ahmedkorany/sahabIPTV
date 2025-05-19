@@ -302,29 +302,23 @@ class MoviesTab(QWidget):
         self.display_current_page()
 
     def load_favorite_movies(self):
-        """Load and display favorite movies (optimized for performance)"""
+        """Load and display favorite movies using the SeriesTab approach."""
         if not self.main_window or not hasattr(self.main_window, 'favorites'):
             QMessageBox.warning(self, "Error", "Favorites list not available.")
             self.movies = []
+            self.current_page = 1
             self.display_current_page()
             return
 
-        favorite_movie_ids = [fav['stream_id'] for fav in self.main_window.favorites if fav.get('stream_type') == 'movie']
+        # Filter favorite items that are movies
+        self.movies = [
+            fav for fav in self.main_window.favorites
+            if fav.get('stream_type') == 'movie'
+        ]
 
-        # Only fetch all_movies from API if not already cached
-        if not hasattr(self, 'all_movies') or not self.all_movies:
-            temp_all_movies = []
-            for cat in getattr(self, 'categories', []):
-                cat_id = cat.get('category_id')
-                if cat_id and cat_id != 'favorites':
-                    success, data = self.api_client.get_vod_streams(cat_id)
-                    if success:
-                        temp_all_movies.extend(data)
-            self.all_movies = temp_all_movies
-
-        # Use cached all_movies for filtering
-        self.movies = [movie for movie in self.all_movies if movie.get('stream_id') in favorite_movie_ids]
-        self.current_page = 1
+        self.current_page = 1  # Reset to first page for favorites
+        # display_current_page will handle pagination and display
+        # It should also update total_pages based on self.movies
         self.display_current_page()
 
     def display_movie_grid(self, movies):
