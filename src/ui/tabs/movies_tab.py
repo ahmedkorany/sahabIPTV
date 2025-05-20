@@ -22,6 +22,7 @@ import os
 # from src.utils.image_cache import ensure_cache_dir, get_cache_path # No longer needed here
 from src.utils.helpers import load_image_async # Import from helpers
 from PyQt5.QtSvg import QSvgWidget
+import sip # Add sip import for checking deleted QObjects
 from src.api.tmdb import TMDBClient
 import heapq
 
@@ -302,6 +303,9 @@ class MoviesTab(QWidget):
 
     def load_categories(self):
         """Load movie categories from the API"""
+        if sip.isdeleted(self.categories_list):
+            print("[MoviesTab] categories_list widget has been deleted, skipping clear().")
+            return
         self.categories_list.clear()
         self.categories = []
         success, data = self.api_client.get_vod_categories()
@@ -396,11 +400,14 @@ class MoviesTab(QWidget):
 
     def build_movie_search_index(self):
         """Builds a token-based search index for fast lookup."""
+        import unicodedata
         self._movie_search_index = {}
         self._movie_lc_names = []
         # Precompute sort keys for each movie
         for mv in self.movies:
-            mv['_sort_name'] = mv.get('name', '').lower()
+            # Normalize name for sorting as well, though primary use is search
+            normalized_sort_name = unicodedata.normalize('NFKD', mv.get('name', '').lower())
+            mv['_sort_name'] = normalized_sort_name
             try:
                 mv['_sort_date'] = int(mv.get('added', 0))
             except Exception:
@@ -410,9 +417,9 @@ class MoviesTab(QWidget):
             except Exception:
                 mv['_sort_rating'] = 0.0
         for idx, mv in enumerate(self.movies):
-            name_lc = mv.get('name', '').lower()
-            self._movie_lc_names.append(name_lc)
-            tokens = set(name_lc.split())
+            name_lc_normalized = unicodedata.normalize('NFKD', mv.get('name', '').lower())
+            self._movie_lc_names.append(name_lc_normalized) # Store normalized names
+            tokens = set(name_lc_normalized.split()) # Tokenize normalized name
             for token in tokens:
                 if token not in self._movie_search_index:
                     self._movie_search_index[token] = set()
@@ -547,23 +554,30 @@ class MoviesTab(QWidget):
             QMessageBox.warning(self, "Error", "Player window not available.")
 
     def search_movies(self, text):
+        import unicodedata
         # Only search if 3+ chars, otherwise always show full list for the current category
         if not self.movies:
             return
-        text = text.strip().lower()
-        if len(text) < 3:
+        
+        normalized_text = unicodedata.normalize('NFKD', text.strip().lower())
+        
+        if len(normalized_text) < 1: # Allow searching for single Arabic characters if needed, adjust if 3 char min is strict
             self.display_current_page()
             return
-        # Token search
-        if ' ' not in text and text in self._movie_search_index:
-            indices = self._movie_search_index[text]
+            
+        # Token search: Use normalized_text for token lookup
+        # We assume tokens in _movie_search_index are already normalized from build_movie_search_index
+        # If the normalized_text itself is a single token and exists in the index:
+        if ' ' not in normalized_text and normalized_text in self._movie_search_index:
+            indices = self._movie_search_index[normalized_text]
             filtered = [self.movies[i] for i in indices]
         else:
-            # Fallback: substring search, but use generator and limit results for performance
+            # Fallback: substring search using normalized text and normalized names
+            # _movie_lc_names should contain pre-normalized names from build_movie_search_index
             max_results = 200
             filtered = []
-            for mv, name in zip(self.movies, self._movie_lc_names):
-                if text in name:
+            for mv, normalized_movie_name in zip(self.movies, self._movie_lc_names):
+                if normalized_text in normalized_movie_name:
                     filtered.append(mv)
                     if len(filtered) >= max_results:
                         break

@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject
 from PyQt5.QtGui import QPixmap, QFont
+import sip # Add sip import for checking deleted QObjects
 from src.ui.player import MediaPlayer
 from src.utils.recorder import RecordingThread
 from src.ui.widgets.dialogs import ProgressDialog
@@ -198,6 +199,9 @@ class LiveTab(QWidget):
 
     def load_categories(self):
         """Load live TV categories from the API"""
+        if sip.isdeleted(self.categories_list):
+            print("[LiveTab] categories_list widget has been deleted, skipping clear().")
+            return
         self.categories_list.clear()
         self.categories_api_data = []
         success, data = self.api_client.get_live_categories()
@@ -369,11 +373,20 @@ class LiveTab(QWidget):
 
     def search_channels(self, text):
         """Search channels based on input text (grid view)"""
+        import unicodedata
         if not self.live_channels:
             return
-        text = text.lower()
-        filtered = [ch for ch in self.live_channels if text in ch['name'].lower()]
-        self.display_channel_grid(filtered)
+        # Normalize the search text
+        normalized_text = unicodedata.normalize('NFKD', text.lower())
+        
+        filtered_channels = []
+        for ch in self.live_channels:
+            # Normalize the channel name
+            normalized_channel_name = unicodedata.normalize('NFKD', ch['name'].lower())
+            if normalized_text in normalized_channel_name:
+                filtered_channels.append(ch)
+        
+        self.display_channel_grid(filtered_channels)
     
     def channel_double_clicked(self, item):
         """Handle channel double-click"""

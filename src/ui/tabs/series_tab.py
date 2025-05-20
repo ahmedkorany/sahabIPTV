@@ -698,11 +698,14 @@ class SeriesTab(QWidget):
 
     def build_series_search_index(self):
         """Builds a token-based search index for fast lookup."""
+        import unicodedata
         self._series_search_index = {}
         self._series_lc_names = []
         # Precompute sort keys for each series
         for s in self.series:
-            s['_sort_name'] = s.get('name', '').lower()
+            # Normalize name for sorting as well, though primary use is search
+            normalized_sort_name = unicodedata.normalize('NFKD', s.get('name', '').lower())
+            s['_sort_name'] = normalized_sort_name
             try:
                 s['_sort_date'] = int(s.get('added', 0))
             except Exception:
@@ -712,30 +715,42 @@ class SeriesTab(QWidget):
             except Exception:
                 s['_sort_rating'] = 0.0
         for idx, s in enumerate(self.series):
-            name_lc = s.get('name', '').lower()
-            self._series_lc_names.append(name_lc)
-            tokens = set(name_lc.split())
+            name_lc_normalized = unicodedata.normalize('NFKD', s.get('name', '').lower())
+            self._series_lc_names.append(name_lc_normalized) # Store normalized names
+            tokens = set(name_lc_normalized.split()) # Tokenize normalized name
             for token in tokens:
                 if token not in self._series_search_index:
                     self._series_search_index[token] = set()
                 self._series_search_index[token].add(idx)
 
     def search_series(self, text):
+        import unicodedata
         # Only search if 3+ chars, otherwise always show full list for the current category
         if not self.series:
             return
-        text = text.strip().lower()
-        if len(text) < 3:
-            # Always show the full list for the current category
+        
+        normalized_text = unicodedata.normalize('NFKD', text.strip().lower())
+        
+        if len(normalized_text) < 1: # Allow searching for single Arabic characters if needed, adjust if 3 char min is strict
             self.display_current_page()
             return
-        # Token search
-        if ' ' not in text and text in self._series_search_index:
-            indices = self._series_search_index[text]
+            
+        # Token search: Use normalized_text for token lookup
+        # We assume tokens in _series_search_index are already normalized from build_series_search_index
+        # If the normalized_text itself is a single token and exists in the index:
+        if ' ' not in normalized_text and normalized_text in self._series_search_index:
+            indices = self._series_search_index[normalized_text]
             filtered = [self.series[i] for i in indices]
         else:
-            # Fallback: substring search
-            filtered = [s for s, name in zip(self.series, self._series_lc_names) if text in name]
+            # Fallback: substring search using normalized text and normalized names
+            # _series_lc_names should contain pre-normalized names from build_series_search_index
+            max_results = 200 # Consider adding a max_results like in movies_tab
+            filtered = []
+            for s, normalized_series_name in zip(self.series, self._series_lc_names):
+                if normalized_text in normalized_series_name:
+                    filtered.append(s)
+                    if len(filtered) >= max_results:
+                        break
         self.display_series_grid(filtered)
 
     def load_seasons(self, series_id):

@@ -11,8 +11,17 @@ class FavoritesManager:
         return self.favorites
 
     def search_favorites(self, text):
-        text = text.lower()
-        return [fav for fav in self.favorites if text in fav.get('name', '').lower()]
+        import unicodedata
+        normalized_text = unicodedata.normalize('NFKD', text.lower())
+        
+        filtered_favorites = []
+        for fav in self.favorites:
+            item_name = fav.get('name', '')
+            if item_name: # Ensure item_name is not None or empty
+                normalized_item_name = unicodedata.normalize('NFKD', item_name.lower())
+                if normalized_text in normalized_item_name:
+                    filtered_favorites.append(fav)
+        return filtered_favorites
 
     def remove_favorite(self, index):
         if 0 <= index < len(self.favorites):
