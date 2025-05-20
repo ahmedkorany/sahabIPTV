@@ -5,6 +5,7 @@ from PyQt5.QtGui import QPixmap, QFont
 from src.utils.helpers import load_image_async # Updated import
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from src.api.tmdb import TMDBClient
+from src.ui.widgets.cast_widget import CastWidget
 
 class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
@@ -104,15 +105,11 @@ class MovieDetailsWidget(QWidget):
         self.cast_scroll_area = QScrollArea()
         self.cast_scroll_area.setWidgetResizable(True)
         self.cast_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.cast_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded) # Changed to AsNeeded
-        self.cast_scroll_area.setMinimumHeight(450) # Min height for the scroll area, increased for larger cast items
+        self.cast_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.cast_scroll_area.setMinimumHeight(450)
 
-        self.cast_container_widget = QWidget()
-        self.cast_grid_layout = QGridLayout(self.cast_container_widget) # Use QGridLayout
-        self.cast_grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.cast_grid_layout.setHorizontalSpacing(10) # Added horizontal spacing
-        self.cast_grid_layout.setVerticalSpacing(10)   # Added vertical spacing
-        self.cast_scroll_area.setWidget(self.cast_container_widget)
+        self.cast_widget = CastWidget(main_window=self.main_window)
+        self.cast_scroll_area.setWidget(self.cast_widget)
         right_layout.addWidget(self.cast_scroll_area)
         # --- End Cast Section ---
 
@@ -222,118 +219,8 @@ class MovieDetailsWidget(QWidget):
             print(f"[MovieDetailsWidget] TMDB credits data received: {str(credits_data)[:200]}...")
             if 'cast' in credits_data and credits_data['cast']:
                 print(f"[MovieDetailsWidget] Found {len(credits_data['cast'])} cast members.")
-                self._fetch_and_display_cast(credits_data['cast'])
+                self.cast_widget.set_cast(credits_data['cast'])
             else:
                 print("[MovieDetailsWidget] 'cast' key not found or empty in TMDB credits response.")
         except Exception as e:
             print(f"[MovieDetailsWidget] Error fetching TMDB credits: {e}")
-
-    def _fetch_and_display_cast(self, cast_data):
-        self._clear_layout(self.cast_grid_layout)
-        
-        MAX_CAST_MEMBERS = 24 # Display up to 24 cast members, increased due to more columns
-        MAX_CAST_COLUMNS = 7  # Number of columns in the grid, increased
-        
-        row, col = 0, 0
-        
-        placeholder_pixmap = QPixmap('assets/person.png') 
-        if placeholder_pixmap.isNull():
-            print("[MovieDetailsWidget] Warning: assets/person.png not found. Cast images might not load correctly.")
-            # Create a small, simple placeholder if the image is missing
-            placeholder_pixmap = QPixmap(125,188) # Adjusted to new aspect ratio
-            placeholder_pixmap.fill(Qt.lightGray)
-
-        loading_counter = {'count': 0} # For managing image loading status if needed by load_image_async
-
-        for i, member in enumerate(cast_data):
-            if i >= MAX_CAST_MEMBERS:
-                break
-
-            member_name = member.get('name', 'N/A')
-            character_name = member.get('character', '') # Get character name
-            profile_path = member.get('profile_path')
-            gender = member.get('gender', 0)
-
-            # Select gender-specific placeholder
-            if gender == 2:
-                gender_placeholder = QPixmap('assets/actor.png')
-            elif gender == 1:
-                gender_placeholder = QPixmap('assets/actress.png')
-            else:
-                gender_placeholder = QPixmap('assets/person.png')
-            if gender_placeholder.isNull():
-                gender_placeholder = QPixmap(125, 188)
-                gender_placeholder.fill(Qt.lightGray)
-
-            # item_widget and item_layout are still the main container for the grid cell
-            item_widget = QWidget()
-            item_layout = QVBoxLayout(item_widget)
-            item_layout.setContentsMargins(5, 5, 5, 5) # Margins for the whole cell
-            item_layout.setSpacing(2) # Spacing between poster+overlay and character_label
-
-            # Container for poster and name overlay
-            poster_with_overlay_container = QWidget()
-            poster_with_overlay_container.setFixedSize(125, 188)
-
-            # Poster Label (child of poster_with_overlay_container)
-            poster_label = QLabel(poster_with_overlay_container)
-            poster_label.setGeometry(0, 0, 125, 188) # Fill the container
-            poster_label.setAlignment(Qt.AlignCenter)
-
-            # Load image into poster_label (existing logic)
-            if profile_path:
-                full_image_url = f"https://image.tmdb.org/t/p/w185{profile_path}"
-                load_image_async(full_image_url, poster_label, gender_placeholder.scaled(125, 188, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(125,188), main_window=self.main_window, loading_counter=loading_counter)
-            else:
-                poster_label.setPixmap(gender_placeholder.scaled(125, 188, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-            # Name Overlay Widget (child of poster_with_overlay_container, drawn on top of poster_label)
-            overlay_height = 35 # Height for the overlay
-            name_overlay_widget = QWidget(poster_with_overlay_container)
-            name_overlay_widget.setGeometry(0, 188 - overlay_height, 125, overlay_height)
-            name_overlay_widget.setStyleSheet("background-color: rgba(0, 0, 0, 180);") # Semi-transparent black
-
-            name_overlay_layout = QVBoxLayout() # Use layout to manage text within overlay
-            name_overlay_layout.setContentsMargins(2, 2, 2, 2) # Small padding within overlay
-            name_overlay_layout.setAlignment(Qt.AlignCenter) # Center content vertically
-
-            actor_name_label = QLabel(member_name)
-            actor_name_label.setAlignment(Qt.AlignCenter)
-            actor_name_label.setWordWrap(True)
-            actor_name_label.setFont(QFont('Arial', 14)) # Increased font for overlay
-            actor_name_label.setStyleSheet("color: white; background-color: transparent;")
-            
-            name_overlay_layout.addWidget(actor_name_label)
-            name_overlay_widget.setLayout(name_overlay_layout)
-
-            # Add the poster_with_overlay_container to the main item_layout
-            item_layout.addWidget(poster_with_overlay_container)
-            
-            # Character Name Label (below the poster_with_overlay_container)
-            if character_name:
-                character_label = QLabel(f"as {character_name}")
-                character_label.setFixedWidth(125)
-                character_label.setAlignment(Qt.AlignCenter)
-                character_label.setWordWrap(True)
-                character_label.setFont(QFont('Arial', 10, italic=True)) # Increased font for character
-                character_label.setStyleSheet("color: lightgray;")
-                item_layout.addWidget(character_label)
-            
-            item_layout.addStretch(1) # Pushes content to the top
-            item_widget.setMinimumWidth(135) 
-            item_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-
-            self.cast_grid_layout.addWidget(item_widget, row, col)
-            
-            col += 1
-            if col >= MAX_CAST_COLUMNS:
-                col = 0
-                row += 1
-        
-        # Add stretch to the bottom and right if not full, to align items to top-left
-        if col > 0 : # If the last row is not full
-             for c_idx in range(col, MAX_CAST_COLUMNS):
-                  self.cast_grid_layout.setColumnStretch(c_idx, 1)
-        self.cast_grid_layout.setRowStretch(row + 1, 1)
-
-        print("[MovieDetailsWidget] Finished populating cast display.")
