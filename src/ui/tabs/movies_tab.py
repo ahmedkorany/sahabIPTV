@@ -22,6 +22,7 @@ import os
 # from src.utils.image_cache import ensure_cache_dir, get_cache_path # No longer needed here
 from src.utils.helpers import load_image_async # Import from helpers
 from PyQt5.QtSvg import QSvgWidget
+from src.api.tmdb import TMDBClient
 
 CACHE_DIR = 'assets/cache/'
 LOADING_ICON = 'assets/loading.gif'
@@ -142,6 +143,8 @@ class MoviesTab(QWidget):
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
         self.api_client = api_client
+        self.main_window = parent
+        self.details_widget = None
         self.movies = []
         self.all_movies = []  # Store all movies across categories
         self.filtered_movies = []  # Store filtered movies for search
@@ -156,6 +159,8 @@ class MoviesTab(QWidget):
         self.setup_ui()
         self.main_window = None  # Will be set by the main window
     
+        # Initialize TMDB client once for all details widgets
+        self.tmdb_client = TMDBClient()  # Loads keys from .env automatically
     def setup_ui(self):
         layout = QVBoxLayout(self)
         # Search bar
@@ -393,6 +398,7 @@ class MoviesTab(QWidget):
             movie,
             api_client=self.api_client,
             main_window=self.main_window,
+            tmdb_client=self.tmdb_client,
             parent=self
         )
         self.details_widget.back_btn.clicked.connect(self.show_movie_grid)

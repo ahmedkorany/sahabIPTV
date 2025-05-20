@@ -1,31 +1,25 @@
-import os
 import requests
-from dotenv import load_dotenv
 from PyQt5.QtCore import pyqtSignal, Qt, QUrl
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QScrollArea, QGridLayout, QSizePolicy
 from PyQt5.QtGui import QPixmap, QFont
 from src.utils.helpers import load_image_async # Updated import
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from src.api.tmdb import TMDBClient
 
 class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
     play_clicked = pyqtSignal(object)
     trailer_clicked = pyqtSignal(str)
 
-    def __init__(self, movie, api_client=None, main_window=None, parent=None):
+    def __init__(self, movie, api_client=None, main_window=None, tmdb_client=None, parent=None):
         super().__init__(parent)
         self.movie = movie
         self.api_client = api_client
         self.main_window = main_window
         self._is_favorite = False
-
-        load_dotenv()
-        self.tmdb_api_key = os.getenv("TMDB_APIACCESS_TOKEN")
-        if not self.tmdb_api_key:
-            print("Warning: TMDB API key not found in .env file. Cast information will not be loaded.")
-
+        # Remove dotenv and os.getenv for TMDB key
+        self.tmdb_client = tmdb_client
         self.network_manager = QNetworkAccessManager() # For image loading, if load_image_async needs it directly
-
         self.setup_ui()
         self.update_metadata_from_api()
 
@@ -167,7 +161,7 @@ class MovieDetailsWidget(QWidget):
                 tmdb_id = None
                 if 'movie_data' in vod_info and isinstance(vod_info['movie_data'], dict) and 'tmdb_id' in vod_info['movie_data']:
                     tmdb_id = vod_info['movie_data']['tmdb_id']
-                elif 'info' in vod_info and isinstance(vod_info['info'], dict) and 'tmdb_id' in vod_info['info']: # Alternative path
+                elif 'info' in vod_info and isinstance(vod_info['info'], dict) and 'tmdb_id' in vod_info['info']:
                     tmdb_id = vod_info['info']['tmdb_id']
 
                 # Update other metadata from vod_info['info']
@@ -198,11 +192,11 @@ class MovieDetailsWidget(QWidget):
                         # A more robust solution might involve checking and adding the button if it wasn't there.
                         print("[MovieDetailsWidget] Trailer URL updated, but button not found to re-enable or re-create.")
 
-                if tmdb_id and self.tmdb_api_key:
+                if tmdb_id and self.tmdb_client:
                     print(f"[MovieDetailsWidget] Found TMDB ID: {tmdb_id}. Fetching credits...")
                     self._fetch_tmdb_credits(tmdb_id)
-                elif not self.tmdb_api_key:
-                    print("[MovieDetailsWidget] TMDB API key not found. Cannot fetch cast information.")
+                elif not self.tmdb_client:
+                    print("[MovieDetailsWidget] TMDB client not provided. Cannot fetch cast information.")
                 else:
                     print(f"[MovieDetailsWidget] TMDB ID not found in VOD info for stream_id: {self.stream_id}. VOD info: {str(vod_info)[:200]}")
             else:
@@ -211,25 +205,20 @@ class MovieDetailsWidget(QWidget):
             print(f"[MovieDetailsWidget] Error in update_metadata_from_api: {e}")
 
     def _fetch_tmdb_credits(self, tmdb_id):
-        if not self.tmdb_api_key:
-            print("[MovieDetailsWidget] TMDB API key is missing, cannot fetch credits.")
+        if not self.tmdb_client:
+            print("[MovieDetailsWidget] TMDB client is missing, cannot fetch credits.")
             return
-        tmdb_credits_url = f"https://api.themoviedb.org/3/movie/{tmdb_id}/credits?api_key={self.tmdb_api_key}"
-        print(f"[MovieDetailsWidget] Fetching TMDB credits from: {tmdb_credits_url}")
+        print(f"[MovieDetailsWidget] Fetching TMDB credits for TMDB ID: {tmdb_id}")
         try:
-            response = requests.get(tmdb_credits_url, timeout=10)
-            response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
-            credits_data = response.json()
+            credits_data = self.tmdb_client.get_movie_credits(tmdb_id)
             print(f"[MovieDetailsWidget] TMDB credits data received: {str(credits_data)[:200]}...")
             if 'cast' in credits_data and credits_data['cast']:
                 print(f"[MovieDetailsWidget] Found {len(credits_data['cast'])} cast members.")
                 self._fetch_and_display_cast(credits_data['cast'])
             else:
                 print("[MovieDetailsWidget] 'cast' key not found or empty in TMDB credits response.")
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             print(f"[MovieDetailsWidget] Error fetching TMDB credits: {e}")
-        except ValueError as e: # Includes JSONDecodeError
-            print(f"[MovieDetailsWidget] Error decoding TMDB credits JSON: {e}")
 
     def _fetch_and_display_cast(self, cast_data):
         self._clear_layout(self.cast_grid_layout)

@@ -98,7 +98,7 @@ class AccountManagementScreen(QWidget):
         if success:
             self.main_window.connect_to_server(acc['server'], acc['username'], acc['password'])
             self.main_window.update_account_label()
-            QMessageBox.information(self, "Switch Account", f"Switched to account '{name}'.")
+            # QMessageBox.information(self, "Switch Account", f"Switched to account '{name}'.")
         else:
             QMessageBox.warning(self, "Switch Account", "Authentication failed. Please check credentials.")
         self.accounts = self.main_window.accounts
