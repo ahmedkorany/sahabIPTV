@@ -22,6 +22,7 @@ class AccountManagementScreen(QWidget):
         layout.addWidget(back_btn, alignment=Qt.AlignLeft)
 
         self.list_widget = QListWidget()
+        self.list_widget.itemDoubleClicked.connect(lambda _: self.switch_account())
         self.refresh_list()
         layout.addWidget(self.list_widget)
 
@@ -90,15 +91,20 @@ class AccountManagementScreen(QWidget):
         if name == self.current_account:
             QMessageBox.information(self, "Switch Account", "Already using this account.")
             return
-        self.main_window.current_account = name
-        self.main_window.settings.setValue("current_account", name)
         acc = self.accounts[name]
         self.main_window.api_client.set_credentials(acc['server'], acc['username'], acc['password'])
         success, _ = self.main_window.api_client.authenticate()
         if success:
+            self.main_window.current_account = name
+            self.main_window.settings.setValue("current_account", name)
             self.main_window.connect_to_server(acc['server'], acc['username'], acc['password'])
             self.main_window.update_account_label()
-            # QMessageBox.information(self, "Switch Account", f"Switched to account '{name}'.")
+            # Dismiss the dialog after successful switch
+            parent_dialog = self.parent()
+            while parent_dialog and not hasattr(parent_dialog, 'accept'):
+                parent_dialog = parent_dialog.parent()
+            if parent_dialog and hasattr(parent_dialog, 'accept'):
+                parent_dialog.accept()
         else:
             QMessageBox.warning(self, "Switch Account", "Authentication failed. Please check credentials.")
         self.accounts = self.main_window.accounts

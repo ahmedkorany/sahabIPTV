@@ -304,8 +304,15 @@ class MainWindow(QMainWindow):
 
     def show_account_management_screen(self):
         from src.ui.widgets.account_management import AccountManagementScreen
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Account Management")
+        dialog.setMinimumWidth(500)
+        layout = QVBoxLayout(dialog)
         screen = AccountManagementScreen(self, self.accounts, self.current_account)
-        self.setCentralWidget(screen)
+        layout.addWidget(screen)
+        dialog.setLayout(layout)
+        dialog.exec_()
 
     def show_account_switch_dialog(self):
         self.show_account_management_screen()
@@ -570,13 +577,22 @@ class MainWindow(QMainWindow):
         
         return False
     def switch_account(self, name):
-        """Switch to a different account and reload favorites"""
+        """Switch to a different account and reload all tab data without deleting/recreating widgets"""
         self.current_account = name
         self.settings.setValue("current_account", name)
         self.load_favorites()
         if hasattr(self, 'favorites_tab'):
             self.favorites_tab.set_favorites(self.favorites)
-    
+        # Reload categories/data in all tabs to reflect new account
+        if hasattr(self, 'live_tab') and self.live_tab:
+            self.live_tab.load_categories()
+        if hasattr(self, 'movies_tab') and self.movies_tab:
+            self.movies_tab.load_categories()
+        if hasattr(self, 'series_tab') and self.series_tab:
+            self.series_tab.load_categories()
+        # Optionally, reload downloads or other per-account data here
+        # Do NOT recreate or delete any widgets/tabs/main window
+
     def load_settings(self):
         """Load application settings"""
         self.language = self.settings.value("language", DEFAULT_LANGUAGE)

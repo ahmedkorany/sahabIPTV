@@ -49,6 +49,14 @@ class MovieDetailsWidget(QWidget):
             load_image_async(self.movie['stream_icon'], self.poster, QPixmap('assets/movies.png'), update_size=(180, 260))
         else:
             self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # Overlay rated-r icon if movie is for adults
+        if self.movie.get('adult'):
+            rated_r_label = QLabel(self.poster)
+            rated_r_pix = QPixmap('assets/rated-r.png').scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            rated_r_label.setPixmap(rated_r_pix)
+            rated_r_label.setStyleSheet("background: transparent;")
+            rated_r_label.move(0, 0)
+            rated_r_label.raise_()
         left_layout.addWidget(self.poster)
         # --- Favorites button under poster ---
         self.favorite_btn = QPushButton()
