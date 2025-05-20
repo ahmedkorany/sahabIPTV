@@ -6,8 +6,7 @@ import json
 from PyQt5.QtGui import QPalette, QColor, QPixmap
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG
 import threading
-from .image_cache import ensure_cache_dir, get_cache_path
-import sip
+from .image_cache import ImageCache
 
 def load_json_file(file_path, default=None):
     """Load JSON data from a file"""
@@ -238,8 +237,8 @@ def get_api_client_from_label(label, main_window):
     return None
 
 def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
-    ensure_cache_dir()
-    cache_path = get_cache_path(image_url)
+    ImageCache.ensure_cache_dir()
+    cache_path = ImageCache.get_cache_path(image_url)
     def set_pixmap(pixmap):
         try:
             if not hasattr(label, 'setPixmap'):

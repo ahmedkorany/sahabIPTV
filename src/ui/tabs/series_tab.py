@@ -15,7 +15,7 @@ from PyQt5.QtSvg import QSvgWidget
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
-from src.utils.image_cache import ensure_cache_dir, get_cache_path
+from src.utils.image_cache import ImageCache
 
 CACHE_DIR = 'assets/cache/images/'
 
@@ -32,8 +32,8 @@ def get_api_client_from_label(label, main_window):
     return None
 
 def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
-    ensure_cache_dir()
-    cache_path = get_cache_path(image_url)
+    ImageCache.ensure_cache_dir()
+    cache_path = ImageCache.get_cache_path(image_url)
     def set_pixmap(pixmap):
         label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     def worker():

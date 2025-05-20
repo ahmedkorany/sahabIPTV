@@ -19,7 +19,7 @@ import hashlib
 # import threading # No longer needed here if load_image_async is moved
 # from PyQt5.QtCore import QMetaObject, Qt, Q_ARG # No longer needed here
 import os
-# from src.utils.image_cache import ensure_cache_dir, get_cache_path # No longer needed here
+from src.utils.image_cache import ImageCache
 from src.utils.helpers import load_image_async # Import from helpers
 from PyQt5.QtSvg import QSvgWidget
 import sip # Add sip import for checking deleted QObjects

@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer, PlayerWindow
-from src.utils.image_cache import ensure_cache_dir, get_cache_path
+from src.utils.image_cache import ImageCache
 
 class LoginDialog(QDialog):
     """Dialog for entering IPTV server credentials"""
@@ -238,7 +238,7 @@ class SeriesDetailsDialog(QDialog):
 class MovieDetailsDialog(QDialog):
     """Dialog for displaying movie details and playback options"""
     import os
-    from src.utils.image_cache import ensure_cache_dir, get_cache_path
+    from src.utils.image_cache import ImageCache
 
     def __init__(self, movie, api_client, parent=None, main_window=None):
         super().__init__(parent)
@@ -251,9 +251,9 @@ class MovieDetailsDialog(QDialog):
 
     def get_cached_pixmap(self, image_url, fallback_path):
         from PyQt5.QtGui import QPixmap
-        from src.utils.image_cache import ensure_cache_dir, get_cache_path
-        ensure_cache_dir()
-        cache_path = get_cache_path(image_url)
+        from src.utils.image_cache import ImageCache
+        ImageCache.ensure_cache_dir()
+        cache_path = ImageCache.get_cache_path(image_url)
         pix = QPixmap()
         if os.path.exists(cache_path):
             pix.load(cache_path)
