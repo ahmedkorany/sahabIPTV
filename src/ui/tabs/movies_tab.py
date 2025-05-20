@@ -5,7 +5,7 @@ import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QProgressBar, QHeaderView, 
-                            QTableWidget, QTableWidgetItem, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedLayout)
+                            QTableWidget, QTableWidgetItem, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedLayout, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer
@@ -23,6 +23,7 @@ import os
 from src.utils.helpers import load_image_async # Import from helpers
 from PyQt5.QtSvg import QSvgWidget
 from src.api.tmdb import TMDBClient
+import heapq
 
 CACHE_DIR = 'assets/cache/'
 LOADING_ICON = 'assets/loading.gif'
@@ -31,7 +32,7 @@ class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):
         self.name = name
         self.save_path = save_path
-        self.progress = 0
+        self
         self.status = 'active'  # active, paused, completed, error
         self.download_thread = download_thread
         self.error_message = None
@@ -155,6 +156,10 @@ class MoviesTab(QWidget):
         self.current_page = 1
         self.total_pages = 1
         self.page_size = 30
+
+        # Search index attributes
+        self._movie_search_index = {}  # token -> set of indices
+        self._movie_lc_names = []      # lowercased names for fallback
         
         self.setup_ui()
         self.main_window = None  # Will be set by the main window
@@ -202,6 +207,27 @@ class MoviesTab(QWidget):
         grid_widget = QWidget()
         grid_widget.setLayout(grid_panel)
 
+        # Sorting panel (initially hidden)
+        self.order_panel = QWidget()
+        order_layout = QHBoxLayout(self.order_panel)
+        order_label = QLabel("Order by:")
+        self.order_combo = QComboBox()
+        self.order_combo.addItems(["Default", "Date", "Rating", "Name"])
+        self.order_combo.setCurrentIndex(0)
+        self.order_combo.currentIndexChanged.connect(self.on_order_changed)
+        self.sort_toggle = QPushButton("Desc")
+        self.sort_toggle.setCheckable(True)
+        self.sort_toggle.setChecked(True)
+        self.sort_toggle.clicked.connect(self.on_sort_toggle)
+        order_layout.addWidget(order_label)
+        order_layout.addWidget(self.order_combo)
+        order_layout.addWidget(self.sort_toggle)
+        order_layout.addStretch(1)
+        self.order_panel.setVisible(False)
+        # Insert sorting panel just above the grid (movie_grid_scroll)
+        grid_parent_layout = self.movie_grid_scroll.parentWidget().layout() if self.movie_grid_scroll.parentWidget() else self.layout()
+        grid_parent_layout.insertWidget(grid_parent_layout.indexOf(self.movie_grid_scroll), self.order_panel)
+
         # Splitter for left (categories) and right (grid/details)
         from PyQt5.QtWidgets import QSplitter
         splitter = QSplitter(Qt.Horizontal)
@@ -224,6 +250,42 @@ class MoviesTab(QWidget):
         self.current_page = 1
         self.total_pages = 1
         self.update_pagination_controls()
+
+    def on_order_changed(self):
+        self.apply_sort_and_refresh()
+
+    def on_sort_toggle(self):
+        if self.sort_toggle.isChecked():
+            self.sort_toggle.setText("Desc")
+        else:
+            self.sort_toggle.setText("Asc")
+        self.apply_sort_and_refresh()
+
+    def apply_sort_and_refresh(self):
+        items = list(self.movies) if hasattr(self, 'movies') else []
+        sort_field = self.order_combo.currentText()
+        reverse = self.sort_toggle.isChecked()
+        page_size = self.page_size
+        if sort_field == "Default":
+            sorted_items = items
+        else:
+            if sort_field == "Date":
+                key = lambda x: x.get('_sort_date', 0)
+            elif sort_field == "Name":
+                key = lambda x: x.get('_sort_name', '')
+            elif sort_field == "Rating":
+                key = lambda x: x.get('_sort_rating', 0)
+            else:
+                key = None
+            if key:
+                sorted_items = sorted(items, key=key, reverse=reverse)
+            else:
+                sorted_items = items
+        # Paginate after full sort
+        start = (self.current_page - 1) * page_size
+        end = start + page_size
+        sorted_items = sorted_items[start:end]
+        self.display_movie_grid(sorted_items)
 
     def setup_pagination_controls(self):
         self.pagination_panel = QWidget()
@@ -274,6 +336,8 @@ class MoviesTab(QWidget):
             self.load_favorite_movies()
         else:
             self.load_movies(category_id)
+        # Show sorting panel for all except 'favorites'
+        self.order_panel.setVisible(category_id != "favorites")
 
     def load_movies(self, category_id):
         """Load movies for the selected category and display as grid"""
@@ -304,6 +368,7 @@ class MoviesTab(QWidget):
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load movies: {data}")
         self.current_page = 1
+        self.build_movie_search_index()
         self.display_current_page()
 
     def load_favorite_movies(self):
@@ -322,12 +387,50 @@ class MoviesTab(QWidget):
         ]
 
         self.current_page = 1  # Reset to first page for favorites
+        self.build_movie_search_index()  # Build index after loading
         # display_current_page will handle pagination and display
         # It should also update total_pages based on self.movies
         self.display_current_page()
 
+    def build_movie_search_index(self):
+        """Builds a token-based search index for fast lookup."""
+        self._movie_search_index = {}
+        self._movie_lc_names = []
+        # Precompute sort keys for each movie
+        for mv in self.movies:
+            mv['_sort_name'] = mv.get('name', '').lower()
+            try:
+                mv['_sort_date'] = int(mv.get('added', 0))
+            except Exception:
+                mv['_sort_date'] = 0
+            try:
+                mv['_sort_rating'] = float(mv.get('rating', 0))
+            except Exception:
+                mv['_sort_rating'] = 0.0
+        for idx, mv in enumerate(self.movies):
+            name_lc = mv.get('name', '').lower()
+            self._movie_lc_names.append(name_lc)
+            tokens = set(name_lc.split())
+            for token in tokens:
+                if token not in self._movie_search_index:
+                    self._movie_search_index[token] = set()
+                self._movie_search_index[token].add(idx)
+
     def display_movie_grid(self, movies):
         """Display movies as a grid of tiles"""
+        # Clear previous grid
+        for i in reversed(range(self.movie_grid_layout.count())):
+            widget = self.movie_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        if not movies:
+            empty_label = QLabel("This category doesn't contain any Movie")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
+            self.movie_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
+            # Hide sorting panel if no movies to show
+            self.order_panel.setVisible(False)
+            return
         cols = 4
         row = 0
         col = 0
@@ -386,6 +489,8 @@ class MoviesTab(QWidget):
             if col >= cols:
                 col = 0
                 row += 1
+        # Hide sorting panel if no movies to show
+        self.order_panel.setVisible(bool(movies))
 
     def show_movie_details(self, movie):
         # Remove old details widget if present
@@ -440,11 +545,20 @@ class MoviesTab(QWidget):
             QMessageBox.warning(self, "Error", "Player window not available.")
 
     def search_movies(self, text):
-        """Search movies based on input text (grid view)"""
+        """Fast search using token index, fallback to substring search."""
         if not self.movies:
             return
-        text = text.lower()
-        filtered = [mv for mv in self.movies if text in mv['name'].lower()]
+        text = text.strip().lower()
+        if not text:
+            self.display_movie_grid(self.movies)
+            return
+        # Token search
+        if ' ' not in text and text in self._movie_search_index:
+            indices = self._movie_search_index[text]
+            filtered = [self.movies[i] for i in indices]
+        else:
+            # Fallback: substring search
+            filtered = [mv for mv, name in zip(self.movies, self._movie_lc_names) if text in name]
         self.display_movie_grid(filtered)
 
     def paginate_items(self, items, page):

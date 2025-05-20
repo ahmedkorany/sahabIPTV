@@ -244,8 +244,18 @@ class MovieDetailsWidget(QWidget):
             member_name = member.get('name', 'N/A')
             character_name = member.get('character', '') # Get character name
             profile_path = member.get('profile_path')
-            
-            # print(f"[MovieDetailsWidget] Processing cast member: {member_name}, Profile path: {profile_path}")
+            gender = member.get('gender', 0)
+
+            # Select gender-specific placeholder
+            if gender == 2:
+                gender_placeholder = QPixmap('assets/actor.png')
+            elif gender == 1:
+                gender_placeholder = QPixmap('assets/actress.png')
+            else:
+                gender_placeholder = QPixmap('assets/person.png')
+            if gender_placeholder.isNull():
+                gender_placeholder = QPixmap(125, 188)
+                gender_placeholder.fill(Qt.lightGray)
 
             # item_widget and item_layout are still the main container for the grid cell
             item_widget = QWidget()
@@ -265,9 +275,9 @@ class MovieDetailsWidget(QWidget):
             # Load image into poster_label (existing logic)
             if profile_path:
                 full_image_url = f"https://image.tmdb.org/t/p/w185{profile_path}"
-                load_image_async(full_image_url, poster_label, placeholder_pixmap.scaled(125, 188, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(125,188), main_window=self.main_window, loading_counter=loading_counter)
+                load_image_async(full_image_url, poster_label, gender_placeholder.scaled(125, 188, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(125,188), main_window=self.main_window, loading_counter=loading_counter)
             else:
-                poster_label.setPixmap(placeholder_pixmap.scaled(125, 188, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                poster_label.setPixmap(gender_placeholder.scaled(125, 188, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
             # Name Overlay Widget (child of poster_with_overlay_container, drawn on top of poster_label)
             overlay_height = 35 # Height for the overlay

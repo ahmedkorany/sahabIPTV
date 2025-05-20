@@ -5,9 +5,10 @@ import time
 import os
 import hashlib
 import threading
+import heapq
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QStackedLayout)
+                            QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QStackedLayout, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, Q_ARG
 from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtSvg import QSvgWidget
@@ -186,6 +187,9 @@ class SeriesTab(QWidget):
         self.current_series = None
         self.setup_ui()
         self.main_window = None
+        self._series_search_index = {}  # token -> set of indices
+        self._series_lc_names = []      # lowercased names for fallback
+        self._series_sort_cache = {}  # (sort_field, reverse) -> sorted list
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -248,6 +252,27 @@ class SeriesTab(QWidget):
         self.current_page = 1
         self.total_pages = 1
         self.update_pagination_controls()
+        # Sorting panel (initially hidden)
+        self.order_panel = QWidget()
+        order_layout = QHBoxLayout(self.order_panel)
+        order_label = QLabel("Order by:")
+        self.order_combo = QComboBox()
+        self.order_combo.addItems(["Default", "Date", "Rating", "Name"])
+        self.order_combo.setCurrentIndex(0)
+        self.order_combo.currentIndexChanged.connect(self.on_order_changed)
+        self.sort_toggle = QPushButton("Desc")
+        self.sort_toggle.setCheckable(True)
+        self.sort_toggle.setChecked(True)
+        self.sort_toggle.clicked.connect(self.on_sort_toggle)
+        order_layout.addWidget(order_label)
+        order_layout.addWidget(self.order_combo)
+        order_layout.addWidget(self.sort_toggle)
+        order_layout.addStretch(1)
+        self.order_panel.setVisible(False)
+        # Insert sorting panel just above the grid (series_grid_scroll)
+        grid_parent_layout = self.series_grid_scroll.parentWidget().layout() if self.series_grid_scroll.parentWidget() else self.layout()
+        grid_parent_layout.insertWidget(grid_parent_layout.indexOf(self.series_grid_scroll), self.order_panel)
+
         self.setLayout(layout)
 
     def show_series_details(self, series):
@@ -522,6 +547,8 @@ class SeriesTab(QWidget):
             self.load_favorite_series()
         else:
             self.load_series(category_id)
+        # Show sorting panel for all except 'favorites'
+        self.order_panel.setVisible(category_id != "favorites")
 
     def load_series(self, category_id):
         self.series = []
@@ -552,6 +579,8 @@ class SeriesTab(QWidget):
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
         self.current_page = 1
+        self._series_sort_cache.clear()  # Clear cache on reload
+        self.build_series_search_index()  # Build index after loading
         self.display_current_page()
 
     def load_favorite_series(self):
@@ -577,6 +606,8 @@ class SeriesTab(QWidget):
         if self.total_pages == 0:
             self.total_pages = 1 # Ensure at least one page if series list is empty
         
+        self._series_sort_cache.clear()  # Clear cache on reload
+        self.build_series_search_index()
         self.display_series_grid(self.series) # Pass the series list to display
         self.update_pagination_controls()
         if not self.series:
@@ -585,6 +616,18 @@ class SeriesTab(QWidget):
             pass
 
     def display_series_grid(self, series_list):
+        self.order_panel.setVisible(True if series_list else False)
+        # Clear previous grid
+        for i in reversed(range(self.series_grid_layout.count())):
+            widget = self.series_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        if not series_list:
+            empty_label = QLabel("This category doesn't contain any Series")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
+            self.series_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
+            return
         cols = 4
         row = 0
         col = 0
@@ -649,11 +692,45 @@ class SeriesTab(QWidget):
         self.current_series = series
         self.show_series_details(series)
 
+    def build_series_search_index(self):
+        """Builds a token-based search index for fast lookup."""
+        self._series_search_index = {}
+        self._series_lc_names = []
+        # Precompute sort keys for each series
+        for s in self.series:
+            s['_sort_name'] = s.get('name', '').lower()
+            try:
+                s['_sort_date'] = int(s.get('added', 0))
+            except Exception:
+                s['_sort_date'] = 0
+            try:
+                s['_sort_rating'] = float(s.get('rating', 0))
+            except Exception:
+                s['_sort_rating'] = 0.0
+        for idx, s in enumerate(self.series):
+            name_lc = s.get('name', '').lower()
+            self._series_lc_names.append(name_lc)
+            tokens = set(name_lc.split())
+            for token in tokens:
+                if token not in self._series_search_index:
+                    self._series_search_index[token] = set()
+                self._series_search_index[token].add(idx)
+
     def search_series(self, text):
+        """Fast search using token index, fallback to substring search."""
         if not self.series:
             return
-        text = text.lower()
-        filtered = [s for s in self.series if text in s['name'].lower()]
+        text = text.strip().lower()
+        if not text:
+            self.display_series_grid(self.series)
+            return
+        # Token search
+        if ' ' not in text and text in self._series_search_index:
+            indices = self._series_search_index[text]
+            filtered = [self.series[i] for i in indices]
+        else:
+            # Fallback: substring search
+            filtered = [s for s, name in zip(self.series, self._series_lc_names) if text in name]
         self.display_series_grid(filtered)
 
     def load_seasons(self, series_id):
@@ -993,3 +1070,44 @@ class SeriesTab(QWidget):
         page_items, self.total_pages = self.paginate_items(self.series, self.current_page)
         self.display_series_grid(page_items)
         self.update_pagination_controls()
+
+    def on_order_changed(self):
+        self.apply_sort_and_refresh()
+
+    def on_sort_toggle(self):
+        if self.sort_toggle.isChecked():
+            self.sort_toggle.setText("Desc")
+        else:
+            self.sort_toggle.setText("Asc")
+        self.apply_sort_and_refresh()
+
+    def apply_sort_and_refresh(self):
+        items = list(self.series) if hasattr(self, 'series') else []
+        sort_field = self.order_combo.currentText()
+        reverse = self.sort_toggle.isChecked()
+        cache_key = (sort_field, reverse)
+        page_size = self.page_size
+        if sort_field == "Default":
+            sorted_items = items
+        else:
+            if cache_key in self._series_sort_cache:
+                sorted_items = self._series_sort_cache[cache_key]
+            else:
+                if sort_field == "Date":
+                    key = lambda x: x.get('_sort_date', 0)
+                elif sort_field == "Name":
+                    key = lambda x: x.get('_sort_name', '')
+                elif sort_field == "Rating":
+                    key = lambda x: x.get('_sort_rating', 0)
+                else:
+                    key = None
+                if key:
+                    sorted_items = sorted(items, key=key, reverse=reverse)
+                else:
+                    sorted_items = items
+                self._series_sort_cache[cache_key] = sorted_items
+            # Paginate after full sort
+            start = (self.current_page - 1) * page_size
+            end = start + page_size
+            sorted_items = sorted_items[start:end]
+        self.display_series_grid(sorted_items)

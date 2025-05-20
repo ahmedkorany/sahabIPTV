@@ -306,10 +306,21 @@ class LiveTab(QWidget):
 
     def display_channel_grid(self, channels):
         """Display channels as a grid of tiles"""
+        # Clear previous grid
+        for i in reversed(range(self.channel_grid_layout.count())):
+            widget = self.channel_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        self.channel_tiles = []
+        if not channels:
+            empty_label = QLabel("This category doesn't contain any Channel")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
+            self.channel_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
+            return
         cols = 4
         row = 0
         col = 0
-        self.channel_tiles = []  # Store references for highlighting
         main_window = self.main_window if hasattr(self, 'main_window') else None
         loading_counter = getattr(main_window, 'loading_counter', None) if main_window else None
         for channel in channels:

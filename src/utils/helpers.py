@@ -7,6 +7,7 @@ from PyQt5.QtGui import QPalette, QColor, QPixmap
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG
 import threading
 from .image_cache import ensure_cache_dir, get_cache_path
+import sip
 
 def load_json_file(file_path, default=None):
     """Load JSON data from a file"""
@@ -240,7 +241,12 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
     ensure_cache_dir()
     cache_path = get_cache_path(image_url)
     def set_pixmap(pixmap):
-        label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        try:
+            if not hasattr(label, 'setPixmap'):
+                return
+            label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except RuntimeError:
+            return
     def worker():
        # print(f"[DEBUG] Start loading image: {image_url}")
         if main_window and hasattr(main_window, 'loading_icon_controller'):
@@ -272,7 +278,11 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                     print(f"[DEBUG] Failed to load image from data for: {image_url}")
         if not pix or pix.isNull():
             pix = default_pixmap
-        QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        try:
+            if hasattr(label, 'setPixmap'):
+                QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+        except RuntimeError:
+            return
         if loading_counter is not None:
             loading_counter['count'] -= 1
             if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
