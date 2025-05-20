@@ -26,7 +26,7 @@ import sip # Add sip import for checking deleted QObjects
 from src.api.tmdb import TMDBClient
 import heapq
 
-CACHE_DIR = 'assets/cache/'
+CACHE_DIR = 'assets/cache/images/'
 LOADING_ICON = 'assets/loading.gif'
 
 class DownloadItem:

@@ -1,7 +1,7 @@
 import os
 import hashlib
 
-CACHE_DIR = 'assets/cache/'
+CACHE_DIR = 'assets/cache/images/'
 
 def ensure_cache_dir():
     if not os.path.exists(CACHE_DIR):

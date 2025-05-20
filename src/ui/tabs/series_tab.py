@@ -17,7 +17,7 @@ from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ensure_cache_dir, get_cache_path
 
-CACHE_DIR = 'assets/cache/'
+CACHE_DIR = 'assets/cache/images/'
 
 def get_api_client_from_label(label, main_window):
     if main_window and hasattr(main_window, 'api_client'):

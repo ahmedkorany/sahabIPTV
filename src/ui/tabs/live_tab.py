@@ -16,7 +16,7 @@ import threading
 from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
 from src.utils.image_cache import ensure_cache_dir, get_cache_path
 
-CACHE_DIR = 'assets/cache/'
+CACHE_DIR = 'assets/cache/images/'
 
 def ensure_cache_dir():
     import os
