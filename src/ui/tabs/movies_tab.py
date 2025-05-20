@@ -16,18 +16,10 @@ from src.ui.widgets.movie_details_widget import MovieDetailsWidget
 from src.utils.helpers import load_image_async # Ensure it's imported if used elsewhere in this file
 from PyQt5.QtWidgets import QPushButton
 import hashlib
-# import threading # No longer needed here if load_image_async is moved
-# from PyQt5.QtCore import QMetaObject, Qt, Q_ARG # No longer needed here
 import os
-from src.utils.image_cache import ImageCache
-from src.utils.helpers import load_image_async # Import from helpers
-from PyQt5.QtSvg import QSvgWidget
-import sip # Add sip import for checking deleted QObjects
 from src.api.tmdb import TMDBClient
 import heapq
-
-CACHE_DIR = 'assets/cache/images/'
-LOADING_ICON = 'assets/loading.gif'
+import sip
 
 class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):

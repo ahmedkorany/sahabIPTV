@@ -5,24 +5,13 @@ import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, QMetaObject, Q_ARG
 from PyQt5.QtGui import QPixmap, QFont
 import sip # Add sip import for checking deleted QObjects
 from src.ui.player import MediaPlayer
 from src.utils.recorder import RecordingThread
 from src.ui.widgets.dialogs import ProgressDialog
-from src.utils.image_cache import ImageCache
-
-CACHE_DIR = 'assets/cache/images/'
-
-def ensure_cache_dir():
-    import os
-    if not os.path.exists(CACHE_DIR):
-        os.makedirs(CACHE_DIR)
-
-def get_cache_path(image_url_or_id):
-    h = hashlib.md5(str(image_url_or_id).encode('utf-8')).hexdigest()
-    return f"{CACHE_DIR}{h}.img"
+import threading
 
 def get_api_client_from_label(label, main_window):
     if main_window and hasattr(main_window, 'api_client'):
@@ -37,8 +26,6 @@ def get_api_client_from_label(label, main_window):
     return None
 
 def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
-    ImageCache.ensure_cache_dir()
-    cache_path = ImageCache.get_cache_path(image_url)
     def set_pixmap(pixmap):
         label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     def worker():
@@ -47,24 +34,17 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         if main_window and hasattr(main_window, 'loading_icon_controller'):
             main_window.loading_icon_controller.show_icon.emit()
         pix = QPixmap()
-        if os.path.exists(cache_path):
-            #print(f"[DEBUG] Image found in cache: {cache_path}")
-            pix.load(cache_path)
-        else:
-            #print(f"[DEBUG] Downloading image: {image_url}")
-            image_data = None
-            api_client = get_api_client_from_label(label, main_window)
-            try:
-                if (api_client):
-                    image_data = api_client.get_image_data(image_url)
-                else:
-                    print("[DEBUG] Could not find api_client for image download!")
-            except Exception as e:
-                print(f"[DEBUG] Error downloading image: {e}")
-            if image_data:
-                pix.loadFromData(image_data)
-                pix.save(cache_path)
-                #print(f"[DEBUG] Image downloaded and cached: {cache_path}")
+        image_data = None
+        api_client = get_api_client_from_label(label, main_window)
+        try:
+            if (api_client):
+                image_data = api_client.get_image_data(image_url)
+            else:
+                print("[DEBUG] Could not find api_client for image download!")
+        except Exception as e:
+            print(f"[DEBUG] Error downloading image: {e}")
+        if image_data:
+            pix.loadFromData(image_data)
         if not pix or pix.isNull():
             pix = default_pixmap
         QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
@@ -76,16 +56,11 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
             if main_window and hasattr(main_window, 'loading_icon_controller'):
                 main_window.loading_icon_controller.hide_icon.emit()
         print(f"[DEBUG] Finished loading image: {image_url}")
-    # Set cached or placeholder immediately
-    if os.path.exists(cache_path):
-        pix = QPixmap()
-        pix.load(cache_path)
-        set_pixmap(pix)
-    else:
-        set_pixmap(default_pixmap)
-        if loading_counter is not None:
-            loading_counter['count'] += 1
-        threading.Thread(target=worker, daemon=True).start()
+    # Set placeholder immediately
+    set_pixmap(default_pixmap)
+    if loading_counter is not None:
+        loading_counter['count'] += 1
+    threading.Thread(target=worker, daemon=True).start()
 
 class ChannelLoaderWorker(QObject):
     channels_loaded = pyqtSignal(list)

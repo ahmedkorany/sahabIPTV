@@ -3,9 +3,7 @@ Series tab for the application
 """
 import time
 import os
-import hashlib
 import threading
-import heapq
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QStackedLayout, QComboBox)
@@ -15,9 +13,8 @@ from PyQt5.QtSvg import QSvgWidget
 from src.ui.player import MediaPlayer
 from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
-from src.utils.image_cache import ImageCache
-
-CACHE_DIR = 'assets/cache/images/'
+from src.utils.image_cache import ImageCache  # Correct import for ImageCache
+from src.utils.helpers import load_image_async
 
 def get_api_client_from_label(label, main_window):
     if main_window and hasattr(main_window, 'api_client'):
@@ -30,57 +27,6 @@ def get_api_client_from_label(label, main_window):
             return parent.api_client
         parent = parent.parent() if hasattr(parent, 'parent') else None
     return None
-
-def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
-    ImageCache.ensure_cache_dir()
-    cache_path = ImageCache.get_cache_path(image_url)
-    def set_pixmap(pixmap):
-        label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-    def worker():
-        from PyQt5.QtGui import QPixmap
-        #print(f"[DEBUG] Start loading image: {image_url}")
-        if main_window and hasattr(main_window, 'loading_icon_controller'):
-            main_window.loading_icon_controller.show_icon.emit()
-        pix = QPixmap()
-        if os.path.exists(cache_path):
-            #print(f"[DEBUG] Image found in cache: {cache_path}")
-            pix.load(cache_path)
-        else:
-            #print(f"[DEBUG] Downloading image: {image_url}")
-            image_data = None
-            api_client = get_api_client_from_label(label, main_window)
-            try:
-                if api_client:
-                    image_data = api_client.get_image_data(image_url)
-                else:
-                    print("[DEBUG] Could not find api_client for image download!")
-            except Exception as e:
-                print(f"[DEBUG] Error downloading image: {e}")
-            if image_data:
-                pix.loadFromData(image_data)
-                pix.save(cache_path)
-                #print(f"[DEBUG] Image downloaded and cached: {cache_path}")
-        if not pix or pix.isNull():
-            pix = default_pixmap
-        QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
-        if loading_counter is not None:
-            loading_counter['count'] -= 1
-            if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
-                main_window.loading_icon_controller.hide_icon.emit()
-        else:
-            if main_window and hasattr(main_window, 'loading_icon_controller'):
-                main_window.loading_icon_controller.hide_icon.emit()
-        #print(f"[DEBUG] Finished loading image: {image_url}")
-    # Set cached or placeholder immediately
-    if os.path.exists(cache_path):
-        pix = QPixmap()
-        pix.load(cache_path)
-        set_pixmap(pix)
-    else:
-        set_pixmap(default_pixmap)
-        if loading_counter is not None:
-            loading_counter['count'] += 1
-        threading.Thread(target=worker, daemon=True).start()
 
 class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):
