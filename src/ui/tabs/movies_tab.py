@@ -2,24 +2,18 @@
 Movies tab for the application
 """
 import time
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-                            QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel, QProgressBar, QHeaderView, 
-                            QTableWidget, QTableWidgetItem, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedLayout, QComboBox)
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QListWidget, QPushButton, QLabel, QLineEdit, QMessageBox,
+    QStackedWidget, QListWidgetItem, QScrollArea, QGridLayout, QComboBox, QFrame, QFileDialog
+)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer
-from src.utils.download import DownloadThread
-from src.ui.widgets.dialogs import ProgressDialog
-from src.ui.widgets.dialogs import MovieDetailsDialog
 from src.ui.widgets.movie_details_widget import MovieDetailsWidget
-from src.utils.helpers import load_image_async # Ensure it's imported if used elsewhere in this file
-from PyQt5.QtWidgets import QPushButton
-import hashlib
-import os
+from src.utils.helpers import load_image_async
 from src.api.tmdb import TMDBClient
-import heapq
-import sip
+from src.ui.widgets.dialogs import MovieDetailsDialog
+from src.utils.download import DownloadThread
 
 class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):
@@ -29,7 +23,7 @@ class DownloadItem:
         self.status = 'active'  # active, paused, completed, error
         self.download_thread = download_thread
         self.error_message = None
-        self.time_created = time.time()
+        self.time_created = None
         self.time_completed = None
         self.total_size = 0
         self.downloaded_size = 0
@@ -295,9 +289,6 @@ class MoviesTab(QWidget):
 
     def load_categories(self):
         """Load movie categories from the API"""
-        if sip.isdeleted(self.categories_list):
-            print("[MoviesTab] categories_list widget has been deleted, skipping clear().")
-            return
         self.categories_list.clear()
         self.categories = []
         success, data = self.api_client.get_vod_categories()
@@ -392,13 +383,12 @@ class MoviesTab(QWidget):
 
     def build_movie_search_index(self):
         """Builds a token-based search index for fast lookup."""
-        import unicodedata
         self._movie_search_index = {}
         self._movie_lc_names = []
         # Precompute sort keys for each movie
         for mv in self.movies:
             # Normalize name for sorting as well, though primary use is search
-            normalized_sort_name = unicodedata.normalize('NFKD', mv.get('name', '').lower())
+            normalized_sort_name = mv.get('name', '').lower()
             mv['_sort_name'] = normalized_sort_name
             try:
                 mv['_sort_date'] = int(mv.get('added', 0))
@@ -409,7 +399,7 @@ class MoviesTab(QWidget):
             except Exception:
                 mv['_sort_rating'] = 0.0
         for idx, mv in enumerate(self.movies):
-            name_lc_normalized = unicodedata.normalize('NFKD', mv.get('name', '').lower())
+            name_lc_normalized = mv.get('name', '').lower()
             self._movie_lc_names.append(name_lc_normalized) # Store normalized names
             tokens = set(name_lc_normalized.split()) # Tokenize normalized name
             for token in tokens:
@@ -525,7 +515,6 @@ class MoviesTab(QWidget):
     def _play_movie_from_details(self, movie):
         # Reuse the logic from the dialog, but adapted for tab context
         main_window = self.window()
-        from src.ui.widgets.dialogs import MovieDetailsDialog
         dlg = MovieDetailsDialog(movie, self.api_client, parent=self, main_window=main_window)
         # Create movie item with necessary information for favorites
         movie_item = {
@@ -546,12 +535,11 @@ class MoviesTab(QWidget):
             QMessageBox.warning(self, "Error", "Player window not available.")
 
     def search_movies(self, text):
-        import unicodedata
         # Only search if 3+ chars, otherwise always show full list for the current category
         if not self.movies:
             return
         
-        normalized_text = unicodedata.normalize('NFKD', text.strip().lower())
+        normalized_text = text.strip().lower()
         
         if len(normalized_text) < 1: # Allow searching for single Arabic characters if needed, adjust if 3 char min is strict
             self.display_current_page()
