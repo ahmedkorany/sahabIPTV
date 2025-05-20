@@ -265,7 +265,6 @@ class MoviesTab(QWidget):
         items = list(self.movies) if hasattr(self, 'movies') else []
         sort_field = self.order_combo.currentText()
         reverse = self.sort_toggle.isChecked()
-        page_size = self.page_size
         if sort_field == "Default":
             sorted_items = items
         else:
@@ -281,11 +280,10 @@ class MoviesTab(QWidget):
                 sorted_items = sorted(items, key=key, reverse=reverse)
             else:
                 sorted_items = items
-        # Paginate after full sort
-        start = (self.current_page - 1) * page_size
-        end = start + page_size
-        sorted_items = sorted_items[start:end]
-        self.display_movie_grid(sorted_items)
+        # Update self.movies to the sorted list so pagination always follows the sort
+        self.movies = sorted_items
+        self.current_page = 1  # Reset to first page after sort
+        self.display_current_page()
 
     def setup_pagination_controls(self):
         self.pagination_panel = QWidget()
@@ -332,6 +330,10 @@ class MoviesTab(QWidget):
 
     def category_clicked(self, item):
         category_id = item.data(Qt.UserRole)
+        # Reset sorting controls to default
+        self.order_combo.setCurrentIndex(0)  # Default
+        self.sort_toggle.setChecked(True)    # Desc
+        self.sort_toggle.setText("Desc")
         if category_id == "favorites":
             self.load_favorite_movies()
         else:
@@ -545,20 +547,26 @@ class MoviesTab(QWidget):
             QMessageBox.warning(self, "Error", "Player window not available.")
 
     def search_movies(self, text):
-        """Fast search using token index, fallback to substring search."""
+        # Only search if 3+ chars, otherwise always show full list for the current category
         if not self.movies:
             return
         text = text.strip().lower()
-        if not text:
-            self.display_movie_grid(self.movies)
+        if len(text) < 3:
+            self.display_current_page()
             return
         # Token search
         if ' ' not in text and text in self._movie_search_index:
             indices = self._movie_search_index[text]
             filtered = [self.movies[i] for i in indices]
         else:
-            # Fallback: substring search
-            filtered = [mv for mv, name in zip(self.movies, self._movie_lc_names) if text in name]
+            # Fallback: substring search, but use generator and limit results for performance
+            max_results = 200
+            filtered = []
+            for mv, name in zip(self.movies, self._movie_lc_names):
+                if text in name:
+                    filtered.append(mv)
+                    if len(filtered) >= max_results:
+                        break
         self.display_movie_grid(filtered)
 
     def paginate_items(self, items, page):

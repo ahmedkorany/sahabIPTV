@@ -543,6 +543,10 @@ class SeriesTab(QWidget):
 
     def category_clicked(self, item):
         category_id = item.data(Qt.UserRole)
+        # Reset sorting controls to default
+        self.order_combo.setCurrentIndex(0)  # Default
+        self.sort_toggle.setChecked(True)    # Desc
+        self.sort_toggle.setText("Desc")
         if category_id == "favorites":
             self.load_favorite_series()
         else:
@@ -717,12 +721,13 @@ class SeriesTab(QWidget):
                 self._series_search_index[token].add(idx)
 
     def search_series(self, text):
-        """Fast search using token index, fallback to substring search."""
+        # Only search if 3+ chars, otherwise always show full list for the current category
         if not self.series:
             return
         text = text.strip().lower()
-        if not text:
-            self.display_series_grid(self.series)
+        if len(text) < 3:
+            # Always show the full list for the current category
+            self.display_current_page()
             return
         # Token search
         if ' ' not in text and text in self._series_search_index:
@@ -1085,29 +1090,22 @@ class SeriesTab(QWidget):
         items = list(self.series) if hasattr(self, 'series') else []
         sort_field = self.order_combo.currentText()
         reverse = self.sort_toggle.isChecked()
-        cache_key = (sort_field, reverse)
-        page_size = self.page_size
         if sort_field == "Default":
             sorted_items = items
         else:
-            if cache_key in self._series_sort_cache:
-                sorted_items = self._series_sort_cache[cache_key]
+            if sort_field == "Date":
+                key = lambda x: x.get('_sort_date', 0)
+            elif sort_field == "Name":
+                key = lambda x: x.get('_sort_name', '')
+            elif sort_field == "Rating":
+                key = lambda x: x.get('_sort_rating', 0)
             else:
-                if sort_field == "Date":
-                    key = lambda x: x.get('_sort_date', 0)
-                elif sort_field == "Name":
-                    key = lambda x: x.get('_sort_name', '')
-                elif sort_field == "Rating":
-                    key = lambda x: x.get('_sort_rating', 0)
-                else:
-                    key = None
-                if key:
-                    sorted_items = sorted(items, key=key, reverse=reverse)
-                else:
-                    sorted_items = items
-                self._series_sort_cache[cache_key] = sorted_items
-            # Paginate after full sort
-            start = (self.current_page - 1) * page_size
-            end = start + page_size
-            sorted_items = sorted_items[start:end]
-        self.display_series_grid(sorted_items)
+                key = None
+            if key:
+                sorted_items = sorted(items, key=key, reverse=reverse)
+            else:
+                sorted_items = items
+        # Update self.series to the sorted list so pagination always follows the sort
+        self.series = sorted_items
+        self.current_page = 1  # Reset to first page after sort
+        self.display_current_page()
