@@ -14,7 +14,7 @@ if __name__ == "__main__":
     app.setStyle('Fusion')
     app.setWindowIcon(QIcon('assets/sahab_icon.png'))
     app.setApplicationName("Sahab IPTV")
-    app.setOrganizationName("SahabIPTV")
+    app.setOrganizationName("EFHAM Labs")
     if DARK_MODE:
         from src.utils.helpers import apply_dark_theme
         apply_dark_theme(app)
