@@ -15,6 +15,7 @@ from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ImageCache  # Correct import for ImageCache
 from src.utils.helpers import load_image_async
+from src.ui.widgets.series_details_widget import SeriesDetailsWidget
 
 def get_api_client_from_label(label, main_window):
     if main_window and hasattr(main_window, 'api_client'):
@@ -221,140 +222,103 @@ class SeriesTab(QWidget):
 
         self.setLayout(layout)
 
-    def show_series_details(self, series):
-        # Remove old details widget if present
+    def _show_grid_view(self):
+        # Assuming grid view is at index 0 of the stacked_widget
+        self.stacked_widget.setCurrentIndex(0)
+        # Clean up details widget if it exists to free resources
         if self.details_widget:
             self.stacked_widget.removeWidget(self.details_widget)
             self.details_widget.deleteLater()
             self.details_widget = None
-        # Create a new details widget (not a dialog)
-        self.details_widget = self._create_details_widget(series)
-        self.stacked_widget.addWidget(self.details_widget)
+
+    def show_series_details(self, series_data):
+        if self.details_widget:
+            self.stacked_widget.removeWidget(self.details_widget)
+            self.details_widget.deleteLater()
+            self.details_widget = None
+
+        self.current_series = series_data # Keep track of the series being detailed
+        self.details_widget = SeriesDetailsWidget(
+            series_data=series_data,
+            api_client=self.api_client,
+            main_window=self.window(), # Or self.main_window if set
+            parent=self # Parent for the widget itself
+        )
+
+        # Connect signals from SeriesDetailsWidget to handlers in SeriesTab
+        self.details_widget.back_clicked.connect(self._show_grid_view)
+        self.details_widget.play_episode_requested.connect(self._handle_play_episode_request)
+        self.details_widget.toggle_favorite_series_requested.connect(self._handle_toggle_favorite_request)
+        self.details_widget.download_episode_requested.connect(self._handle_download_episode_request)
+        self.details_widget.download_season_requested.connect(self._handle_download_season_request)
+        self.details_widget.export_season_requested.connect(self._handle_export_season_request)
+
+        # Add the new details widget to the stacked_widget (if not already added as a placeholder)
+        # It's common to add it once and then show/hide, or remove/add like here.
+        # If a placeholder was used at index 1:
+        if self.stacked_widget.widget(1) is not None and self.stacked_widget.widget(1) != self.details_widget:
+             # Remove placeholder if it's a generic QWidget before adding the real one
+            old_placeholder = self.stacked_widget.widget(1)
+            if old_placeholder:
+                self.stacked_widget.removeWidget(old_placeholder)
+                old_placeholder.deleteLater()
+        
+        # Ensure details_widget is added if no placeholder or placeholder was removed
+        if self.stacked_widget.indexOf(self.details_widget) == -1:
+            self.stacked_widget.addWidget(self.details_widget) # Adds to the end, usually index 1 if grid is 0
+
         self.stacked_widget.setCurrentWidget(self.details_widget)
 
-    def _create_details_widget(self, series):
-        from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QListWidget
-        from PyQt5.QtGui import QPixmap, QFont
-        details = QWidget()
-        layout = QHBoxLayout(details)
-        # --- Left: Poster and Back button ---
-        left_layout = QVBoxLayout()
-        back_btn = QPushButton("← Back")
-        back_btn.setFixedWidth(80)
-        back_btn.clicked.connect(self.show_series_grid)
-        left_layout.addWidget(back_btn, alignment=Qt.AlignLeft)
-        # Poster
-        poster = QLabel()
-        poster.setAlignment(Qt.AlignTop)
-        pix = QPixmap()
-        series_cover_url = series.get('cover') # Store for favorite item
-        if series_cover_url:
-            image_data = self.api_client.get_image_data(series_cover_url)
-            if image_data:
-                pix.loadFromData(image_data)
-        if not pix or pix.isNull():
-            pix = QPixmap('assets/series.png')
-        if not pix.isNull():
-            poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        left_layout.addWidget(poster)
-
-        # Favorite button
-        self.favorite_series_btn = QPushButton()
-        self.favorite_series_btn.setFixedWidth(180) # Match poster width
-        # Pass the original series dict from the grid, which includes 'cover'
-        self._update_favorite_series_button_text(series) 
-        self.favorite_series_btn.clicked.connect(lambda _, s=series: self._toggle_favorite_series(s))
-        left_layout.addWidget(self.favorite_series_btn)
-
-        layout.addLayout(left_layout)
-        # --- Right: Metadata, seasons, episodes ---
-        right_layout = QVBoxLayout()
-        # Title
-        title = QLabel(series.get('name', ''))
-        title.setFont(QFont('Arial', 16, QFont.Bold))
-        right_layout.addWidget(title)
-        # Metadata
-        meta = QLabel()
-        meta.setText(f"Year: {series.get('year', '--')} | Genre: {series.get('genre', '--')}")
-        right_layout.addWidget(meta)
-        # Description
-        desc = QTextEdit(series.get('plot', ''))
-        desc.setReadOnly(True)
-        desc.setMaximumHeight(80)
-        right_layout.addWidget(desc)
-        # Seasons and episodes
-        self.seasons_list = QListWidget()
-        self.episodes_list = QListWidget()
-        self.seasons_list.itemClicked.connect(self.season_clicked)
-        self.episodes_list.itemDoubleClicked.connect(self.episode_double_clicked)
-        right_layout.addWidget(QLabel("Seasons"))
-        right_layout.addWidget(self.seasons_list)
-        right_layout.addWidget(QLabel("Episodes"))
-        right_layout.addWidget(self.episodes_list)
-        # Play button for selected episode
-        self.play_episode_btn = QPushButton("Play Episode")
-        self.play_episode_btn.setEnabled(False)
-        self.play_episode_btn.clicked.connect(self.play_selected_episode)
-        right_layout.addWidget(self.play_episode_btn)
-        self.episodes_list.currentItemChanged.connect(self.update_play_button_state)
-
-        # --- Add trailer button if available ---
-        trailer_url = series.get('trailer_url')
-        # Try to get trailer_url from detailed info if not present
-        series_id = series.get('series_id')
-        try:
-            success, series_info = self.api_client.get_series_info(series_id)
-            if success and series_info:
-                info = series_info.get('info', {})
-                if not trailer_url:
-                    trailer_url = info.get('trailer_url')
-                # ...existing code for updating meta, desc, poster...
-                meta.setText(f"Year: {info.get('releaseDate', '--')} | Genre: {info.get('genre', '--')}")
-                desc.setPlainText(info.get('plot', ''))
-                if 'cover' in info:
-                    image_data = self.api_client.get_image_data(info['cover'])
-                    if image_data:
-                        pix = QPixmap()
-                        pix.loadFromData(image_data)
-                        if not pix.isNull():
-                            poster.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        except Exception as e:
-            print("Error fetching detailed metadata:", e)
-
-        # Add trailer button if trailer_url is available
-        if trailer_url:
-            trailer_btn = QPushButton("WATCH TRAILER")
-            trailer_btn.clicked.connect(lambda: self._play_trailer(trailer_url))
-            right_layout.addWidget(trailer_btn)
-
-        layout.addLayout(right_layout)
-        # Load seasons for this series
-        self.load_seasons(series['series_id'])
-        self.current_detailed_series = series # Store for reference if needed
-        return details
-
-    def _update_favorite_series_button_text(self, series_data):
+    # --- New/Adapted Signal Handlers ---
+    def _handle_play_episode_request(self, episode_data):
+        # This will replace the logic of the old _play_episode method
+        # For now, just a placeholder
+        print(f"SeriesTab: Play episode requested: {episode_data.get('title')}")
+        # Actual play logic will be added in a subsequent step
         main_window = self.window()
-        if not main_window or not hasattr(main_window, 'is_favorite') or not hasattr(self, 'favorite_series_btn'):
-            if hasattr(self, 'favorite_series_btn'): self.favorite_series_btn.setText("Favorite N/A")
-            return
+        if hasattr(main_window, 'player_window') and episode_data:
+            stream_id = episode_data.get('id') or episode_data.get('stream_id')
+            container_extension = episode_data.get('container_extension', 'mp4')
+            
+            # Ensure current_series is set if needed by get_series_url or for context
+            if not hasattr(self, 'current_series') or not self.current_series:
+                # This might happen if show_series_details wasn't called or series context is lost
+                # Try to get series_id from episode_data if possible, though it's not standard
+                # QMessageBox.warning(self, "Error", "Series context not found for playing episode.")
+                # return
+                # Fallback: if series_id is in episode_data (not typical but as a safeguard)
+                series_id_for_url = episode_data.get('series_id') 
+            else:
+                series_id_for_url = self.current_series.get('series_id')
 
-        # Use series_id and stream_type for checking favorite status
-        favorite_item_check = {
-            'series_id': series_data.get('series_id'),
-            'stream_type': 'series'
-        }
+            # The get_series_url might need series_id if it's not part of episode's stream_id logic
+            # Assuming get_series_url can derive necessary info from stream_id and container_extension
+            stream_url = self.api_client.get_series_url(stream_id, container_extension)
 
-        if main_window.is_favorite(favorite_item_check):
-            self.favorite_series_btn.setText("★")
-            self.favorite_series_btn.setStyleSheet("QPushButton { color: gold; background: transparent; font-size: 16px; }")
-            self.favorite_series_btn.setToolTip("Remove from favorites")
+            if stream_url:
+                episode_name = episode_data.get('title', 'Episode')
+                series_name = self.current_series.get('name', 'Series') if hasattr(self, 'current_series') and self.current_series else ''
+                
+                player_item_info = {
+                    'name': f"{series_name} - {episode_name}",
+                    'stream_id': stream_id,
+                    'stream_url': stream_url,
+                    'container_extension': container_extension,
+                    'stream_type': 'episode', # or 'series' depending on player's expectation
+                    'series_id': series_id_for_url, # For context, like adding to history/watched status
+                    'episode_num': episode_data.get('episode_num'),
+                    'season_num': episode_data.get('season_num')
+                }
+                main_window.player_window.play(stream_url, player_item_info)
+                main_window.player_window.show()
+            else:
+                QMessageBox.warning(self, "Error", "Could not retrieve stream URL for the episode.")
         else:
-            self.favorite_series_btn.setText("☆")
-            self.favorite_series_btn.setStyleSheet("QPushButton { color: white; background: transparent; font-size: 16px; }")
-            self.favorite_series_btn.setToolTip("Add to favorites")
+            QMessageBox.warning(self, "Error", "Player window or episode data not available.")
 
-    def _toggle_favorite_series(self, series_data):
+    def _handle_toggle_favorite_request(self, series_data):
+        # This will replace the logic of the old _toggle_favorite_series method
+        print(f"SeriesTab: Toggle favorite requested for: {series_data.get('name')}")
         main_window = self.window()
         if not main_window or not hasattr(main_window, 'add_to_favorites') or not hasattr(main_window, 'remove_from_favorites'):
             QMessageBox.warning(self, "Error", "Favorite functionality not available in main window.")
@@ -362,7 +326,8 @@ class SeriesTab(QWidget):
 
         series_id = series_data.get('series_id')
         series_name = series_data.get('name')
-        series_cover = series_data.get('cover') # Get cover from the series_data passed
+        # Ensure 'cover' is present in series_data if needed by add_to_favorites
+        series_cover = series_data.get('cover') 
 
         if not series_id or not series_name:
             QMessageBox.warning(self, "Error", "Series data is incomplete for favorites.")
@@ -371,91 +336,161 @@ class SeriesTab(QWidget):
         favorite_item = {
             'name': series_name,
             'series_id': series_id,
-            'cover': series_cover, # Ensure cover is included
+            'cover': series_cover, 
             'stream_type': 'series',
-            'stream_url': '',  # As per example
-            'stream_id': ''    # As per example, or use series_id if preferred for consistency
+            # Add other fields as expected by main_window.add_to_favorites/remove_from_favorites
+            # 'stream_url': '', 'stream_id': '' # Placeholder if needed
         }
         
-        # Check item for is_favorite should only contain identifying keys
         favorite_item_check = {'series_id': series_id, 'stream_type': 'series'}
 
         if main_window.is_favorite(favorite_item_check):
-            main_window.remove_from_favorites(favorite_item) # Pass full item for potential name display in status
+            main_window.remove_from_favorites(favorite_item) 
         else:
             main_window.add_to_favorites(favorite_item)
         
-        self._update_favorite_series_button_text(series_data) # Update button after action
+        # Refresh the button in SeriesDetailsWidget
+        if self.details_widget and self.stacked_widget.currentWidget() == self.details_widget:
+            self.details_widget.refresh_favorite_button()
 
-    def _play_trailer(self, trailer_url):
-        main_window = self.window()
-        if hasattr(main_window, 'player_window'):
-            player_window = main_window.player_window
-            player_window.play(trailer_url, {'name': 'Trailer', 'stream_type': 'trailer'})
-            player_window.show()
-        else:
-            QMessageBox.warning(self, "Error", "Player window not available.")
-
-    def update_play_button_state(self):
-        # Enable play button if an episode is selected and set the user role data
-        item = self.episodes_list.currentItem()
-        self.play_episode_btn.setEnabled(item is not None)
-        if item and hasattr(self, 'current_episodes'):
-            # Find the episode dict and set as user data
-            ep_num = item.text().split(' ')[0].lstrip('E')
-            for ep in self.current_episodes:
-                if str(ep.get('episode_num')) == ep_num:
-                    item.setData(Qt.UserRole, ep)
-                    break
-
-    def play_selected_episode(self):
-        item = self.episodes_list.currentItem()
-        if item:
-            self._play_episode(item)
-
-    def episode_double_clicked(self, item):
-        # Ensure user role data is set
-        self.update_play_button_state()
-        self._play_episode(item)
-
-    def _play_episode(self, item):
-        ep = item.data(Qt.UserRole)
-        if not ep:
-            QMessageBox.warning(self, "Error", "Episode data not found.")
+    def _handle_download_episode_request(self, episode_data):
+        if not episode_data or not self.current_series:
+            QMessageBox.warning(self, "Error", "Episode or series data not found for download.")
             return
-        main_window = self.window()
-        if hasattr(main_window, 'player_window'):
-            stream_id = ep.get('id') or ep.get('stream_id')
-            container_extension = ep.get('container_extension', 'mp4')
-            try:
-                # Try to get container extension from episode info (if available)
-                success, info = self.api_client.get_episode_info(stream_id)
-                if success and 'container_extension' in info:
-                    container_extension = info['container_extension']
-            except Exception:
-                pass
-            # Use the correct method for series/episodes
-            stream_url = self.api_client.get_series_url(stream_id, container_extension)
-            if stream_url:
-                self.current_episode = ep  # Track the current episode for favorites
-                self.current_series = getattr(self, 'current_series', None) or getattr(self, 'series', None)
-                self.episode_num = getattr(self, 'episode_num', None) or getattr(self, 'episode', None)
-                self.season = getattr(self, 'season_num', None) or getattr(self, 'season', None)
-                episode_item = {
-                    'name': f"{self.current_series['name']}-{self.current_episode['title']}",
-                    'stream_id': stream_id,
-                    'stream_url': stream_url,
-                    'container_extension': container_extension,
-                    'stream_type': 'episode'
-                }
-                main_window.player_window.play(stream_url, episode_item)
-                # Provide the current episode to the player window for favorites context
-                if hasattr(main_window.player_window, 'set_current_episode'):
-                    main_window.player_window.set_current_episode(ep)
+
+        series_name = self.current_series.get('name', 'Series')
+        episode_title = episode_data.get('title', 'Episode')
+        episode_num = episode_data.get('episode_num', 'UnknownEpisode')
+        season_num = episode_data.get('season_num', self.details_widget.get_current_season() if self.details_widget else 'UnknownSeason')
+
+        default_filename = f"{series_name} - S{str(season_num).zfill(2)}E{str(episode_num).zfill(2)} - {episode_title}.{episode_data.get('container_extension', 'mp4')}"
+        # Sanitize filename (basic example, consider a more robust function)
+        default_filename = default_filename.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save Episode", default_filename, "Video Files (*.mp4 *.mkv *.avi *.ts);;All Files (*)")
+        if not save_path:
+            return
+
+        stream_id = episode_data.get('id') or episode_data.get('stream_id')
+        container_extension = episode_data.get('container_extension', 'mp4')
+        download_url = self.api_client.get_series_url(stream_id, container_extension)
+
+        if not download_url:
+            QMessageBox.warning(self, "Error", "Could not retrieve download URL for the episode.")
+            return
+
+        download_item = DownloadItem(name=default_filename, save_path=save_path)
+        # The DownloadThread will be created and managed by the DownloadsTab or a central download manager
+        # For now, we just prepare the DownloadItem
+        # download_item.download_thread = DownloadThread(download_url, save_path, download_item) # Example if thread created here
+        
+        self.add_to_downloads.emit(download_item) # DownloadsTab will handle this
+        QMessageBox.information(self, "Download Started", f"{default_filename} has been added to downloads.")
+
+    def _handle_download_season_request(self, season_number):
+        if not self.current_series or not self.details_widget:
+            QMessageBox.warning(self, "Error", "Series data not available for season download.")
+            return
+
+        series_info = self.details_widget.get_series_info()
+        if not series_info or 'episodes' not in series_info or season_number not in series_info['episodes']:
+            QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number}.")
+            return
+
+        episodes_to_download = series_info['episodes'][season_number]
+        if not episodes_to_download:
+            QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number}.")
+            return
+
+        series_name = self.current_series.get('name', 'Series')
+        # Sanitize series name for directory creation
+        sane_series_name = series_name.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+        default_folder_name = f"{sane_series_name} - Season {str(season_number).zfill(2)}"
+
+        save_directory = QFileDialog.getExistingDirectory(self, "Select Directory to Save Season", os.path.expanduser("~"))
+        if not save_directory:
+            return
+
+        season_save_path = os.path.join(save_directory, default_folder_name)
+        try:
+            if not os.path.exists(season_save_path):
+                os.makedirs(season_save_path)
+        except OSError as e:
+            QMessageBox.warning(self, "Error", f"Could not create directory: {season_save_path}\n{e}")
+            return
+
+        download_count = 0
+        for episode_data in episodes_to_download:
+            episode_title = episode_data.get('title', 'Episode')
+            episode_num = episode_data.get('episode_num', 'UnknownEpisode')
+            container_extension = episode_data.get('container_extension', 'mp4')
+            
+            ep_filename = f"{series_name} - S{str(season_number).zfill(2)}E{str(episode_num).zfill(2)} - {episode_title}.{container_extension}"
+            ep_filename = ep_filename.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+            full_save_path = os.path.join(season_save_path, ep_filename)
+
+            stream_id = episode_data.get('id') or episode_data.get('stream_id')
+            download_url = self.api_client.get_series_url(stream_id, container_extension)
+
+            if download_url:
+                download_item = DownloadItem(name=ep_filename, save_path=full_save_path)
+                self.add_to_downloads.emit(download_item)
+                download_count += 1
             else:
-                QMessageBox.warning(self, "Error", "Unable to get episode stream URL.")
+                print(f"Could not get download URL for {ep_filename}")
+        
+        if download_count > 0:
+            QMessageBox.information(self, "Season Download Started", f"{download_count} episodes from Season {season_number} added to downloads.")
         else:
-            QMessageBox.warning(self, "Error", "Player window not available.")
+            QMessageBox.warning(self, "Season Download", f"No episodes could be added to downloads for Season {season_number}.")
+
+    def _handle_export_season_request(self, season_number):
+        if not self.current_series or not self.details_widget:
+            QMessageBox.warning(self, "Error", "Series data not available for season export.")
+            return
+
+        series_info = self.details_widget.get_series_info()
+        if not series_info or 'episodes' not in series_info or season_number not in series_info['episodes']:
+            QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number} to export.")
+            return
+
+        episodes_to_export = series_info['episodes'][season_number]
+        if not episodes_to_export:
+            QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number} to export.")
+            return
+
+        series_name = self.current_series.get('name', 'Series')
+        sane_series_name = series_name.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+        default_m3u_filename = f"{sane_series_name} - Season {str(season_number).zfill(2)}.m3u"
+
+        save_path, _ = QFileDialog.getSaveFileName(self, "Export Season URLs", default_m3u_filename, "M3U Playlist (*.m3u);;All Files (*)")
+        if not save_path:
+            return
+
+        m3u_content = ["#EXTM3U"]
+        for episode_data in episodes_to_export:
+            episode_title = episode_data.get('title', 'Episode')
+            episode_id = episode_data.get('id') or episode_data.get('stream_id')
+            container_extension = episode_data.get('container_extension', 'mp4')
+            stream_url = self.api_client.get_series_url(episode_id, container_extension)
+
+            if stream_url:
+                # Basic M3U format, can be extended with #EXTINF if more metadata is needed
+                m3u_content.append(f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title}\" group-title=\"Season {season_number}\",{episode_title}")
+                m3u_content.append(stream_url)
+            else:
+                print(f"Could not get stream URL for {episode_title}")
+
+        if len(m3u_content) > 1: # Has at least one episode
+            try:
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    f.write("\n".join(m3u_content))
+                QMessageBox.information(self, "Export Successful", f"Season {season_number} URLs exported to {save_path}")
+            except IOError as e:
+                QMessageBox.warning(self, "Export Error", f"Could not write to file: {save_path}\n{e}")
+        else:
+            QMessageBox.warning(self, "Export Failed", f"No stream URLs could be retrieved for Season {season_number}.")
+
 
     def show_series_grid(self):
         self.stacked_widget.setCurrentIndex(0)
@@ -699,35 +734,6 @@ class SeriesTab(QWidget):
                         break
         self.display_series_grid(filtered)
 
-    def load_seasons(self, series_id):
-        """Load seasons for the selected series"""
-        self.seasons_list.clear()
-        self.episodes_list.clear()
-        
-        success, data = self.api_client.get_series_info(series_id)
-        if success:
-            self.series_info = data
-            if 'episodes' in data:
-                for season_number in sorted(data['episodes'].keys(), key=int):
-                    self.seasons_list.addItem(f"Season {season_number}")
-        else:
-            QMessageBox.warning(self, "Error", f"Failed to load seasons: {data}")
-    
-    def season_clicked(self, item):
-        """Handle season selection"""
-        season_text = item.text()
-        season_number = season_text.replace("Season ", "")
-        
-        if hasattr(self, 'series_info') and 'episodes' in self.series_info and season_number in self.series_info['episodes']:
-            episodes = self.series_info['episodes'][season_number]
-            
-            self.episodes_list.clear()
-            self.current_episodes = episodes
-            self.current_season = season_number
-            
-            for episode in sorted(episodes, key=lambda x: int(x['episode_num'])):
-                self.episodes_list.addItem(f"E{episode['episode_num']} - {episode['title']}")
-    
     def episode_double_clicked(self, item):
         """Handle episode double-click"""
         self._play_episode(item)

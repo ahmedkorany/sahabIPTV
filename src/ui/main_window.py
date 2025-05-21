@@ -505,17 +505,78 @@ class MainWindow(QMainWindow):
         self.statusBar.showMessage(f"'{item_name}' added to favorites.", 3000)
         self.favorites_changed.emit()
 
-    def remove_from_favorites(self, index):
-        """Remove an item from favorites for the current account"""
-        if not hasattr(self, 'favorites') or index < 0 or index >= len(self.favorites):
+    def remove_from_favorites(self, item_to_remove):
+        """Remove an item from favorites for the current account.
+        The item is identified by its content (e.g., stream_type and ID).
+        """
+        if not hasattr(self, 'favorites') or not self.favorites:
             return
-        removed = self.favorites.pop(index)
-        if hasattr(self, 'favorites_tab'):
-            self.favorites_tab.set_favorites(self.favorites)
-        self.save_favorites()
-        item_name = removed.get('name', 'Item') # Use the 'removed' item
-        self.statusBar.showMessage(f"'{item_name}' removed from favorites.", 3000)
-        self.favorites_changed.emit()
+
+        found_index = -1
+        item_type_to_remove = item_to_remove.get('stream_type')
+        id_to_remove = None
+
+        # Determine the ID from item_to_remove based on its stream_type
+        if item_type_to_remove == 'movie':
+            id_to_remove = item_to_remove.get('movie_id') or item_to_remove.get('id') # Common keys for movie ID
+        elif item_type_to_remove == 'series':
+            id_to_remove = item_to_remove.get('series_id')
+        elif item_type_to_remove == 'live':
+            id_to_remove = item_to_remove.get('stream_id')
+        # Add other types if necessary, or a general 'id' fallback
+        # else:
+            # id_to_remove = item_to_remove.get('id') # General fallback
+
+        if id_to_remove is None and item_type_to_remove is not None:
+            # This case might happen if the ID key is unexpected for a known type
+            print(f"Warning: Could not determine a unique ID for removal for item type '{item_type_to_remove}': {item_to_remove}")
+            return
+        elif id_to_remove is None and item_type_to_remove is None:
+             # This case if item_to_remove is not structured as expected (e.g. not a dict or missing keys)
+             # This was the original problem path if 'index' (now item_to_remove) was an int.
+             # However, the TypeError implies item_to_remove is a dict here.
+             # For safety, if it's not a dict or doesn't have expected keys, we can't proceed.
+            if isinstance(item_to_remove, int):
+                 # Handle the original integer index case if it's still possible from other call sites
+                if 0 <= item_to_remove < len(self.favorites):
+                    found_index = item_to_remove
+                else:
+                    print(f"Warning: Index {item_to_remove} out of bounds for favorites list.")
+                    return # Index out of bounds
+            else:
+                print(f"Warning: item_to_remove is not an integer index and key identifiers (stream_type, id) are missing: {item_to_remove}")
+                return
+
+        if found_index == -1: # If not already found via integer index path
+            for i, fav_item in enumerate(self.favorites):
+                fav_item_type = fav_item.get('stream_type')
+                fav_item_id = None
+
+                if fav_item_type == 'movie':
+                    fav_item_id = fav_item.get('movie_id') or fav_item.get('id')
+                elif fav_item_type == 'series':
+                    fav_item_id = fav_item.get('series_id')
+                elif fav_item_type == 'live':
+                    fav_item_id = fav_item.get('stream_id')
+                # else:
+                    # fav_item_id = fav_item.get('id') # General fallback
+
+                if fav_item_type == item_type_to_remove and fav_item_id == id_to_remove and fav_item_id is not None:
+                    found_index = i
+                    break
+        
+        if found_index != -1:
+            removed = self.favorites.pop(found_index)
+            if hasattr(self, 'favorites_tab'):
+                self.favorites_tab.set_favorites(self.favorites)
+            self.save_favorites()
+            item_name = removed.get('name', 'Item')
+            self.statusBar.showMessage(f"'{item_name}' removed from favorites.", 3000)
+            self.favorites_changed.emit()
+        else:
+            item_name_to_remove = item_to_remove.get('name', 'Unknown item') if isinstance(item_to_remove, dict) else 'Item at invalid index'
+            # print(f"Warning: Item '{item_name_to_remove}' (ID: {id_to_remove}, Type: {item_type_to_remove}) not found in favorites for removal.")
+            self.statusBar.showMessage(f"Could not remove '{item_name_to_remove}'. Item not found in favorites.", 3000)
 
     def is_favorite(self, item_to_check):
         """Check if an item is in favorites for the current account, considering item type."""
