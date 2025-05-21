@@ -83,15 +83,17 @@ class HomeScreenWidget(QWidget):
 
         # Bottom info bar
         info_bar = QHBoxLayout()
-        user_label = QLabel(f"User: {self.user_info.get('username', 'N/A')}")
-        user_label.setStyleSheet("color: #aaa; font-size: 16px;")
-        info_bar.addWidget(user_label)
+        self.user_label = QLabel(f"User: {self.user_info.get('username', 'N/A')}")
+        self.user_label.setStyleSheet("color: #aaa; font-size: 16px;")
+        info_bar.addWidget(self.user_label)
         info_bar.addStretch()
         self.expiry_label = QLabel(f"Subscription expires: {self.expiry_date or 'N/A'}")
         self.expiry_label.setStyleSheet("color: #aaa; font-size: 16px;")
         info_bar.addWidget(self.expiry_label)
         main_layout.addLayout(info_bar)
-
+    def update_user_info(self, user_name):
+        self.user_info.update({'username': user_name})
+        self.user_label.setText(f"User: {self.user_info.get('username', 'N/A')}")
     def handle_tile_click(self, key):
         if self.on_tile_clicked:
             self.on_tile_clicked(key)

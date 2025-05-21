@@ -11,9 +11,11 @@ from PyQt5.QtGui import QPixmap, QFont
 from src.ui.player import MediaPlayer
 from src.ui.widgets.movie_details_widget import MovieDetailsWidget
 from src.utils.helpers import load_image_async
+from src.utils.text_search import TextSearch
 from src.api.tmdb import TMDBClient
 from src.ui.widgets.dialogs import MovieDetailsDialog
 from src.utils.download import DownloadThread
+import re
 
 class DownloadItem:
     def __init__(self, name, save_path, download_thread=None):
@@ -142,17 +144,17 @@ class MoviesTab(QWidget):
         # Pagination
         self.current_page = 1
         self.total_pages = 1
-        self.page_size = 30
+        self.page_size = 32 # Consistent page size
 
         # Search index attributes
         self._movie_search_index = {}  # token -> set of indices
         self._movie_lc_names = []      # lowercased names for fallback
         
-        self.setup_ui()
-        self.main_window = None  # Will be set by the main window
-    
         # Initialize TMDB client once for all details widgets
         self.tmdb_client = TMDBClient()  # Loads keys from .env automatically
+
+        self.setup_ui() # self.main_window is already set from parent
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
         # Search bar
@@ -201,11 +203,11 @@ class MoviesTab(QWidget):
         self.order_combo = QComboBox()
         self.order_combo.addItems(["Default", "Date", "Rating", "Name"])
         self.order_combo.setCurrentIndex(0)
-        self.order_combo.currentIndexChanged.connect(self.on_order_changed)
+        self.order_combo.currentIndexChanged.connect(self._handle_sort_criteria_changed)
         self.sort_toggle = QPushButton("Desc")
         self.sort_toggle.setCheckable(True)
         self.sort_toggle.setChecked(True)
-        self.sort_toggle.clicked.connect(self.on_sort_toggle)
+        self.sort_toggle.clicked.connect(self._handle_sort_criteria_changed)
         order_layout.addWidget(order_label)
         order_layout.addWidget(self.order_combo)
         order_layout.addWidget(self.sort_toggle)
@@ -233,9 +235,9 @@ class MoviesTab(QWidget):
         layout.addWidget(self.stacked_widget)
         self.setup_pagination_controls()
         grid_panel.addWidget(self.pagination_panel)
-        self.page_size = 32
-        self.current_page = 1
-        self.total_pages = 1
+        # self.page_size is now set in __init__
+        # self.current_page = 1 # Already set in __init__
+        # self.total_pages = 1 # Already set in __init__
         self.update_pagination_controls()
 
     def on_order_changed(self):
@@ -248,29 +250,60 @@ class MoviesTab(QWidget):
             self.sort_toggle.setText("Asc")
         self.apply_sort_and_refresh()
 
+    def _handle_sort_criteria_changed(self):
+        self.apply_sort_and_refresh()
+
     def apply_sort_and_refresh(self):
-        items = list(self.movies) if hasattr(self, 'movies') else []
+        # Determine the list to sort.
+        # self.filtered_movies should hold the current set of items (e.g., search results, or all items if no search).
+        if hasattr(self, 'filtered_movies') and self.filtered_movies is not None:
+            items_to_sort = list(self.filtered_movies)
+        elif hasattr(self, 'movies') and self.movies:
+            # Fallback: if filtered_movies isn't populated, use self.movies as the base.
+            items_to_sort = list(self.movies)
+        else:
+            items_to_sort = []
+
         sort_field = self.order_combo.currentText()
         reverse = self.sort_toggle.isChecked()
+
         if sort_field == "Default":
-            sorted_items = items
+            # For "Default" sort, re-apply the current search.
+            # search_movies will populate self.filtered_movies with (unsorted) search results from self.movies
+            # and then call display_current_page.
+            current_search_text = self.search_input.text() if hasattr(self, 'search_input') else ""
+            self.search_movies(current_search_text)
+            return # search_movies handles the display update
+
+        # If there are no items to sort (e.g., empty category and not "Default" sort),
+        # ensure the display is empty and pagination is correct.
+        if not items_to_sort:
+            self.filtered_movies = []
+            self.current_page = 1
+            self.display_current_page() # This will show "no movies" message
+            return
+
+        # For other sort fields:
+        key_func = None
+        if sort_field == "Date":
+            key_func = lambda x: x.get('_sort_date', 0)
+        elif sort_field == "Name":
+            key_func = lambda x: x.get('_sort_name', '')
+        elif sort_field == "Rating":
+            key_func = lambda x: x.get('_sort_rating', 0)
+        
+        if key_func:
+            sorted_items = sorted(items_to_sort, key=key_func, reverse=reverse)
         else:
-            if sort_field == "Date":
-                key = lambda x: x.get('_sort_date', 0)
-            elif sort_field == "Name":
-                key = lambda x: x.get('_sort_name', '')
-            elif sort_field == "Rating":
-                key = lambda x: x.get('_sort_rating', 0)
-            else:
-                key = None
-            if key:
-                sorted_items = sorted(items, key=key, reverse=reverse)
-            else:
-                sorted_items = items
-        # Update self.movies to the sorted list so pagination always follows the sort
-        self.movies = sorted_items
-        self.current_page = 1  # Reset to first page after sort
-        self.display_current_page()
+            # Should not happen if ComboBox is restricted to valid sort fields.
+            # If it does, treat as no-sort on the current items_to_sort.
+            sorted_items = items_to_sort 
+        
+        self.filtered_movies = sorted_items # Update self.filtered_movies with the sorted list
+        # DO NOT update self.movies here, as it's the source for the search index.
+        
+        self.current_page = 1
+        self.display_current_page() # display_current_page uses self.filtered_movies
 
     def setup_pagination_controls(self):
         self.pagination_panel = QWidget()
@@ -357,8 +390,9 @@ class MoviesTab(QWidget):
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load movies: {data}")
         self.current_page = 1
-        self.build_movie_search_index()
-        self.display_current_page()
+        self.build_movie_search_index() # Depends on self.movies
+        self.filtered_movies = list(self.movies) # Reset filtered list to all current movies
+        self.display_current_page() # Will use self.filtered_movies
 
     def load_favorite_movies(self):
         """Load and display favorite movies using the SeriesTab approach."""
@@ -376,52 +410,72 @@ class MoviesTab(QWidget):
         ]
 
         self.current_page = 1  # Reset to first page for favorites
-        self.build_movie_search_index()  # Build index after loading
+        self.build_movie_search_index()  # Build index after loading (depends on self.movies)
+        self.filtered_movies = list(self.movies) # Reset filtered list
         # display_current_page will handle pagination and display
         # It should also update total_pages based on self.movies
-        self.display_current_page()
+        self.display_current_page() # Will use self.filtered_movies
 
     def build_movie_search_index(self):
-        """Builds a token-based search index for fast lookup."""
-        self._movie_search_index = {}
-        self._movie_lc_names = []
-        # Precompute sort keys for each movie
-        for mv in self.movies:
-            # Normalize name for sorting as well, though primary use is search
-            normalized_sort_name = mv.get('name', '').lower()
-            mv['_sort_name'] = normalized_sort_name
-            try:
-                mv['_sort_date'] = int(mv.get('added', 0))
-            except Exception:
-                mv['_sort_date'] = 0
-            try:
-                mv['_sort_rating'] = float(mv.get('rating', 0))
-            except Exception:
-                mv['_sort_rating'] = 0.0
-        for idx, mv in enumerate(self.movies):
-            name_lc_normalized = mv.get('name', '').lower()
-            self._movie_lc_names.append(name_lc_normalized) # Store normalized names
-            tokens = set(name_lc_normalized.split()) # Tokenize normalized name
-            for token in tokens:
-                if token not in self._movie_search_index:
-                    self._movie_search_index[token] = set()
-                self._movie_search_index[token].add(idx)
+        """Builds a token-based search index for fast lookup using normalized text."""
+        self._movie_search_index = {}  # token -> set of movie indices
+        self._movie_lc_names = []      # list of normalized names for fallback search
 
-    def display_movie_grid(self, movies):
+        if not hasattr(self, 'movies') or not self.movies:
+            # If self.movies is empty, _movie_search_index and _movie_lc_names will remain as initialized (empty).
+            # self.filtered_movies is handled by the calling functions (e.g., load_movies, search_movies).
+            return
+
+        for idx, movie_data in enumerate(self.movies):
+            original_name = movie_data.get('name', '')
+            normalized_name = TextSearch.normalize_text(original_name)
+
+            movie_data['_normalized_name'] = normalized_name
+            self._movie_lc_names.append(normalized_name)
+
+            movie_data['_sort_name'] = normalized_name # Use normalized name for 'Name' sort
+            try:
+                movie_data['_sort_date'] = int(movie_data.get('added', 0))
+            except (ValueError, TypeError):
+                movie_data['_sort_date'] = 0
+            try:
+                movie_data['_sort_rating'] = float(movie_data.get('rating', 0))
+            except (ValueError, TypeError):
+                movie_data['_sort_rating'] = 0.0
+
+            tokens = set(normalized_name.split()) 
+            for token in tokens:
+                if token:  # Avoid empty tokens
+                    if token not in self._movie_search_index:
+                        self._movie_search_index[token] = set()
+                    self._movie_search_index[token].add(idx)
+
+    def display_movie_grid(self, movies): # movies is page_items
         """Display movies as a grid of tiles"""
-        # Clear previous grid
-        for i in reversed(range(self.movie_grid_layout.count())):
-            widget = self.movie_grid_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
+        # Grid is cleared in display_current_page before this method is called
         if not movies:
-            empty_label = QLabel("This category doesn't contain any Movie")
+            message = "This category currently has no movies." # Default message
+            if hasattr(self, 'search_input') and self.search_input.text().strip():
+                message = "No movies found matching your search criteria."
+            
+            empty_label = QLabel(message)
             empty_label.setAlignment(Qt.AlignCenter)
             empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
-            self.movie_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
-            # Hide sorting panel if no movies to show
-            self.order_panel.setVisible(False)
+            self.movie_grid_layout.addWidget(empty_label, 0, 0, 1, 4) # Add to grid
+            if hasattr(self, 'order_panel'):
+                self.order_panel.setVisible(False)
             return
+        # Ensure order_panel visibility is correctly set when movies are present
+        if hasattr(self, 'order_panel') and hasattr(self, 'categories_list'):
+            current_category_item = self.categories_list.currentItem()
+            is_favorites_category = False
+            if current_category_item:
+                category_id = current_category_item.data(Qt.UserRole)
+                if category_id == "favorites":
+                    is_favorites_category = True
+            # Show order panel if there are movies to display AND it's not the favorites category
+            self.order_panel.setVisible(bool(movies) and not is_favorites_category)
+
         cols = 4
         row = 0
         col = 0
@@ -462,7 +516,8 @@ class MoviesTab(QWidget):
                 new_icon.raise_()
             tile_layout.addWidget(poster_container, alignment=Qt.AlignCenter)
             # Movie name
-            name = QLabel(movie['name'])
+            name_text = movie.get('name', 'Unnamed Movie')
+            name = QLabel(name_text)
             name.setAlignment(Qt.AlignCenter)
             name.setWordWrap(True)
             name.setFont(QFont('Arial', 11, QFont.Bold))
@@ -535,36 +590,78 @@ class MoviesTab(QWidget):
             QMessageBox.warning(self, "Error", "Player window not available.")
 
     def search_movies(self, text):
-        # Only search if 3+ chars, otherwise always show full list for the current category
-        if not self.movies:
-            return
-        
-        normalized_text = text.strip().lower()
-        
-        if len(normalized_text) < 1: # Allow searching for single Arabic characters if needed, adjust if 3 char min is strict
+        """Filter movies based on search text using normalized query and movie names."""
+        search_term = text.strip()
+
+        if not hasattr(self, 'movies') or not self.movies:
+            self.filtered_movies = []
+            self.current_page = 1
             self.display_current_page()
             return
-            
-        # Token search: Use normalized_text for token lookup
-        # We assume tokens in _movie_search_index are already normalized from build_movie_search_index
-        # If the normalized_text itself is a single token and exists in the index:
-        if ' ' not in normalized_text and normalized_text in self._movie_search_index:
-            indices = self._movie_search_index[normalized_text]
-            filtered = [self.movies[i] for i in indices]
-        else:
-            # Fallback: substring search using normalized text and normalized names
-            # _movie_lc_names should contain pre-normalized names from build_movie_search_index
-            max_results = 200
-            filtered = []
-            for mv, normalized_movie_name in zip(self.movies, self._movie_lc_names):
-                if normalized_text in normalized_movie_name:
-                    filtered.append(mv)
-                    if len(filtered) >= max_results:
-                        break
-        self.display_movie_grid(filtered)
 
-    def paginate_items(self, items, page):
-        total_items = len(items)
+        # TextSearch.search handles empty search_term by returning all items
+        # and internal normalization. It also handles the token and substring search.
+        # The key_func extracts the original name for TextSearch to normalize and search against.
+        # Note: The previous implementation had a more complex token-based search (AND logic) 
+        # and a fallback substring search. The current TextSearch.search is simpler (substring match).
+        # If the more complex logic is strictly needed, TextSearch.search would need to be enhanced
+        # or this method would need to retain some custom logic around TextSearch.normalize_text.
+        # For now, we use the simpler centralized search.
+        
+        # Option 1: Simple search using TextSearch.search (current implementation in TextSearch class)
+        # self.filtered_movies = TextSearch.search(
+        #     self.movies, 
+        #     search_term, 
+        #     lambda item: item.get('name', '') 
+        # )
+
+        # Option 2: Using the more complex token/substring logic from movies_tab.
+        normalized_query = TextSearch.normalize_text(search_term)
+        if not normalized_query:
+            self.filtered_movies = list(self.movies) if hasattr(self, 'movies') and self.movies else []
+        else:
+            matched_indices = set()
+            query_tokens = set(token for token in normalized_query.split(' ') if token)
+            
+            if query_tokens and hasattr(self, '_movie_search_index'):
+                processed_first_token = False
+                current_results_token_search = set()
+                # Perform token-based intersection search (AND logic for tokens)
+                for i, token in enumerate(query_tokens):
+                    if token in self._movie_search_index:
+                        if not processed_first_token:
+                            current_results_token_search = self._movie_search_index[token].copy()
+                            processed_first_token = True
+                        else:
+                            current_results_token_search.intersection_update(self._movie_search_index[token])
+                    else:
+                        # If any token is not found, the AND condition fails for token search
+                        current_results_token_search.clear()
+                        break # No need to check further tokens
+                if processed_first_token: # if at least one token was processed and found
+                    matched_indices.update(current_results_token_search)
+            
+            # Fallback or additional: Substring search on full normalized names 
+            # (self._movie_lc_names are already normalized, populated by build_movie_search_index)
+            # This part can find matches even if the token search didn't, or add to them.
+            if hasattr(self, '_movie_lc_names'):
+                for idx, normalized_movie_name in enumerate(self._movie_lc_names):
+                    if normalized_query in normalized_movie_name:
+                        matched_indices.add(idx)
+            
+            if hasattr(self, 'movies') and self.movies:
+                self.filtered_movies = [self.movies[i] for i in sorted(list(matched_indices)) if i < len(self.movies)]
+            else:
+                self.filtered_movies = []
+
+        self.current_page = 1
+        self.display_current_page()
+
+    def paginate_items(self, items_to_paginate, page):
+        """Paginate a list of items."""
+        total_items = len(items_to_paginate)
+        if total_items == 0:
+            return [], 1
         total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
         if page < 1:
             page = 1
@@ -572,7 +669,7 @@ class MoviesTab(QWidget):
             page = total_pages
         start = (page - 1) * self.page_size
         end = min(start + self.page_size, total_items)
-        return items[start:end], total_pages
+        return items_to_paginate[start:end], total_pages
 
     def update_pagination_controls(self):
         if self.total_pages > 1:
@@ -598,12 +695,17 @@ class MoviesTab(QWidget):
             self.display_current_page()
 
     def display_current_page(self):
-        for i in reversed(range(self.movie_grid_layout.count())):
-            widget = self.movie_grid_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
-        page_items, self.total_pages = self.paginate_items(self.movies, self.current_page)
-        self.display_movie_grid(page_items)
+        # Clear previous grid items more thoroughly
+        while self.movie_grid_layout.count() > 0:
+            item = self.movie_grid_layout.takeAt(0) # takeAt removes and returns item from layout
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.setParent(None) # Disassociate widget from parent
+                    widget.deleteLater()   # Schedule widget for deletion
+        
+        page_items, self.total_pages = self.paginate_items(self.filtered_movies, self.current_page)
+        self.display_movie_grid(page_items) # This will add new widgets to the now empty layout
         self.update_pagination_controls()
 
     def movie_double_clicked(self, item):

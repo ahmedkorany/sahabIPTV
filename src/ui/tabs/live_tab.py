@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, QMetaObject, Q_ARG
 from PyQt5.QtGui import QPixmap, QFont
+from src.utils.text_search import TextSearch
 import sip # Add sip import for checking deleted QObjects
 from src.ui.player import MediaPlayer
 from src.utils.recorder import RecordingThread
@@ -345,18 +346,19 @@ class LiveTab(QWidget):
 
     def search_channels(self, text):
         """Search channels based on input text (grid view)"""
-        import unicodedata
+        search_term = text.strip()
+
         if not self.live_channels:
+            self.display_channel_grid([]) # Display empty grid if no channels
             return
-        # Normalize the search text
-        normalized_text = unicodedata.normalize('NFKD', text.lower())
-        
-        filtered_channels = []
-        for ch in self.live_channels:
-            # Normalize the channel name
-            normalized_channel_name = unicodedata.normalize('NFKD', ch['name'].lower())
-            if normalized_text in normalized_channel_name:
-                filtered_channels.append(ch)
+
+        # TextSearch.search handles empty search_term by returning all items
+        # and internal normalization.
+        filtered_channels = TextSearch.search(
+            self.live_channels,
+            search_term,
+            lambda item: item.get('name', '')
+        )
         
         self.display_channel_grid(filtered_channels)
     

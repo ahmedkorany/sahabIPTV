@@ -271,6 +271,7 @@ class MainWindow(QMainWindow):
         if success:
             self.show_status_message("Full cache population completed successfully.")
             self.reload_tab_categories()
+            self.home_screen.update_expiry_date(self.expiry_str)
         else:
             self.show_status_message(f"Cache population failed: {message}")
         self.cache_thread = None # Allow re-creation
@@ -288,15 +289,6 @@ class MainWindow(QMainWindow):
     def handle_reload_requested(self):
         """Handles the reload request from the home screen."""
         if self.api_client and self.api_client.server_url:
-            # self.api_client.invalidate_cache() # invalidate_cache is now called within start_full_cache_population if force_reload is True
-            # # Reload categories in each tab - This will be handled by on_cache_population_finished
-            # if hasattr(self, 'live_tab') and self.live_tab:
-            #     self.live_tab.load_categories()
-            # if hasattr(self, 'movies_tab') and self.movies_tab:
-            #     self.movies_tab.load_categories()
-            # if hasattr(self, 'series_tab') and self.series_tab:
-            #     self.series_tab.load_categories()
-            # QMessageBox.information(self, "Reload", "Cache cleared and data refresh initiated.")
             self.start_full_cache_population(force_reload=True)
             self.show_status_message("Cache cleared and data refresh initiated.")
         else:
@@ -424,10 +416,6 @@ class MainWindow(QMainWindow):
         expiry_str = ""
         if success:
             self.statusBar.showMessage("Connected successfully. Populating cache...")
-            # Instead of loading categories directly, start the full cache population
-            # self.live_tab.load_categories()
-            # self.movies_tab.load_categories()
-            # self.series_tab.load_categories()
             self.start_full_cache_population() # This will also reload tab categories upon completion
             
             # Get expiry date from user_info if available
@@ -742,7 +730,8 @@ class MainWindow(QMainWindow):
     def update_account_label(self):
         if hasattr(self, 'account_label'):
             if self.current_account:
-                self.account_label.setText(f"Account: {self.current_account}")
+                user_info={'username': self.current_account or ''},
+                self.home_screen.update_user_info(self.current_account)
                 self.setWindowTitle(f"Sahab Xtream IPTV - {self.current_account}")
             else:
                 self.account_label.setText("")

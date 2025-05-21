@@ -15,6 +15,7 @@ from src.utils.download import DownloadThread, BatchDownloadThread
 from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ImageCache  # Correct import for ImageCache
 from src.utils.helpers import load_image_async
+from src.utils.text_search import TextSearch
 from src.ui.widgets.series_details_widget import SeriesDetailsWidget
 
 def get_api_client_from_label(label, main_window):
@@ -130,6 +131,7 @@ class SeriesTab(QWidget):
         super().__init__(parent)
         self.api_client = api_client
         self.series = []
+        self.filtered_series = []
         self.all_series = []  # Store all series across categories
         self.current_series = None
         self.setup_ui()
@@ -565,8 +567,8 @@ class SeriesTab(QWidget):
                 QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
         self.current_page = 1
         self._series_sort_cache.clear()  # Clear cache on reload
-        self.build_series_search_index()  # Build index after loading
-        self.display_current_page()
+        self.build_series_search_index()  # Build index after loading, populates _normalized_name
+        self.search_series(self.search_input.text()) # Apply current search or show all
 
     def load_favorite_series(self):
         main_window = self.window()
@@ -592,9 +594,8 @@ class SeriesTab(QWidget):
             self.total_pages = 1 # Ensure at least one page if series list is empty
         
         self._series_sort_cache.clear()  # Clear cache on reload
-        self.build_series_search_index()
-        self.display_series_grid(self.series) # Pass the series list to display
-        self.update_pagination_controls()
+        self.build_series_search_index() # Populates _normalized_name
+        self.search_series(self.search_input.text()) # Apply current search or show all
         if not self.series:
             # Optionally, show a message in the grid area if no favorites
             # For now, an empty grid will be shown by display_series_page
@@ -678,61 +679,61 @@ class SeriesTab(QWidget):
         self.show_series_details(series)
 
     def build_series_search_index(self):
-        """Builds a token-based search index for fast lookup."""
-        import unicodedata
+        """Builds a token-based search index for fast lookup using normalized names."""
         self._series_search_index = {}
-        self._series_lc_names = []
-        # Precompute sort keys for each series
-        for s in self.series:
-            # Normalize name for sorting as well, though primary use is search
-            normalized_sort_name = unicodedata.normalize('NFKD', s.get('name', '').lower())
-            s['_sort_name'] = normalized_sort_name
+        self._series_lc_names = [] # This will store _normalized_name for potential fallback or direct use
+
+        if not self.series:
+            return
+
+        for idx, s_item in enumerate(self.series):
+            original_name = s_item.get('name', '')
+            normalized_name = TextSearch.normalize_text(original_name)
+            s_item['_normalized_name'] = normalized_name
+            s_item['_sort_name'] = normalized_name # Use normalized name for consistent sorting
+
             try:
-                s['_sort_date'] = int(s.get('added', 0))
-            except Exception:
-                s['_sort_date'] = 0
+                s_item['_sort_date'] = int(s_item.get('added', 0))
+            except (ValueError, TypeError):
+                s_item['_sort_date'] = 0
             try:
-                s['_sort_rating'] = float(s.get('rating', 0))
-            except Exception:
-                s['_sort_rating'] = 0.0
-        for idx, s in enumerate(self.series):
-            name_lc_normalized = unicodedata.normalize('NFKD', s.get('name', '').lower())
-            self._series_lc_names.append(name_lc_normalized) # Store normalized names
-            tokens = set(name_lc_normalized.split()) # Tokenize normalized name
+                s_item['_sort_rating'] = float(s_item.get('rating', 0))
+            except (ValueError, TypeError):
+                s_item['_sort_rating'] = 0.0
+            
+            self._series_lc_names.append(normalized_name) # Keep this list updated
+
+            tokens = set(normalized_name.split()) 
             for token in tokens:
+                if not token: # Skip empty tokens that might result from multiple spaces
+                    continue
                 if token not in self._series_search_index:
                     self._series_search_index[token] = set()
                 self._series_search_index[token].add(idx)
 
     def search_series(self, text):
-        import unicodedata
-        # Only search if 3+ chars, otherwise always show full list for the current category
-        if not self.series:
-            return
+        search_term = text.strip()
+
+        if not hasattr(self, 'series') or self.series is None:
+            self.series = []
         
-        normalized_text = unicodedata.normalize('NFKD', text.strip().lower())
-        
-        if len(normalized_text) < 1: # Allow searching for single Arabic characters if needed, adjust if 3 char min is strict
+        if not self.series: # No series loaded or series list is empty
+            self.filtered_series = []
+            self.current_page = 1
             self.display_current_page()
             return
-            
-        # Token search: Use normalized_text for token lookup
-        # We assume tokens in _series_search_index are already normalized from build_series_search_index
-        # If the normalized_text itself is a single token and exists in the index:
-        if ' ' not in normalized_text and normalized_text in self._series_search_index:
-            indices = self._series_search_index[normalized_text]
-            filtered = [self.series[i] for i in indices]
-        else:
-            # Fallback: substring search using normalized text and normalized names
-            # _series_lc_names should contain pre-normalized names from build_series_search_index
-            max_results = 200 # Consider adding a max_results like in movies_tab
-            filtered = []
-            for s, normalized_series_name in zip(self.series, self._series_lc_names):
-                if normalized_text in normalized_series_name:
-                    filtered.append(s)
-                    if len(filtered) >= max_results:
-                        break
-        self.display_series_grid(filtered)
+
+        # TextSearch.search handles empty search_term by returning all items
+        # It also handles normalization internally.
+        # The key_func extracts the original name for TextSearch to normalize and search against.
+        self.filtered_series = TextSearch.search(
+            self.series, 
+            search_term, 
+            lambda item: item.get('name', '')
+        )
+        
+        self.current_page = 1 # Reset to first page for new search results
+        self.display_current_page()
 
     def episode_double_clicked(self, item):
         """Handle episode double-click"""
@@ -1035,13 +1036,25 @@ class SeriesTab(QWidget):
             self.display_current_page()
 
     def display_current_page(self):
+        # Clear existing grid items
         for i in reversed(range(self.series_grid_layout.count())):
             widget = self.series_grid_layout.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
-        page_items, self.total_pages = self.paginate_items(self.series, self.current_page)
-        self.display_series_grid(page_items)
-        self.update_pagination_controls()
+        
+        source_list = []
+        # Check if search_input exists and has text
+        search_active = hasattr(self, 'search_input') and self.search_input.text().strip()
+
+        if search_active:
+            if hasattr(self, 'filtered_series') and self.filtered_series is not None:
+                source_list = self.filtered_series
+        elif hasattr(self, 'series') and self.series is not None:
+            source_list = self.series
+        
+        page_items, self.total_pages = self.paginate_items(source_list, self.current_page)
+        self.display_series_grid(page_items) # display_series_grid takes the paginated items
+        self.update_pagination_controls() # update_pagination_controls uses self.total_pages
 
     def on_order_changed(self):
         self.apply_sort_and_refresh()
@@ -1074,5 +1087,6 @@ class SeriesTab(QWidget):
                 sorted_items = items
         # Update self.series to the sorted list so pagination always follows the sort
         self.series = sorted_items
+        self.build_series_search_index() # Rebuild index/normalized names if series order changed
         self.current_page = 1  # Reset to first page after sort
-        self.display_current_page()
+        self.search_series(self.search_input.text()) # Re-apply search to the sorted list
