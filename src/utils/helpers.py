@@ -3442,9 +3442,6 @@ def get_translations(language):
             "Record": "Record",
             "Stop Recording": "Stop Recording",
             "Add to Favorites": "Add to Favorites",
-            "Download": "Download",
-            "Download Episode": "Download Episode",
-            "Download Season": "Download Season",
             "Remove from Favorites": "Remove from Favorites",
             "Connect": "Connect",
             "Server URL": "Server URL",
@@ -3462,8 +3459,7 @@ def get_translations(language):
             "Mute": "Mute",
             "Fullscreen": "Fullscreen",
             "Exit Fullscreen": "Exit Fullscreen",
-            "Speed": "Speed",
-            "Downloads": "Downloads"
+            "Speed": "Speed"
         },
         "ar": {
             "Live TV": "البث المباشر",
@@ -3476,9 +3472,6 @@ def get_translations(language):
             "Record": "تسجيل",
             "Stop Recording": "إيقاف التسجيل",
             "Add to Favorites": "إضافة إلى المفضلة",
-            "Download": "تحميل",
-            "Download Episode": "تحميل الحلقة",
-            "Download Season": "تحميل الموسم",
             "Remove from Favorites": "إزالة من المفضلة",
             "Connect": "اتصال",
             "Server URL": "عنوان الخادم",
@@ -3496,8 +3489,7 @@ def get_translations(language):
             "Mute": "كتم",
             "Fullscreen": "ملء الشاشة",
             "Exit Fullscreen": "الخروج من ملء الشاشة",
-            "Speed": "السرعة",
-            "Downloads": "التحميلات"
+            "Speed": "السرعة"
         }
     }
     

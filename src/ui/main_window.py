@@ -12,7 +12,6 @@ from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
-from src.ui.tabs.downloads_tab import DownloadsTab
 from src.ui.widgets.dialogs import LoginDialog
 from src.utils.helpers import load_json_file, save_json_file, get_translations
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
@@ -92,9 +91,6 @@ class MainWindow(QMainWindow):
                     auto_login_success = True
         if not auto_login_success:
             self.show_account_switch_dialog()
-        # Only add DownloadsTab once
-        # self.downloads_tab = DownloadsTab()  # Already added in setup_ui
-        # self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
 
     def setup_ui(self):
         """Set up the UI components"""
@@ -116,15 +112,12 @@ class MainWindow(QMainWindow):
         self.live_tab = LiveTab(self.api_client, parent=self)
         self.movies_tab = MoviesTab(self.api_client, parent=self)
         self.series_tab = SeriesTab(self.api_client, parent=self)
-        self.downloads_tab = DownloadsTab()
-        self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
         self.live_tab.add_to_favorites.connect(self.add_to_favorites)
         self.movies_tab.add_to_favorites.connect(self.add_to_favorites)
         self.series_tab.add_to_favorites.connect(self.add_to_favorites)
         self.tabs.addTab(self.live_tab, self.translations["Live TV"])
         self.tabs.addTab(self.movies_tab, self.translations["Movies"])
         self.tabs.addTab(self.series_tab, self.translations["Series"])
-        self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
         self.live_tab.main_window = self
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
@@ -669,7 +662,6 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(1, self.translations["Live TV"])
         self.tabs.setTabText(2, self.translations["Movies"])
         self.tabs.setTabText(3, self.translations["Series"])
-        self.tabs.setTabText(4, self.translations.get("Downloads", "Downloads"))
         
         # Set layout direction
         if self.language == "ar":
@@ -686,7 +678,6 @@ class MainWindow(QMainWindow):
             "Features:\n"
             "- Live TV streaming\n"
             "- Movies and Series playback\n"
-            "- Download functionality\n"
             "- Recording capability\n"
             "- Favorites management\n\n"
             "Version 2.0.0"

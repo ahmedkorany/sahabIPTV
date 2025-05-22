@@ -10,32 +10,13 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 
-# Assuming DownloadItem is accessible or will be moved/imported appropriately
-# from src.utils.download import DownloadItem, BatchDownloadThread
-# For now, let's define a placeholder or assume it's passed if needed by methods here
-
-class DownloadItem:
-    def __init__(self, name, save_path, download_thread=None):
-        self.name = name
-        self.save_path = save_path
-        self.progress = 0
-        self.status = 'active'  # active, paused, completed, error
-        self.download_thread = download_thread
-        self.error_message = None
-        self.time_created = time.time()
-        self.time_completed = None
-        self.total_size = 0
-        self.downloaded_size = 0
-        self.speed = 0  # bytes per second
-        self.estimated_time = 0  # seconds remaining
-
 class SeriesDetailsWidget(QWidget):
     back_clicked = pyqtSignal()
     play_episode_requested = pyqtSignal(object)  # episode data
     toggle_favorite_series_requested = pyqtSignal(object) # series data
     # Signals for download/export actions, will need to be connected in SeriesTab
-    download_episode_requested = pyqtSignal(object) # episode data
-    download_season_requested = pyqtSignal(str) # season number
+    # download_episode_requested = pyqtSignal(object) # episode data # Removed
+    # download_season_requested = pyqtSignal(str) # season number # Removed
     export_season_requested = pyqtSignal(str) # season number
 
     def __init__(self, series_data, api_client, main_window, parent=None):
@@ -71,10 +52,10 @@ class SeriesDetailsWidget(QWidget):
         left_layout.addWidget(self.favorite_series_btn)
         
         # Placeholder for Download Season and Export Season buttons
-        self.download_season_btn = QPushButton("Available Offline")
-        self.download_season_btn.setVisible(False)
-        self.download_season_btn.clicked.connect(self._on_download_season)
-        left_layout.addWidget(self.download_season_btn)
+        # self.download_season_btn = QPushButton("Available Offline") # Removed
+        # self.download_season_btn.setVisible(False) # Removed
+        # self.download_season_btn.clicked.connect(self._on_download_season) # Removed
+        # left_layout.addWidget(self.download_season_btn) # Removed
 
         self.export_season_btn = QPushButton("Export Season URLs")
         self.export_season_btn.setVisible(False)
@@ -117,11 +98,11 @@ class SeriesDetailsWidget(QWidget):
         self.play_episode_btn.clicked.connect(self._on_play_selected_episode)
         episode_actions_layout.addWidget(self.play_episode_btn)
 
-        self.download_episode_btn = QPushButton("Download Episode")
-        self.download_episode_btn.setEnabled(False)
-        self.download_episode_btn.setVisible(False)
-        self.download_episode_btn.clicked.connect(self._on_download_episode)
-        episode_actions_layout.addWidget(self.download_episode_btn)
+        # self.download_episode_btn = QPushButton("Download Episode") # Removed
+        # self.download_episode_btn.setEnabled(False) # Removed
+        # self.download_episode_btn.setVisible(False) # Removed
+        # self.download_episode_btn.clicked.connect(self._on_download_episode) # Removed
+        # episode_actions_layout.addWidget(self.download_episode_btn) # Removed
         right_layout.addLayout(episode_actions_layout)
 
         self.trailer_btn = QPushButton("WATCH TRAILER")
@@ -217,7 +198,7 @@ class SeriesDetailsWidget(QWidget):
         
         if hasattr(self, 'series_info') and 'episodes' in self.series_info and season_number_str in self.series_info['episodes']:
             self.export_season_btn.setVisible(True)
-            self.download_season_btn.setVisible(True)
+            # self.download_season_btn.setVisible(True) # Removed
             episodes_data = self.series_info['episodes'][season_number_str]
             self.episodes_list.clear()
             self.current_episodes = episodes_data
@@ -240,9 +221,9 @@ class SeriesDetailsWidget(QWidget):
         selected_episode_item = self.episodes_list.currentItem()
         is_episode_selected = selected_episode_item is not None
         self.play_episode_btn.setEnabled(is_episode_selected)
-        self.download_episode_btn.setEnabled(is_episode_selected)
+        # self.download_episode_btn.setEnabled(is_episode_selected) # Removed
         self.play_episode_btn.setVisible(is_episode_selected)
-        self.download_episode_btn.setVisible(is_episode_selected)
+        # self.download_episode_btn.setVisible(is_episode_selected) # Removed
 
     def _on_episode_double_clicked(self, item):
         self._play_episode_from_item(item)
@@ -301,23 +282,14 @@ class SeriesDetailsWidget(QWidget):
             QMessageBox.information(self, "Trailer", "No trailer URL available for this series.")
 
     def _on_download_episode(self):
-        item = self.episodes_list.currentItem()
-        if not item:
-            QMessageBox.warning(self, "Error", "No episode selected for download.")
-            return
-        episode_data = item.data(Qt.UserRole)
-        if episode_data:
-            self.download_episode_requested.emit(episode_data)
-        else:
-            QMessageBox.warning(self, "Error", "Episode data not found for download.")
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
 
     def _on_download_season(self):
-        if not self.seasons_list.currentItem():
-            QMessageBox.warning(self, "Error", "No season selected to download.")
-            return
-        season_text = self.seasons_list.currentItem().text()
-        season_number = season_text.replace("Season ", "")
-        self.download_season_requested.emit(season_number)
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
 
     def _on_export_season(self):
         if not self.seasons_list.currentItem():

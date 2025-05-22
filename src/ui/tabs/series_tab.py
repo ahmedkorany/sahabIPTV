@@ -11,7 +11,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, Q_ARG
 from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtSvg import QSvgWidget
 from src.ui.player import MediaPlayer
-from src.utils.download import DownloadThread, BatchDownloadThread
+# from src.utils.download import DownloadThread, BatchDownloadThread # Removed
 from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ImageCache  # Correct import for ImageCache
 from src.utils.helpers import load_image_async
@@ -125,7 +125,7 @@ class DownloadItem:
 
 class SeriesTab(QWidget):
     add_to_favorites = pyqtSignal(dict)
-    add_to_downloads = pyqtSignal(object)
+    # add_to_downloads = pyqtSignal(object) # Removed
 
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
@@ -251,8 +251,8 @@ class SeriesTab(QWidget):
         self.details_widget.back_clicked.connect(self._show_grid_view)
         self.details_widget.play_episode_requested.connect(self._handle_play_episode_request)
         self.details_widget.toggle_favorite_series_requested.connect(self._handle_toggle_favorite_request)
-        self.details_widget.download_episode_requested.connect(self._handle_download_episode_request)
-        self.details_widget.download_season_requested.connect(self._handle_download_season_request)
+        # self.details_widget.download_episode_requested.connect(self._handle_download_episode_request) # Removed
+        # self.details_widget.download_season_requested.connect(self._handle_download_season_request) # Removed
         self.details_widget.export_season_requested.connect(self._handle_export_season_request)
 
         # Add the new details widget to the stacked_widget (if not already added as a placeholder)
@@ -386,65 +386,14 @@ class SeriesTab(QWidget):
         # For now, we just prepare the DownloadItem
         # download_item.download_thread = DownloadThread(download_url, save_path, download_item) # Example if thread created here
         
-        self.add_to_downloads.emit(download_item) # DownloadsTab will handle this
+        # self.add_to_downloads.emit(download_item) # DownloadsTab will handle this # Removed
         QMessageBox.information(self, "Download Started", f"{default_filename} has been added to downloads.")
 
     def _handle_download_season_request(self, season_number):
-        if not self.current_series or not self.details_widget:
-            QMessageBox.warning(self, "Error", "Series data not available for season download.")
-            return
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
 
-        series_info = self.details_widget.get_series_info()
-        if not series_info or 'episodes' not in series_info or season_number not in series_info['episodes']:
-            QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number}.")
-            return
-
-        episodes_to_download = series_info['episodes'][season_number]
-        if not episodes_to_download:
-            QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number}.")
-            return
-
-        series_name = self.current_series.get('name', 'Series')
-        # Sanitize series name for directory creation
-        sane_series_name = series_name.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
-        default_folder_name = f"{sane_series_name} - Season {str(season_number).zfill(2)}"
-
-        save_directory = QFileDialog.getExistingDirectory(self, "Select Directory to Save Season", os.path.expanduser("~"))
-        if not save_directory:
-            return
-
-        season_save_path = os.path.join(save_directory, default_folder_name)
-        try:
-            if not os.path.exists(season_save_path):
-                os.makedirs(season_save_path)
-        except OSError as e:
-            QMessageBox.warning(self, "Error", f"Could not create directory: {season_save_path}\n{e}")
-            return
-
-        download_count = 0
-        for episode_data in episodes_to_download:
-            episode_title = episode_data.get('title', 'Episode')
-            episode_num = episode_data.get('episode_num', 'UnknownEpisode')
-            container_extension = episode_data.get('container_extension', 'mp4')
-            
-            ep_filename = f"{series_name} - S{str(season_number).zfill(2)}E{str(episode_num).zfill(2)} - {episode_title}.{container_extension}"
-            ep_filename = ep_filename.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
-            full_save_path = os.path.join(season_save_path, ep_filename)
-
-            stream_id = episode_data.get('id') or episode_data.get('stream_id')
-            download_url = self.api_client.get_series_url(stream_id, container_extension)
-
-            if download_url:
-                download_item = DownloadItem(name=ep_filename, save_path=full_save_path)
-                self.add_to_downloads.emit(download_item)
-                download_count += 1
-            else:
-                print(f"Could not get download URL for {ep_filename}")
-        
-        if download_count > 0:
-            QMessageBox.information(self, "Season Download Started", f"{download_count} episodes from Season {season_number} added to downloads.")
-        else:
-            QMessageBox.warning(self, "Season Download", f"No episodes could be added to downloads for Season {season_number}.")
 
     def _handle_export_season_request(self, season_number):
         if not self.current_series or not self.details_widget:
@@ -785,71 +734,25 @@ class SeriesTab(QWidget):
         download_item.download_thread = self.download_thread
         
         # Connect signals
-        self.download_thread.progress_update.connect(
-            lambda progress, downloaded=0, total=0: self.update_download_progress(download_item, progress, downloaded, total))
-        self.download_thread.download_complete.connect(
-            lambda path: self.download_finished(download_item, path))
-        self.download_thread.download_error.connect(
-            lambda error: self.download_error(download_item, error))
+        # self.download_thread.progress_update.connect( # Removed
+        #     lambda progress, downloaded=0, total=0: self.update_download_progress(download_item, progress, downloaded, total)) # Removed
+        # self.download_thread.download_complete.connect( # Removed
+        #     lambda path: self.download_finished(download_item, path)) # Removed
+        # self.download_thread.download_error.connect( # Removed
+        #     lambda error: self.download_error(download_item, error)) # Removed
         
-        # Add to downloads tab
-        if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-            self.main_window.downloads_tab.add_download(download_item)
+        # Add to downloads tab # Removed
+        # if self.main_window and hasattr(self.main_window, 'downloads_tab'): # Removed
+            # self.main_window.downloads_tab.add_download(download_item) # Removed
         
-        self.download_thread.start()
+        # self.download_thread.start() # Removed
+        pass # Download functionality removed
     
     def download_season(self):
-        """Download the complete season"""
-        if not self.seasons_list.currentItem():
-            QMessageBox.warning(self, "Error", "No season selected")
-            return
-        
-        season_text = self.seasons_list.currentItem().text()
-        season_number = season_text.replace("Season ", "")
-        
-        if not hasattr(self, 'series_info') or 'episodes' not in self.series_info or season_number not in self.series_info['episodes']:
-            QMessageBox.warning(self, "Error", "Failed to get season information")
-            return
-        
-        episodes = self.series_info['episodes'][season_number]
-        
-        # Ask for save directory
-        save_dir = QFileDialog.getExistingDirectory(self, "Select Directory to Save Season")
-        
-        if not save_dir:
-            return
-        
-        # Create season directory
-        series_name = self.current_series['name']
-        season_dir = os.path.join(save_dir, f"{series_name} - Season {season_number}")
-        os.makedirs(season_dir, exist_ok=True)
-        
-        # Create download item for the whole season
-        download_item = DownloadItem(
-            f"{series_name} - Season {season_number} (Complete)",
-            season_dir
-        )
-        
-        # Start batch download thread
-        self.batch_download_thread = BatchDownloadThread(
-            self.api_client, episodes, season_dir, series_name
-        )
-        download_item.download_thread = self.batch_download_thread
-        
-        # Connect signals
-        self.batch_download_thread.progress_update.connect(
-            lambda episode_idx, progress: self.update_batch_progress(download_item, episode_idx, progress))
-        self.batch_download_thread.download_complete.connect(
-            lambda: self.batch_download_finished(download_item))
-        self.batch_download_thread.download_error.connect(
-            lambda error: self.batch_download_error(download_item, error))
-        
-        # Add to downloads tab
-        if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-            self.main_window.downloads_tab.add_download(download_item)
-        
-        self.batch_download_thread.start()
-    
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
+
     def export_season(self):
         """Export all episode URLs of the selected season to a text file"""
         if not self.seasons_list.currentItem():
@@ -887,88 +790,50 @@ class SeriesTab(QWidget):
         return
     def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
         """Update download progress in the downloads tab"""
-        if download_item:
-            # Update the download item
-            download_item.update_progress(progress, downloaded_size, total_size)
+        # if download_item: # Removed
+            # Update the download item # Removed
+            # download_item.update_progress(progress, downloaded_size, total_size) # Removed
             
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
+            # Update the UI in the downloads tab # Removed
+            # if self.main_window and hasattr(self.main_window, 'downloads_tab'): # Removed
+                # self.main_window.downloads_tab.update_download_item(download_item) # Removed
+        pass # Download functionality removed
             
     
     def download_finished(self, download_item, save_path):
-        """Handle download completion"""
-        if download_item:
-            # Update the download item
-            download_item.complete(save_path)
-            
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
-        
-        QMessageBox.information(self, "Download Complete", f"File saved to: {save_path}")
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
     
     def download_error(self, download_item, error_message):
-        """Handle download error"""
-        if download_item:
-            # Update the download item
-            download_item.fail(error_message)
-            
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
-        
-        QMessageBox.critical(self, "Download Error", error_message)
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
     
     def cancel_download(self):
-        """Cancel the current download"""
-        if self.download_thread and self.download_thread.isRunning():
-            self.download_thread.cancel()
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
     
     def update_batch_progress(self, download_item, episode_index, progress):
-        """Update batch download progress dialog"""
-        if download_item:
-            # For batch downloads, we'll use the episode index and progress to calculate overall progress
-            if hasattr(self, 'current_episodes'):
-                total_episodes = len(self.current_episodes)
-                if total_episodes > 0:
-                    overall_progress = int((episode_index * 100 + progress) / total_episodes)
-                    download_item.update_progress(overall_progress)
-                    
-                    # Update the UI in the downloads tab
-                    if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                        self.main_window.downloads_tab.update_download_item(download_item)
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
         
     def batch_download_finished(self, download_item):
-        """Handle batch download completion"""
-        if download_item:
-            # Update the download item
-            download_item.complete(download_item.save_path)
-            
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
-        
-        
-        QMessageBox.information(self, "Download Complete", "Season download completed")
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
     
     def batch_download_error(self, download_item, error_message):
-        """Handle batch download error"""
-        if download_item:
-            # Update the download item
-            download_item.fail(error_message)
-            
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
-        
-        
-        QMessageBox.critical(self, "Download Error", error_message)
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
     
     def cancel_batch_download(self):
-        """Cancel the current batch download"""
-        if self.batch_download_thread and self.batch_download_thread.isRunning():
-            self.batch_download_thread.cancel()
+        # This method is no longer needed as download functionality is removed.
+        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
+        pass
     
     def add_to_favorites_clicked(self):
         """Add current episode to favorites"""

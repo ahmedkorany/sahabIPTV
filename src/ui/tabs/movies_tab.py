@@ -14,121 +14,11 @@ from src.utils.helpers import load_image_async
 from src.utils.text_search import TextSearch
 from src.api.tmdb import TMDBClient
 from src.ui.widgets.dialogs import MovieDetailsDialog
-from src.utils.download import DownloadThread
 import re
-
-class DownloadItem:
-    def __init__(self, name, save_path, download_thread=None):
-        self.name = name
-        self.save_path = save_path
-        self
-        self.status = 'active'  # active, paused, completed, error
-        self.download_thread = download_thread
-        self.error_message = None
-        self.time_created = None
-        self.time_completed = None
-        self.total_size = 0
-        self.downloaded_size = 0
-        self.speed = 0  # bytes per second
-        self.estimated_time = 0  # seconds remaining
-    
-    def update_progress(self, progress, downloaded_size=0, total_size=0):
-        self.progress = progress
-        if total_size > 0:
-            self.total_size = total_size
-            self.downloaded_size = downloaded_size
-            # Calculate download speed and estimated time
-            if self.status == 'active' and progress > 0:
-                now = time.time()
-                elapsed_time = now - self.time_created
-                # Use a moving window for speed calculation for smoother updates
-                if not hasattr(self, '_last_update_time'):
-                    self._last_update_time = now
-                    self._last_downloaded_size = self.downloaded_size
-                    self.speed = 0
-                else:
-                    delta_time = now - self._last_update_time
-                    delta_bytes = self.downloaded_size - getattr(self, '_last_downloaded_size', 0)
-                    if delta_time > 0 and delta_bytes >= 0:
-                        inst_speed = delta_bytes / delta_time
-                        # Use instant speed for more responsive UI
-                        self.speed = inst_speed
-                    self._last_update_time = now
-                    self._last_downloaded_size = self.downloaded_size
-                remaining_bytes = self.total_size - self.downloaded_size
-                if self.speed > 0:
-                    self.estimated_time = remaining_bytes / self.speed
-                else:
-                    self.estimated_time = 0
-            else:
-                self.speed = 0
-                self.estimated_time = 0
-        else:
-            self.speed = 0
-            self.estimated_time = 0
-
-    def complete(self, save_path):
-        self.status = 'completed'
-        self.progress = 100
-        self.time_completed = time.time()
-        self.save_path = save_path
-        
-    def fail(self, error_message):
-        self.status = 'error'
-        self.error_message = error_message
-        
-    def pause(self):
-        if self.status == 'active' and self.download_thread:
-            self.status = 'paused'
-            # Signal the download thread to pause
-            if hasattr(self.download_thread, 'pause'):
-                self.download_thread.pause()
-    
-    def resume(self):
-        if self.status == 'paused' and self.download_thread:
-            self.status = 'active'
-            # Signal the download thread to resume
-            if hasattr(self.download_thread, 'resume'):
-                self.download_thread.resume()
-    
-    def cancel(self):
-        if self.download_thread and hasattr(self.download_thread, 'cancel'):
-            self.download_thread.cancel()
-            self.status = 'cancelled'
-    
-    def get_formatted_speed(self):
-        """Return formatted download speed (e.g., '1.2 MB/s')"""
-        if self.speed == 0 or self.status in ['completed', 'error', 'cancelled']:
-            return "--"
-        units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
-        size = self.speed
-        unit_index = 0
-        while size >= 1024 and unit_index < len(units) - 1:
-            size /= 1024
-            unit_index += 1
-        return f"{size:.2f} {units[unit_index]}"
-    
-    def get_formatted_time(self):
-        """Return formatted estimated time remaining"""
-        if self.estimated_time is None or self.estimated_time <= 0 or self.status in ['completed', 'error', 'cancelled']:
-            return "--"
-        seconds = int(self.estimated_time)
-        if seconds < 60:
-            return f"{seconds}s"
-        elif seconds < 3600:
-            minutes = seconds // 60
-            seconds %= 60
-            return f"{minutes}m {seconds}s"
-        else:
-            hours = seconds // 3600
-            seconds %= 3600
-            minutes = seconds // 60
-            return f"{hours}h {minutes}m"
 
 class MoviesTab(QWidget):
     """Movies tab widget"""
     add_to_favorites = pyqtSignal(dict)
-    add_to_downloads = pyqtSignal(object)  # Signal to add download to downloads tab
     
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
@@ -139,7 +29,6 @@ class MoviesTab(QWidget):
         self.all_movies = []  # Store all movies across categories
         self.filtered_movies = []  # Store filtered movies for search
         self.current_movie = None
-        self.download_thread = None
         
         # Pagination
         self.current_page = 1
@@ -757,103 +646,6 @@ class MoviesTab(QWidget):
                 self.player.controls.play_pause_button.clicked.connect(self.play_movie)
             else:
                 self.player.play_pause(False)
-    
-    def download_movie(self):
-        """Download the selected movie"""
-        if not self.movies_list.currentItem():
-            QMessageBox.warning(self, "Error", "No movie selected")
-            return
-        
-        movie_name = self.movies_list.currentItem().text()
-        movie = None
-        for m in self.filtered_movies:
-            if m['name'] == movie_name:
-                movie = m
-                break
-        
-        if not movie:
-            return
-        
-        stream_id = movie['stream_id']
-        
-        # Get container extension from VOD info
-        container_extension = "mp4"  # Default extension
-        success, vod_info = self.api_client.get_vod_info(stream_id)
-        if success and 'movie_data' in vod_info and 'container_extension' in vod_info['movie_data']:
-            container_extension = vod_info['movie_data']['container_extension']
-        
-        stream_url = self.api_client.get_movie_url(stream_id, container_extension)
-        
-        # Ask for save location
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Movie", f"{movie_name}.{container_extension}", f"Video Files (*.{container_extension})"
-        )
-        
-        if not save_path:
-            return
-        
-        # Create download item
-        download_item = DownloadItem(movie_name, save_path)
-        
-        # Start download thread
-        self.download_thread = DownloadThread(stream_url, save_path, self.api_client.headers)
-        download_item.download_thread = self.download_thread
-        
-        # Connect signals
-        self.download_thread.progress_update.connect(
-            lambda progress, downloaded=0, total=0: self.update_download_progress(download_item, progress, downloaded, total))
-        self.download_thread.download_complete.connect(
-            lambda path: self.download_finished(download_item, path))
-        self.download_thread.download_error.connect(
-            lambda error: self.download_error(download_item, error))
-        
-        # Add to downloads tab
-        if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-            self.main_window.downloads_tab.add_download(download_item)
-        
-        self.download_thread.start()
-    
-    def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
-        """Update download progress in the downloads tab"""
-        if download_item:
-            # Update the download item
-            download_item.update_progress(progress, downloaded_size, total_size)
-            
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
-            
-    
-    def download_finished(self, download_item, save_path):
-        """Handle download completion"""
-        if download_item:
-            # Update the download item
-            download_item.complete(save_path)
-            
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
-        
-        
-        QMessageBox.information(self, "Download Complete", f"File saved to: {save_path}")
-    
-    def download_error(self, download_item, error_message):
-        """Handle download error"""
-        if download_item:
-            # Update the download item
-            download_item.fail(error_message)
-            
-            # Update the UI in the downloads tab
-            if self.main_window and hasattr(self.main_window, 'downloads_tab'):
-                self.main_window.downloads_tab.update_download_item(download_item)
-        
-        
-        QMessageBox.critical(self, "Download Error", error_message)
-    
-    def cancel_download(self):
-        """Cancel the current download"""
-        if self.download_thread and self.download_thread.isRunning():
-            self.download_thread.cancel()
     
     def add_to_favorites_clicked(self):
         """Add current movie to favorites"""

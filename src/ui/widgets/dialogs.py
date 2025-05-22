@@ -78,7 +78,7 @@ class LoginDialog(QDialog):
 
 
 class ProgressDialog(QDialog):
-    """Dialog for showing progress of operations like downloads"""
+    """Dialog for showing progress of operations"""
     cancelled = pyqtSignal()
     
     def __init__(self, parent=None, title="Progress", text="Please wait..."):
