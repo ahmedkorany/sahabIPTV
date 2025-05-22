@@ -5,7 +5,7 @@ import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, QMetaObject, Q_ARG
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, QMetaObject, Q_ARG, QTimer
 from PyQt5.QtGui import QPixmap, QFont
 from src.utils.text_search import TextSearch
 import sip # Add sip import for checking deleted QObjects
@@ -15,6 +15,20 @@ from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ImageCache
 from src.utils.helpers import get_api_client_from_label
 import threading
+
+class DebouncedLineEdit(QLineEdit):
+    _debounced_text_changed = pyqtSignal(str)
+    def __init__(self, delay=200, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.timeout.connect(self._emit_debounced_text_changed)
+        self.textChanged.connect(self._on_text_changed)
+        self._debounce_delay = delay
+    def _on_text_changed(self, text):
+        self._debounce_timer.start(self._debounce_delay)
+    def _emit_debounced_text_changed(self):
+        self._debounced_text_changed.emit(self.text())
 
 def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
     ImageCache.ensure_cache_dir()
@@ -95,7 +109,6 @@ class ChannelLoaderWorker(QObject):
 class LiveTab(QWidget):
     """Live TV tab widget"""
     add_to_favorites = pyqtSignal(dict)
-    
     def __init__(self, api_client, parent=None):
         super().__init__(parent)
         self.api_client = api_client
@@ -103,6 +116,8 @@ class LiveTab(QWidget):
         self.all_channels = []  # Store all channels across categories
         self.categories_api_data = [] # Store raw API category data
         self.current_channel = None
+        self._live_search_index = {}  # token -> set of indices
+        self._live_lc_names = []      # lowercased names for fallback
         self.recording_thread = None
         self.page_size = 32
         self.current_page = 1
@@ -111,14 +126,12 @@ class LiveTab(QWidget):
         self.main_window = None  # Will be set by the main window
     
     def setup_ui(self):
-        """Set up the UI components"""
         layout = QVBoxLayout(self)
-
         # Search bar
         search_layout = QHBoxLayout()
-        self.search_input = QLineEdit()
+        self.search_input = DebouncedLineEdit()
         self.search_input.setPlaceholderText("Search channels...")
-        self.search_input.textChanged.connect(self.search_channels)
+        self.search_input._debounced_text_changed.connect(self.search_channels)
         search_layout.addWidget(self.search_input)
 
         # Main content area with splitter
@@ -156,7 +169,7 @@ class LiveTab(QWidget):
         self.loading_label.hide()
         self.setup_pagination_controls()
         right_panel.addWidget(self.loading_label)
-        right_panel.addWidget(self.pagination_panel)
+        right_panel.addWidget(self.pagination_panel)  # Always add pagination panel
         right_widget = QWidget()
         right_widget.setLayout(right_panel)
 
@@ -168,7 +181,6 @@ class LiveTab(QWidget):
         layout.addLayout(search_layout)
         layout.addWidget(splitter)
         self.display_current_page()
-        self.channel_grid_scroll.verticalScrollBar().valueChanged.connect(self.on_channel_grid_scroll)
         self.page_size = 32
         self.current_page = 1
         self.loaded_pages = set()
@@ -241,6 +253,7 @@ class LiveTab(QWidget):
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load channels: {data}")
         self.display_current_page()
+        self.build_live_search_index()  # Build search index after loading
         self.show_loading(False)
 
     def load_favorite_channels(self):
@@ -262,110 +275,57 @@ class LiveTab(QWidget):
         # display_current_page will handle pagination and display
         # It should also update total_pages based on self.live_channels
         self.display_current_page()
+        self.build_live_search_index()  # Build search index after loading
 
-    # Remove ChannelLoaderWorker and all threading-related code
-    # Remove load_channels_page, on_channels_loaded, on_channels_failed, on_channel_grid_scroll, loader_threads, etc.
-    # The rest of the class remains unchanged
-
-    def on_channels_loaded(self, channels, page):
-        self.live_channels.extend(channels)
-        self.display_channel_grid(self.live_channels)
-        self.loaded_pages.add(page)
-        self.loading = False
-        self.show_loading(False)
-
-    def on_channels_failed(self, error):
-        QMessageBox.warning(self, "Error", f"Failed to load channels: {error}")
-        self.loading = False
-        self.show_loading(False)
-
-    def on_channel_grid_scroll(self, value):
-        # Disable pagination logic since load_channels_page does not exist; optionally implement if needed
-        pass
-
-    def show_loading(self, show):
-        self.loading_label.setVisible(show)
-
-    def display_channel_grid(self, channels):
-        """Display channels as a grid of tiles"""
-        # Clear previous grid
-        for i in reversed(range(self.channel_grid_layout.count())):
-            widget = self.channel_grid_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
-        self.channel_tiles = []
-        if not channels:
-            empty_label = QLabel("This category doesn't contain any Channel")
-            empty_label.setAlignment(Qt.AlignCenter)
-            empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
-            self.channel_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
+    def build_live_search_index(self):
+        """Builds a token-based search index for fast lookup using normalized text."""
+        from src.utils.text_search import TextSearch
+        self._live_search_index = {}
+        self._live_lc_names = []
+        if not self.live_channels:
             return
-        cols = 4
-        row = 0
-        col = 0
-        main_window = self.main_window if hasattr(self, 'main_window') else None
-        loading_counter = getattr(main_window, 'loading_counter', None) if main_window else None
-        for channel in channels:
-            tile = QFrame()
-            tile.setFrameShape(QFrame.StyledPanel)
-            tile.setStyleSheet("background: #222; border-radius: 12px;")
-            tile_layout = QVBoxLayout(tile)
-            # Channel logo
-            logo = QLabel()
-            logo.setAlignment(Qt.AlignCenter)
-            default_pix = QPixmap('assets/live.png')
-            # Show cached or placeholder immediately, then load async
-            if channel.get('stream_icon'):
-                load_image_async(channel['stream_icon'], logo, default_pix, update_size=(80, 80), main_window=main_window, loading_counter=loading_counter)
-            else:
-                logo.setPixmap(default_pix.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            tile_layout.addWidget(logo)
-            # Channel name
-            name = QLabel(channel['name'])
-            name.setAlignment(Qt.AlignCenter)
-            name.setWordWrap(True)
-            name.setFont(QFont('Arial', 11, QFont.Bold))
-            name.setStyleSheet("color: #fff;")
-            tile_layout.addWidget(name)
-            tile.mousePressEvent = lambda e, ch=channel, t=tile: self.channel_tile_clicked(ch, t)
-            self.channel_grid_layout.addWidget(tile, row, col)
-            self.channel_tiles.append(tile)
-            col += 1
-            if col >= cols:
-                col = 0
-                row += 1
-
-    def channel_tile_clicked(self, channel, tile=None):
-        self.current_channel = {
-            'name': channel['name'],
-            'stream_url': self.api_client.get_live_stream_url(channel['stream_id']),
-            'stream_id': channel['stream_id'],
-            'stream_type': 'live'
-        }
-        # Highlight selected tile
-        for t in getattr(self, 'channel_tiles', []):
-            t.setStyleSheet("background: #222; border-radius: 12px;")
-        if tile:
-            tile.setStyleSheet("background: #0057d8; border-radius: 12px; border: 2px solid #fff;")
-        self.play_channel(channel)
+        for idx, channel in enumerate(self.live_channels):
+            original_name = channel.get('name', '')
+            normalized_name = TextSearch.normalize_text(original_name)
+            channel['_normalized_name'] = normalized_name
+            self._live_lc_names.append(normalized_name)
+            tokens = set(normalized_name.split())
+            for token in tokens:
+                if token:
+                    if token not in self._live_search_index:
+                        self._live_search_index[token] = set()
+                    self._live_search_index[token].add(idx)
 
     def search_channels(self, text):
-        """Search channels based on input text (grid view)"""
+        """Fast search using index, similar to movies/series."""
+        from src.utils.text_search import TextSearch
         search_term = text.strip()
-
         if not self.live_channels:
-            self.display_channel_grid([]) # Display empty grid if no channels
+            self.display_channel_grid([])
             return
-
-        # TextSearch.search handles empty search_term by returning all items
-        # and internal normalization.
-        filtered_channels = TextSearch.search(
-            self.live_channels,
-            search_term,
-            lambda item: item.get('name', '')
-        )
-        
-        self.display_channel_grid(filtered_channels)
+        if not search_term:
+            self.display_channel_grid(self.live_channels)
+            return
+        query_tokens = TextSearch.normalize_text(search_term).split()
+        matched_indices = set()
+        processed_first_token = False
+        for token in query_tokens:
+            if token in self._live_search_index:
+                if not processed_first_token:
+                    matched_indices = self._live_search_index[token].copy()
+                    processed_first_token = True
+                else:
+                    matched_indices.intersection_update(self._live_search_index[token])
+            else:
+                matched_indices.clear()
+                break
+        # Fallback: substring search
+        if not matched_indices:
+            for idx, name in enumerate(self._live_lc_names):
+                if search_term.lower() in name:
+                    matched_indices.add(idx)
+        filtered = [self.live_channels[i] for i in sorted(matched_indices)]
+        self.display_channel_grid(filtered)
     
     def channel_double_clicked(self, item):
         """Handle channel double-click"""
@@ -507,6 +467,56 @@ class LiveTab(QWidget):
         self.display_channel_grid(page_items)
         self.update_pagination_controls()
 
+    def display_channel_grid(self, channels):
+        """Display channels as a grid of tiles"""
+        # Clear previous grid
+        for i in reversed(range(self.channel_grid_layout.count())):
+            widget = self.channel_grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        self.channel_tiles = []
+        if not channels:
+            empty_label = QLabel("This category doesn't contain any Channel")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
+            self.channel_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
+            self.pagination_panel.setVisible(False)
+            return
+        cols = 4
+        row = 0
+        col = 0
+        main_window = self.main_window if hasattr(self, 'main_window') else None
+        loading_counter = getattr(main_window, 'loading_counter', None) if main_window else None
+        for channel in channels:
+            tile = QFrame()
+            tile.setFrameShape(QFrame.StyledPanel)
+            tile.setStyleSheet("background: #222; border-radius: 12px;")
+            tile_layout = QVBoxLayout(tile)
+            # Channel logo
+            logo = QLabel()
+            logo.setAlignment(Qt.AlignCenter)
+            default_pix = QPixmap('assets/live.png')
+            if channel.get('stream_icon'):
+                load_image_async(channel['stream_icon'], logo, default_pix, update_size=(80, 80), main_window=main_window, loading_counter=loading_counter)
+            else:
+                logo.setPixmap(default_pix.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            tile_layout.addWidget(logo)
+            # Channel name
+            name = QLabel(channel['name'])
+            name.setAlignment(Qt.AlignCenter)
+            name.setWordWrap(True)
+            name.setFont(QFont('Arial', 11, QFont.Bold))
+            name.setStyleSheet("color: #fff;")
+            tile_layout.addWidget(name)
+            tile.mousePressEvent = lambda e, ch=channel, t=tile: self.channel_tile_clicked(ch, t)
+            self.channel_grid_layout.addWidget(tile, row, col)
+            self.channel_tiles.append(tile)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+        self.pagination_panel.setVisible(True)
+
     def setup_pagination_controls(self):
         self.pagination_panel = QWidget()
         nav_layout = QHBoxLayout(self.pagination_panel)
@@ -521,3 +531,21 @@ class LiveTab(QWidget):
         nav_layout.addWidget(self.page_label)
         nav_layout.addWidget(self.next_page_button)
         self.pagination_panel.setVisible(False)
+
+    def show_loading(self, show):
+        if hasattr(self, 'loading_label'):
+            self.loading_label.setVisible(show)
+
+    def channel_tile_clicked(self, channel, tile=None):
+        self.current_channel = {
+            'name': channel['name'],
+            'stream_url': self.api_client.get_live_stream_url(channel['stream_id']),
+            'stream_id': channel['stream_id'],
+            'stream_type': 'live'
+        }
+        # Highlight selected tile
+        for t in getattr(self, 'channel_tiles', []):
+            t.setStyleSheet("background: #222; border-radius: 12px;")
+        if tile:
+            tile.setStyleSheet("background: #0057d8; border-radius: 12px; border: 2px solid #fff;")
+        self.play_channel(channel)
