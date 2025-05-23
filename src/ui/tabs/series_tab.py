@@ -4,11 +4,13 @@ Series tab for the application
 import time
 import os
 import threading
+from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QStackedLayout, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, Q_ARG
-from PyQt5.QtGui import QPixmap, QFont, QIcon
+from PyQt5.QtGui import QPixmap, QIcon, QColor, QPainter, QFont, QFontMetrics
+from PyQt5.QtCore import QRect
 from PyQt5.QtSvg import QSvgWidget
 from src.ui.player import MediaPlayer
 # from src.utils.download import DownloadThread, BatchDownloadThread # Removed
@@ -598,45 +600,68 @@ class SeriesTab(QWidget):
         for series in series_list:
             tile = QFrame()
             tile.setFrameShape(QFrame.StyledPanel)
-            tile.setStyleSheet("background: #222; border-radius: 12px;")
+            tile.setStyleSheet("background: #222;")
             tile_layout = QVBoxLayout(tile)
             tile_layout.setContentsMargins(0, 0, 0, 0)
-            tile_layout.setSpacing(0)
+            tile_layout.setSpacing(4) # Adjust spacing for rating below poster
             # Series poster with overlay using absolute positioning
             poster_container = QWidget()
-            poster_container.setFixedSize(100, 140)
-            poster = QLabel(poster_container)
-            poster.setAlignment(Qt.AlignCenter)
-            poster.setGeometry(0, 0, 100, 140)
+            poster_width = 125
+            poster_height = 188 # Approx 1.5 aspect ratio (125 * 1.5 = 187.5)
+            poster_container.setFixedSize(poster_width, poster_height)
+            
+            poster_label_widget = QLabel(poster_container) 
+            poster_label_widget.setAlignment(Qt.AlignCenter)
+            poster_label_widget.setGeometry(0, 0, poster_width, poster_height)
+            poster_label_widget.setStyleSheet("background-color: #111111;") # Dark placeholder background
+
             default_pix = QPixmap('assets/series.png')
             if series.get('cover'):
-                load_image_async(series['cover'], poster, default_pix, update_size=(100, 140), main_window=main_window, loading_counter=loading_counter)
+                load_image_async(series['cover'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, loading_counter=loading_counter)
             else:
-                poster.setPixmap(default_pix.scaled(100, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+            # Title overlay
+            title_text_label = QLabel(series['name'], poster_container) 
+            title_text_label.setWordWrap(True)
+            title_text_label.setAlignment(Qt.AlignCenter) 
+            title_text_label.setFont(QFont('Arial', 14, QFont.Bold)) # User requested font 14px and bold
+            title_text_label.setStyleSheet("background-color: rgba(0, 0, 0, 0.7); color: white; padding: 5px; border-radius: 0px;") 
+            
+            font_metrics = QFontMetrics(title_text_label.font())
+            max_title_width = poster_width - 10 # 5px padding on each side for text
+            # Calculate height for up to two lines of text.
+            text_rect = font_metrics.boundingRect(QRect(0, 0, max_title_width, poster_height), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, series['name'])
+            # Ensure title_height is at least one line, max two lines, plus padding.
+            single_line_height = font_metrics.height()
+            estimated_title_height = min(text_rect.height(), single_line_height * 2) # Cap actual text height at 2 lines
+            title_box_height = estimated_title_height + 10 # Add 5px padding top/bottom
+
+            title_text_label.setGeometry(0, poster_height - title_box_height, poster_width, title_box_height)
+            title_text_label.raise_() 
+
             # Overlay 'new.png' if the series is new
             is_recent = False
             if series.get('added'):
-                from datetime import datetime, timedelta
+                from datetime import datetime, timedelta # Import here is fine as it's conditional
                 try:
                     added_time = datetime.fromtimestamp(int(series['added']))
                     if (datetime.now() - added_time) < timedelta(days=7):
                         is_recent = True
                 except Exception:
-                    pass
+                    pass 
+            
             if is_recent:
-                new_icon = QLabel(poster_container)
-                new_icon.setPixmap(QPixmap('assets/new.png').scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                new_icon.setStyleSheet("background: transparent;")
-                new_icon.move(0, 0)
-                new_icon.raise_()
+                new_icon_size = 24 
+                new_icon_padding = 5 
+                new_icon_label = QLabel(poster_container) 
+                new_icon_label.setPixmap(QPixmap('assets/new.png').scaled(new_icon_size, new_icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                new_icon_label.setStyleSheet("background: transparent;")
+                new_icon_label.setGeometry(poster_width - new_icon_size - new_icon_padding, new_icon_padding, new_icon_size, new_icon_size)
+                new_icon_label.raise_() 
+            
             tile_layout.addWidget(poster_container, alignment=Qt.AlignCenter)
-            # Series name
-            name = QLabel(series['name'])
-            name.setAlignment(Qt.AlignCenter)
-            name.setWordWrap(True)
-            name.setFont(QFont('Arial', 11, QFont.Bold))
-            name.setStyleSheet("color: #fff;")
-            tile_layout.addWidget(name)
+            # Original series name QLabel is removed, title is now an overlay.
             # Rating (if available)
             if series.get('rating'):
                 rating = QLabel(f"★ {series['rating']}")

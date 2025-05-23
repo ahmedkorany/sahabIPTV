@@ -6,7 +6,8 @@ from PyQt5.QtWidgets import (
     QScrollArea, QLabel, QFrame, QButtonGroup, QMessageBox, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtGui import QPixmap, QIcon, QColor, QPainter, QFont, QFontMetrics
+from PyQt5.QtCore import QRect
 from src.config import DARK_MODE
 from src.utils.helpers import load_image_async
 from src.ui.tabs.live_tab import DebouncedLineEdit
@@ -71,7 +72,7 @@ class SearchTab(QWidget):
             btn.setCheckable(True)
             btn.setFixedHeight(30)
             filter_value = filter_name_display.replace(" TV", "")
-            btn.clicked.connect(lambda checked, fv=filter_value: self.set_filter(fv))
+            btn.clicked.connect(lambda checked, fv=filter_value: self.apply_type_filter_and_paginate(fv))
             self.filter_button_group.addButton(btn)
             filter_layout.addWidget(btn)
             self.filter_buttons[filter_value] = btn
@@ -241,7 +242,7 @@ class SearchTab(QWidget):
         for movie in self.all_movies:
             name = movie.get('name', '')
             normalized_name = TextSearch.normalize_text(name)
-            self._search_lc_items.append
+            self._search_lc_items.append({'item': movie, 'normalized_name': normalized_name, 'type': 'Movies'})
             tokens = set(normalized_name.split())
             for token in tokens:
                 if token:
@@ -310,8 +311,30 @@ class SearchTab(QWidget):
         else:
             self.empty_state_label.setVisible(False)
 
-    def apply_type_filter_and_paginate(self):
+    def apply_type_filter_and_paginate(self, filter_value=None):
         """Applies the current filter to search_results and displays them."""
+        reset_page_for_filter_change = False
+
+        if filter_value is not None: # Explicit filter passed (button click)
+            if self.current_filter != filter_value:
+                self.current_filter = filter_value
+                reset_page_for_filter_change = True
+            else: # Same filter button clicked
+                reset_page_for_filter_change = True 
+        else: # No explicit filter passed (e.g. called from perform_search)
+            current_button_from_group = self.filter_button_group.checkedButton()
+            active_filter_from_buttons = "All" # Default
+            if current_button_from_group:
+                active_filter_from_buttons = current_button_from_group.text().replace(" TV", "")
+            
+            if self.current_filter != active_filter_from_buttons:
+                self.current_filter = active_filter_from_buttons
+                reset_page_for_filter_change = True # Page reset if filter changed implicitly
+            
+        if reset_page_for_filter_change:
+            self.current_page = 1
+        
+        # Original line that was searched for, now self.current_filter is appropriately set
         if self.current_filter == "All":
             self.filtered_results = list(self.search_results)
         else:
@@ -340,57 +363,151 @@ class SearchTab(QWidget):
         end_index = start_index + self.page_size
         page_items = self.filtered_results[start_index:end_index]
 
-        cols = 4 # Number of columns in the grid
+        cols = 7  # Number of columns in the grid
         row, col = 0, 0
 
         for item_wrapper in page_items:
             item_data = item_wrapper['item']
             item_type = item_wrapper['type']
-            
+
             tile = QFrame()
             tile.setFrameShape(QFrame.StyledPanel)
             tile.setCursor(Qt.PointingHandCursor)
-            tile.setStyleSheet("background: #222; border-radius: 12px;")
+            # tile.setStyleSheet("background: #222;") # Removed background
             tile_layout = QVBoxLayout(tile)
             tile_layout.setContentsMargins(0, 0, 0, 0)
-            tile_layout.setSpacing(0)
+            tile_layout.setSpacing(4)  # Adjust spacing for rating below poster
 
-            # Image/Icon
-            icon_label = QLabel()
-            icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setFixedSize(120, 70) # Adjust size as needed
-            icon_label.setStyleSheet("background-color: #222; border-radius: 4px;")
-            default_pix = self.get_default_pixmap(item_type)
-            
+            # Poster container
+            poster_container = QWidget()
+            poster_width = 125
+            poster_height = 188  # Approx 1.5 aspect ratio
+            poster_container.setFixedSize(poster_width, poster_height)
+
+            poster_label_widget = QLabel(poster_container)
+            poster_label_widget.setAlignment(Qt.AlignCenter)
+            poster_label_widget.setGeometry(0, 0, poster_width, poster_height)
+            poster_label_widget.setStyleSheet("background-color: #111111;")  # Dark placeholder
+
+            default_pix = self.get_default_pixmap(item_type)  # Ensure this returns a QPixmap
+
             img_url = None
-            if item_type == 'Live':
+            if item_type == 'Live':  # Live items might not have traditional posters
                 img_url = item_data.get('stream_icon')
-            elif item_type == 'Movie':
-                img_url = item_data.get('stream_icon') # or a poster from TMDB if integrated
+            elif item_type == 'Movies':
+                img_url = item_data.get('stream_icon') or item_data.get('cover')
             elif item_type == 'Series':
                 img_url = item_data.get('cover')
 
             if img_url:
-                load_image_async(img_url, icon_label, default_pix, update_size=(120,70), main_window=self.main_window)
+                load_image_async(img_url, poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=self.main_window)
             else:
-                icon_label.setPixmap(default_pix.scaled(120, 70, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            tile_layout.addWidget(icon_label)
+                poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-            # Name
-            name_label = QLabel(item_data.get('name', 'N/A'))
-            name_label.setAlignment(Qt.AlignCenter)
-            name_label.setWordWrap(True)
-            name_label.setFont(QFont('Arial', 10, QFont.Bold))
-            name_label.setStyleSheet("color: #FFF;")
-            tile_layout.addWidget(name_label)
+            # Item type logo
+            type_logo_label = QLabel(poster_container)
+            type_logo_size = 30  # Adjust size as needed
+            type_logo_padding = 5
+            logo_path = None
+            if item_type == 'Live':
+                logo_path = "assets/live.png"
+            elif item_type == 'Movies':
+                logo_path = "assets/movies.png"
+            elif item_type == 'Series':
+                logo_path = "assets/series.png"
 
-            # Type indicator
-            type_label = QLabel(item_type)
-            type_label.setAlignment(Qt.AlignCenter)
-            type_label.setFont(QFont('Arial', 8))
-            type_label.setStyleSheet("color: #AAA; background-color: #3A3A3A; border-radius: 3px; padding: 1px 3px;")
-            tile_layout.addWidget(type_label)
-            tile_layout.addStretch(1)
+            if logo_path and not QPixmap(logo_path).isNull():
+                type_logo_pixmap = QPixmap(logo_path)
+            else: # Fallback to a default colored square or text if logo not found
+                type_logo_pixmap = QPixmap(type_logo_size, type_logo_size)
+                if item_type == 'Live': type_logo_pixmap.fill(Qt.red)
+                elif item_type == 'Movies': type_logo_pixmap.fill(Qt.blue)
+                elif item_type == 'Series': type_logo_pixmap.fill(Qt.green)
+                else: type_logo_pixmap.fill(Qt.gray)
+            
+            type_logo_label.setPixmap(type_logo_pixmap.scaled(type_logo_size, type_logo_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            type_logo_label.setGeometry(type_logo_padding, type_logo_padding, type_logo_size, type_logo_size)
+            type_logo_label.setStyleSheet("background: transparent;")
+            type_logo_label.raise_()
+
+            # Title overlay
+            item_name = item_data.get('name', 'N/A')
+            title_text_label = QLabel(item_name, poster_container)
+            title_text_label.setWordWrap(True)
+            title_text_label.setAlignment(Qt.AlignCenter)
+            title_text_label.setFont(QFont('Arial', 14, QFont.Bold))
+            title_text_label.setStyleSheet("background-color: rgba(0, 0, 0, 0.7); color: white; padding: 5px; border-radius: 0px;")
+
+            font_metrics = QFontMetrics(title_text_label.font())
+            max_title_width = poster_width - 10
+            text_rect = font_metrics.boundingRect(QRect(0, 0, max_title_width, poster_height), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, item_name)
+            single_line_height = font_metrics.height()
+            estimated_title_height = min(text_rect.height(), single_line_height * 2)
+            title_box_height = estimated_title_height + 10
+
+            title_text_label.setGeometry(0, poster_height - title_box_height, poster_width, title_box_height)
+            title_text_label.raise_()
+
+            # Overlay 'new.png' if the item is new (assuming 'added' field exists and is a timestamp)
+            is_recent = False
+            if item_data.get('added'):
+                from datetime import datetime, timedelta # Keep import local if not used elsewhere in class
+                try:
+                    added_timestamp = item_data.get('added')
+                    # Ensure added_timestamp is an int or float before conversion
+                    if isinstance(added_timestamp, (str)) and added_timestamp.isdigit():
+                        added_timestamp = int(added_timestamp)
+                    
+                    if isinstance(added_timestamp, (int, float)):
+                        added_time = datetime.fromtimestamp(added_timestamp)
+                        if (datetime.now() - added_time) < timedelta(days=7):
+                            is_recent = True
+                except (ValueError, TypeError, OSError) as e:
+                    # print(f"Error processing 'added' timestamp for search item: {e}")
+                    pass 
+            
+            if is_recent:
+                new_icon_size = 24
+                new_icon_padding = 5
+                new_icon_label = QLabel(poster_container)
+                new_icon_label.setPixmap(QPixmap('assets/new.png').scaled(new_icon_size, new_icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                new_icon_label.setStyleSheet("background: transparent;")
+                new_icon_label.setGeometry(poster_width - new_icon_size - new_icon_padding, new_icon_padding, new_icon_size, new_icon_size)
+                new_icon_label.raise_()
+
+            tile_layout.addWidget(poster_container, alignment=Qt.AlignCenter)
+
+            # Rating (if available, e.g., for Movies/Series)
+            # Assuming 'rating' field might exist, similar to other tabs
+            if item_type in ['Movies', 'Series'] and item_data.get('rating'):
+                rating_text = str(item_data.get('rating', ''))
+                # Check if rating is a number like "7.5" or "75" (for TMDB-like percentage)
+                try:
+                    rating_val = float(rating_text)
+                    if rating_val > 10: # Assuming it might be 0-100 scale
+                        rating_display = f"★ {rating_val/10:.1f}" 
+                    else: # Assuming 0-10 scale
+                        rating_display = f"★ {rating_val:.1f}"
+                except ValueError:
+                    rating_display = f"★ {rating_text}" # Fallback for non-numeric ratings
+                
+                rating_label = QLabel(rating_display)
+                rating_label.setAlignment(Qt.AlignCenter)
+                rating_label.setStyleSheet("color: gold; font-size: 11px; padding-top: 2px;")
+                tile_layout.addWidget(rating_label)
+            else:
+                # Add a spacer or empty label to maintain layout consistency if no rating
+                spacer_label = QLabel("") 
+                spacer_label.setFixedHeight(QFontMetrics(QFont('Arial', 11)).height() + 2) # Match potential rating height
+                tile_layout.addWidget(spacer_label)
+
+            # Type indicator (optional, if still desired below rating)
+            # type_label = QLabel(item_type)
+            # type_label.setAlignment(Qt.AlignCenter)
+            # type_label.setFont(QFont('Arial', 8))
+            # type_label.setStyleSheet("color: #AAA; background-color: #3A3A3A; border-radius: 3px; padding: 1px 3px;")
+            # tile_layout.addWidget(type_label)
+            # tile_layout.addStretch(1) # Removed to keep rating at bottom
 
             tile.mousePressEvent = lambda e, data=item_data, type=item_type: self.item_clicked(data, type)
             
