@@ -15,7 +15,6 @@ from src.ui.player import MediaPlayer
 from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ImageCache  # Correct import for ImageCache
 from src.utils.helpers import load_image_async
-from src.utils.text_search import TextSearch
 from src.ui.widgets.series_details_widget import SeriesDetailsWidget
 
 def get_api_client_from_label(label, main_window):
@@ -137,20 +136,10 @@ class SeriesTab(QWidget):
         self.setup_ui()
         self.api_client = api_client
         self.main_window = main_window
-        self._series_search_index = {}  # token -> set of indices
-        self._series_lc_names = []      # lowercased names for fallback
         self._series_sort_cache = {}  # (sort_field, reverse) -> sorted list
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        # Search bar
-        search_layout = QHBoxLayout()
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search series...")
-        self.search_input.textChanged.connect(self.search_series)
-        search_layout.addWidget(self.search_input)
-        layout.addLayout(search_layout)
-
         # Stacked widget for grid/details views
         self.stacked_widget = QStackedWidget()
 
@@ -555,8 +544,7 @@ class SeriesTab(QWidget):
                 QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
         self.current_page = 1
         self._series_sort_cache.clear()  # Clear cache on reload
-        self.build_series_search_index()  # Build index after loading, populates _normalized_name
-        self.search_series(self.search_input.text()) # Apply current search or show all
+        self.display_current_page() # Refresh display after loading series
 
     def load_favorite_series(self):
         main_window = self.window()
@@ -666,62 +654,7 @@ class SeriesTab(QWidget):
         self.current_series = series
         self.show_series_details(series)
 
-    def build_series_search_index(self):
-        """Builds a token-based search index for fast lookup using normalized names."""
-        self._series_search_index = {}
-        self._series_lc_names = [] # This will store _normalized_name for potential fallback or direct use
 
-        if not self.series:
-            return
-
-        for idx, s_item in enumerate(self.series):
-            original_name = s_item.get('name', '')
-            normalized_name = TextSearch.normalize_text(original_name)
-            s_item['_normalized_name'] = normalized_name
-            s_item['_sort_name'] = normalized_name # Use normalized name for consistent sorting
-
-            try:
-                s_item['_sort_date'] = int(s_item.get('added', 0))
-            except (ValueError, TypeError):
-                s_item['_sort_date'] = 0
-            try:
-                s_item['_sort_rating'] = float(s_item.get('rating', 0))
-            except (ValueError, TypeError):
-                s_item['_sort_rating'] = 0.0
-            
-            self._series_lc_names.append(normalized_name) # Keep this list updated
-
-            tokens = set(normalized_name.split()) 
-            for token in tokens:
-                if not token: # Skip empty tokens that might result from multiple spaces
-                    continue
-                if token not in self._series_search_index:
-                    self._series_search_index[token] = set()
-                self._series_search_index[token].add(idx)
-
-    def search_series(self, text):
-        search_term = text.strip()
-
-        if not hasattr(self, 'series') or self.series is None:
-            self.series = []
-        
-        if not self.series: # No series loaded or series list is empty
-            self.filtered_series = []
-            self.current_page = 1
-            self.display_current_page()
-            return
-
-        # TextSearch.search handles empty search_term by returning all items
-        # It also handles normalization internally.
-        # The key_func extracts the original name for TextSearch to normalize and search against.
-        self.filtered_series = TextSearch.search(
-            self.series, 
-            search_term, 
-            lambda item: item.get('name', '')
-        )
-        
-        self.current_page = 1 # Reset to first page for new search results
-        self.display_current_page()
 
     def episode_double_clicked(self, item):
         """Handle episode double-click"""

@@ -116,8 +116,6 @@ class LiveTab(QWidget):
         self.all_channels = []  # Store all channels across categories
         self.categories_api_data = [] # Store raw API category data
         self.current_channel = None
-        self._live_search_index = {}  # token -> set of indices
-        self._live_lc_names = []      # lowercased names for fallback
         self.recording_thread = None
         self.page_size = 32
         self.current_page = 1
@@ -127,12 +125,6 @@ class LiveTab(QWidget):
     
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        # Search bar
-        search_layout = QHBoxLayout()
-        self.search_input = DebouncedLineEdit()
-        self.search_input.setPlaceholderText("Search channels...")
-        self.search_input._debounced_text_changed.connect(self.search_channels)
-        search_layout.addWidget(self.search_input)
 
         # Main content area with splitter
         splitter = QSplitter(Qt.Horizontal)
@@ -178,7 +170,6 @@ class LiveTab(QWidget):
         splitter.setSizes([300, 900])
 
         # Add all components to main layout
-        layout.addLayout(search_layout)
         layout.addWidget(splitter)
         self.display_current_page()
         self.page_size = 32
@@ -253,7 +244,6 @@ class LiveTab(QWidget):
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load channels: {data}")
         self.display_current_page()
-        self.build_live_search_index()  # Build search index after loading
         self.show_loading(False)
 
     def load_favorite_channels(self):
@@ -275,26 +265,6 @@ class LiveTab(QWidget):
         # display_current_page will handle pagination and display
         # It should also update total_pages based on self.live_channels
         self.display_current_page()
-        self.build_live_search_index()  # Build search index after loading
-
-    def build_live_search_index(self):
-        """Builds a token-based search index for fast lookup using normalized text."""
-        from src.utils.text_search import TextSearch
-        self._live_search_index = {}
-        self._live_lc_names = []
-        if not self.live_channels:
-            return
-        for idx, channel in enumerate(self.live_channels):
-            original_name = channel.get('name', '')
-            normalized_name = TextSearch.normalize_text(original_name)
-            channel['_normalized_name'] = normalized_name
-            self._live_lc_names.append(normalized_name)
-            tokens = set(normalized_name.split())
-            for token in tokens:
-                if token:
-                    if token not in self._live_search_index:
-                        self._live_search_index[token] = set()
-                    self._live_search_index[token].add(idx)
 
     def search_channels(self, text):
         """Fast search using index, similar to movies/series."""
