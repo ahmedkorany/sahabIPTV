@@ -586,15 +586,34 @@ class MoviesTab(QWidget):
     def display_current_page(self):
         # Clear previous grid items more thoroughly
         while self.movie_grid_layout.count() > 0:
-            item = self.movie_grid_layout.takeAt(0) # takeAt removes and returns item from layout
+            item = self.movie_grid_layout.takeAt(0)
             if item:
                 widget = item.widget()
                 if widget:
-                    widget.setParent(None) # Disassociate widget from parent
-                    widget.deleteLater()   # Schedule widget for deletion
-        
+                    widget.setParent(None)
+                    widget.deleteLater()
         page_items, self.total_pages = self.paginate_items(self.filtered_movies, self.current_page)
-        self.display_movie_grid(page_items) # This will add new widgets to the now empty layout
+        # Show empty state label if no items
+        if not page_items:
+            if not hasattr(self, 'empty_state_label'):
+                self.empty_state_label = QLabel()
+                self.empty_state_label.setAlignment(Qt.AlignCenter)
+                self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
+                self.empty_state_label.setWordWrap(True)
+            query = self.search_input.text().strip() if hasattr(self, 'search_input') else ''
+            if query:
+                self.empty_state_label.setText(f"No results found for '{query}'.")
+            else:
+                self.empty_state_label.setText("No movies to display.")
+            self.movie_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
+            if hasattr(self, 'order_panel'):
+                self.order_panel.setVisible(False)
+            self.update_pagination_controls()
+            return
+        else:
+            if hasattr(self, 'empty_state_label'):
+                self.empty_state_label.hide()
+        self.display_movie_grid(page_items)
         self.update_pagination_controls()
 
     def movie_double_clicked(self, item):

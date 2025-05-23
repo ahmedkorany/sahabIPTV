@@ -12,6 +12,7 @@ from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
+from src.ui.tabs.search_tab import SearchTab # Added import for SearchTab
 from src.ui.widgets.dialogs import LoginDialog
 from src.utils.helpers import load_json_file, save_json_file, get_translations
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
@@ -111,20 +112,25 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.home_screen, self.translations.get("Home", "Home"))
         self.live_tab = LiveTab(self.api_client, parent=self)
         self.movies_tab = MoviesTab(self.api_client, parent=self)
-        self.series_tab = SeriesTab(self.api_client, parent=self)
+        self.series_tab = SeriesTab(self.api_client, main_window=self)
+        self.search_tab = SearchTab(self.api_client, main_window=self)
         self.live_tab.add_to_favorites.connect(self.add_to_favorites)
         self.movies_tab.add_to_favorites.connect(self.add_to_favorites)
         self.series_tab.add_to_favorites.connect(self.add_to_favorites)
         self.tabs.addTab(self.live_tab, self.translations["Live TV"])
         self.tabs.addTab(self.movies_tab, self.translations["Movies"])
         self.tabs.addTab(self.series_tab, self.translations["Series"])
+        self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search"))
         self.live_tab.main_window = self
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
         self.setCentralWidget(self.tabs)
 
         # Connect tab change to handler
-        self.tabs.currentChanged.connect(self.handle_tab_changed)
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        # Connect add_to_favorites from search_tab
+        if hasattr(self.search_tab, 'add_to_favorites'):
+            self.search_tab.add_to_favorites.connect(self.add_to_favorites)
 
         # Create menu bar
         self.create_menu_bar()
@@ -146,11 +152,23 @@ class MainWindow(QMainWindow):
         self.loading_counter = {'count': 0}
         self.loading_icon_controller = LoadingIconController(self)
 
-    def handle_tab_changed(self, index):
+    def show_series_details_from_search(self, series_data):
+        """Switches to Series tab and shows details for a series from search results."""
+        if hasattr(self, 'series_tab') and self.series_tab:
+            self.tabs.setCurrentWidget(self.series_tab)
+            # Ensure series_tab is ready and then call its method to show details
+            # This might need a small delay or a signal if series_tab loads data lazily
+            QTimer.singleShot(0, lambda: self.series_tab.show_series_details_by_data(series_data))
+
+    def on_tab_changed(self, index):
         # If Home tab selected, update home screen info if needed
         if index == 0 and hasattr(self, 'home_screen'):
             self.home_screen.update_expiry_date(self.expiry_str)
-            # Optionally update user info, etc.
+            current_widget = self.tabs.widget(index)
+            if current_widget == self.series_tab and hasattr(self.series_tab, 'tab_selected'):
+                self.series_tab.tab_selected()
+            elif current_widget == self.search_tab and hasattr(self.search_tab, 'tab_selected'):
+                self.search_tab.tab_selected()
 
     def handle_home_tile_clicked(self, key):
         # Switch to the appropriate tab when a tile is clicked

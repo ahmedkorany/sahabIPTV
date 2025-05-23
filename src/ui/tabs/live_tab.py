@@ -459,11 +459,30 @@ class LiveTab(QWidget):
         return items[start:end], total_pages
 
     def display_current_page(self):
+        # Clear previous grid items
         for i in reversed(range(self.channel_grid_layout.count())):
             widget = self.channel_grid_layout.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
         page_items, self.total_pages = self.paginate_items(self.live_channels, self.current_page)
+        # Show empty state label if no items
+        if not page_items:
+            if not hasattr(self, 'empty_state_label'):
+                self.empty_state_label = QLabel()
+                self.empty_state_label.setAlignment(Qt.AlignCenter)
+                self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
+                self.empty_state_label.setWordWrap(True)
+            query = self.search_input.text().strip() if hasattr(self, 'search_input') else ''
+            if query:
+                self.empty_state_label.setText(f"No results found for '{query}'.")
+            else:
+                self.empty_state_label.setText("No channels to display.")
+            self.channel_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
+            self.pagination_panel.setVisible(False)
+            return
+        else:
+            if hasattr(self, 'empty_state_label'):
+                self.empty_state_label.hide()
         self.display_channel_grid(page_items)
         self.update_pagination_controls()
 
@@ -475,12 +494,11 @@ class LiveTab(QWidget):
             if widget:
                 widget.setParent(None)
         self.channel_tiles = []
+        # Remove the empty state label if present
+        if hasattr(self, 'empty_state_label'):
+            self.empty_state_label.hide()
         if not channels:
-            empty_label = QLabel("This category doesn't contain any Channel")
-            empty_label.setAlignment(Qt.AlignCenter)
-            empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
-            self.channel_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
-            self.pagination_panel.setVisible(False)
+            # This logic is now handled in display_current_page
             return
         cols = 4
         row = 0

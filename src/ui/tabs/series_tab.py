@@ -127,7 +127,7 @@ class SeriesTab(QWidget):
     add_to_favorites = pyqtSignal(dict)
     # add_to_downloads = pyqtSignal(object) # Removed
 
-    def __init__(self, api_client, parent=None):
+    def __init__(self, api_client, main_window=None, parent=None):
         super().__init__(parent)
         self.api_client = api_client
         self.series = []
@@ -135,7 +135,8 @@ class SeriesTab(QWidget):
         self.all_series = []  # Store all series across categories
         self.current_series = None
         self.setup_ui()
-        self.main_window = None
+        self.api_client = api_client
+        self.main_window = main_window
         self._series_search_index = {}  # token -> set of indices
         self._series_lc_names = []      # lowercased names for fallback
         self._series_sort_cache = {}  # (sort_field, reverse) -> sorted list
@@ -269,6 +270,44 @@ class SeriesTab(QWidget):
         if self.stacked_widget.indexOf(self.details_widget) == -1:
             self.stacked_widget.addWidget(self.details_widget) # Adds to the end, usually index 1 if grid is 0
 
+        self.stacked_widget.setCurrentWidget(self.details_widget)
+
+    def show_series_details_by_data(self, series_data):
+        """Shows series details based on provided series_data, typically from an external source like search."""
+        # This method is similar to show_series_details but callable with data directly.
+        if not series_data or not isinstance(series_data, dict):
+            QMessageBox.warning(self, "Error", "Invalid series data provided.")
+            return
+
+        # Clear existing details widget if any
+        if self.details_widget:
+            self.stacked_widget.removeWidget(self.details_widget)
+            self.details_widget.deleteLater()
+            self.details_widget = None
+
+        self.current_series = series_data  # Set current series context
+        self.details_widget = SeriesDetailsWidget(
+            series_data=series_data,
+            api_client=self.api_client,
+            main_window=self.main_window, # Ensure main_window is passed
+            parent=self
+        )
+
+        # Connect signals from SeriesDetailsWidget
+        self.details_widget.back_clicked.connect(self._show_grid_view)
+        self.details_widget.play_episode_requested.connect(self._handle_play_episode_request)
+        self.details_widget.toggle_favorite_series_requested.connect(self._handle_toggle_favorite_request)
+        self.details_widget.export_season_requested.connect(self._handle_export_season_request)
+
+        # Add and show the details widget
+        if self.stacked_widget.indexOf(self.details_widget) == -1:
+            # If a placeholder was at index 1, remove it first
+            old_widget_at_1 = self.stacked_widget.widget(1)
+            if old_widget_at_1 and old_widget_at_1 != self.grid_view_widget: # Check it's not the grid view itself
+                self.stacked_widget.removeWidget(old_widget_at_1)
+                old_widget_at_1.deleteLater()
+            self.stacked_widget.addWidget(self.details_widget) # Add to index 1 (or next available)
+        
         self.stacked_widget.setCurrentWidget(self.details_widget)
 
     # --- New/Adapted Signal Handlers ---
@@ -788,52 +827,6 @@ class SeriesTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export season URLs: {str(e)}")
         return
-    def update_download_progress(self, download_item, progress, downloaded_size=0, total_size=0):
-        """Update download progress in the downloads tab"""
-        # if download_item: # Removed
-            # Update the download item # Removed
-            # download_item.update_progress(progress, downloaded_size, total_size) # Removed
-            
-            # Update the UI in the downloads tab # Removed
-            # if self.main_window and hasattr(self.main_window, 'downloads_tab'): # Removed
-                # self.main_window.downloads_tab.update_download_item(download_item) # Removed
-        pass # Download functionality removed
-            
-    
-    def download_finished(self, download_item, save_path):
-        # This method is no longer needed as download functionality is removed.
-        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
-        pass
-    
-    def download_error(self, download_item, error_message):
-        # This method is no longer needed as download functionality is removed.
-        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
-        pass
-    
-    def cancel_download(self):
-        # This method is no longer needed as download functionality is removed.
-        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
-        pass
-    
-    def update_batch_progress(self, download_item, episode_index, progress):
-        # This method is no longer needed as download functionality is removed.
-        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
-        pass
-        
-    def batch_download_finished(self, download_item):
-        # This method is no longer needed as download functionality is removed.
-        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
-        pass
-    
-    def batch_download_error(self, download_item, error_message):
-        # This method is no longer needed as download functionality is removed.
-        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
-        pass
-    
-    def cancel_batch_download(self):
-        # This method is no longer needed as download functionality is removed.
-        # QMessageBox.information(self, "Info", "Download functionality is currently disabled.")
-        pass
     
     def add_to_favorites_clicked(self):
         """Add current episode to favorites"""
@@ -907,10 +900,15 @@ class SeriesTab(QWidget):
             if widget:
                 widget.setParent(None)
         
+        # Add or update empty_state_label for empty results
+        if not hasattr(self, 'empty_state_label'):
+            self.empty_state_label = QLabel()
+            self.empty_state_label.setAlignment(Qt.AlignCenter)
+            self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
+            self.empty_state_label.setWordWrap(True)
+        
         source_list = []
-        # Check if search_input exists and has text
         search_active = hasattr(self, 'search_input') and self.search_input.text().strip()
-
         if search_active:
             if hasattr(self, 'filtered_series') and self.filtered_series is not None:
                 source_list = self.filtered_series
@@ -918,6 +916,18 @@ class SeriesTab(QWidget):
             source_list = self.series
         
         page_items, self.total_pages = self.paginate_items(source_list, self.current_page)
+        if not page_items:
+            # Show empty state label in the grid
+            if search_active:
+                query = self.search_input.text().strip()
+                self.empty_state_label.setText(f"No results found for '{query}'.")
+            else:
+                self.empty_state_label.setText("No items to display.")
+            self.series_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
+            self.update_pagination_controls()
+            return
+        else:
+            self.empty_state_label.hide()
         self.display_series_grid(page_items) # display_series_grid takes the paginated items
         self.update_pagination_controls() # update_pagination_controls uses self.total_pages
 
