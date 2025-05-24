@@ -5,9 +5,8 @@ import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout)
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, QMetaObject, Q_ARG, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QMetaObject, Q_ARG, QTimer
 from PyQt5.QtGui import QPixmap, QFont
-from src.utils.text_search import TextSearch
 import sip # Add sip import for checking deleted QObjects
 from src.ui.player import MediaPlayer
 from src.utils.recorder import RecordingThread

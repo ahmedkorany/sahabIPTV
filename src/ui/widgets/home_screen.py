@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QSizePolicy
-from PyQt5.QtGui import QIcon, QPixmap, QFont, QLinearGradient, QBrush, QPalette, QColor
+from PyQt5.QtGui import QIcon, QFont, QLinearGradient, QBrush, QPalette, QColor
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
 import os
 
@@ -42,7 +42,6 @@ class HomeScreenWidget(QWidget):
         search_btn.setIconSize(QSize(48, 48))
         search_btn.setToolTip('Search')
         search_btn.setFlat(True)
-        search_btn.clicked.connect(self.handle_search_click)
         nav_bar.addWidget(search_btn)
         settings_btn = QPushButton()
         settings_btn.setIcon(QIcon(os.path.join('assets', 'settings.png')))
@@ -75,7 +74,6 @@ class HomeScreenWidget(QWidget):
             btn.setText(name)
             btn.setFont(QFont('Arial', 22, QFont.Bold))
             btn.setStyleSheet("QPushButton { color: white; background: rgba(40,40,60,0.8); border-radius: 24px; padding: 24px; } QPushButton:hover { background: #444466; }")
-            # btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)  # Removed: QPushButton does not support this method
             btn.clicked.connect(lambda checked, k=key: self.handle_tile_click(k))
             tile_layout.addWidget(btn)
         main_layout.addStretch()
@@ -110,10 +108,4 @@ class HomeScreenWidget(QWidget):
         main_window = self.window()
         if hasattr(main_window, 'show_account_management_screen'):
             main_window.show_account_management_screen()
-            
-    def handle_search_click(self):
-        # Switch to search tab via parent MainWindow
-        main_window = self.window()
-        if hasattr(main_window, 'tabs'):
-            # Search tab is at index 4
-            main_window.tabs.setCurrentIndex(4)
+    
