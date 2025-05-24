@@ -53,3 +53,132 @@ class TextSearch:
                 if normalized_search_term in normalized_value:
                     results.append(item)
         return results
+
+def search_all_data(api_client, query):
+    """
+    Searches across live channels, movies, and series for the given query.
+    Returns a list of combined, structured results.
+    """
+    if not api_client or not query:
+        return []
+
+    normalized_query = TextSearch.normalize_text(query)
+    if not normalized_query: # Or if len(normalized_query) < MIN_SEARCH_LEN
+        return []
+
+    all_results = []
+
+    # --- Search Live Channels ---
+    # Assuming api_client.get_live_streams_for_search() or similar exists
+    # and returns a list of dicts with 'name', 'stream_id', 'stream_icon', 'category_name', etc.
+    # For now, let's assume a generic get_live_streams() that might need category iteration.
+    # This part needs to align with how live channels are fetched for searching.
+    # A more optimized API endpoint for searching live channels would be ideal.
+    # If we need to fetch all live streams first:
+    live_streams_data = []
+    success_cat_live, live_categories = api_client.get_live_categories()
+    if success_cat_live:
+        for cat in live_categories:
+            category_id = cat.get('category_id')
+            if category_id:
+                success_streams, streams = api_client.get_live_streams(category_id)
+                if success_streams:
+                    live_streams_data.extend(streams)
+    
+    for item in live_streams_data:
+        name = item.get('name', '')
+        normalized_name = TextSearch.normalize_text(name)
+        if normalized_query in normalized_name:
+            result_item = {
+                'stream_type': 'live',
+                'name': name,
+                'stream_id': item.get('stream_id'),
+                'cover': item.get('stream_icon'),
+                'rating': item.get('rating', 0), # Live channels might not have ratings
+                # Add any other relevant fields for display or action
+                'category_name': item.get('category_name', 'Live')
+            }
+            all_results.append(result_item)
+
+    # --- Search Movies ---
+    # Assuming api_client.get_movies_for_search() or similar exists.
+    # Or iterate through movie categories and then movies.
+    movies_data = []
+    success_cat_movies, movie_categories = api_client.get_vod_categories() # Changed to get_vod_categories
+    if success_cat_movies:
+        for cat in movie_categories:
+            category_id = cat.get('category_id')
+            if category_id:
+                # Using get_vod_streams which is often used for movies
+                success_movies, movies = api_client.get_vod_streams(category_id)
+                if success_movies:
+                    movies_data.extend(movies) 
+    
+    for item in movies_data:
+        name = item.get('name', '')
+        normalized_name = TextSearch.normalize_text(name)
+        if normalized_query in normalized_name:
+            result_item = {
+                'stream_type': 'movies', # Changed 'movie' to 'movies'
+                'name': name,
+                'movie_id': item.get('stream_id'), # Assuming stream_id is the movie_id for VOD
+                'cover': item.get('stream_icon') or item.get('movie_image'),
+                'rating': item.get('rating', 0),
+                'year': item.get('year'),
+                'plot': item.get('plot'),
+                # Add other relevant fields
+            }
+            all_results.append(result_item)
+
+    # --- Search Series ---
+    # Assuming api_client.get_series_for_search() or similar exists.
+    series_data = []
+    success_cat_series, series_categories = api_client.get_series_categories()
+    if success_cat_series:
+        for cat in series_categories:
+            category_id = cat.get('category_id')
+            if category_id:
+                success_series, series_list = api_client.get_series(category_id)
+                if success_series:
+                    series_data.extend(series_list)
+
+    for item in series_data:
+        name = item.get('name', '')
+        normalized_name = TextSearch.normalize_text(name)
+        if normalized_query in normalized_name:
+            result_item = {
+                'stream_type': 'series',
+                'name': name,
+                'series_id': item.get('series_id'),
+                'cover': item.get('cover'),
+                'rating': item.get('rating', 0),
+                'plot': item.get('plot'),
+                'year': item.get('year'),
+                # Add other relevant fields
+            }
+            all_results.append(result_item)
+            
+    # Remove duplicates if any (e.g., if an item appears in multiple categories)
+    # This basic de-duplication assumes unique IDs per type.
+    # A more robust de-duplication might be needed if IDs are not globally unique across types.
+    unique_results = []
+    seen_ids = set()
+    for item in all_results:
+        item_id = None
+        if item['stream_type'] == 'live':
+            item_id = item.get('stream_id')
+        elif item['stream_type'] == 'movies': # Changed 'movie' to 'movies'
+            item_id = item.get('movie_id')
+        elif item['stream_type'] == 'series':
+            item_id = item.get('series_id')
+        
+        if item_id:
+            unique_key = (item['stream_type'], item_id)
+            if unique_key not in seen_ids:
+                unique_results.append(item)
+                seen_ids.add(unique_key)
+        else: # If no ID, just add it (less ideal)
+            unique_results.append(item)
+
+
+    return unique_results

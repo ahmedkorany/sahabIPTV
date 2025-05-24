@@ -12,6 +12,7 @@ from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
+from src.ui.tabs.search_tab import SearchTab # Added SearchTab
 from src.utils.helpers import load_json_file, save_json_file, get_translations
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
 from src.ui.widgets.home_screen import HomeScreenWidget
@@ -111,15 +112,25 @@ class MainWindow(QMainWindow):
         self.live_tab = LiveTab(self.api_client, parent=self)
         self.movies_tab = MoviesTab(self.api_client, parent=self)
         self.series_tab = SeriesTab(self.api_client, main_window=self)
+        self.search_tab = SearchTab(self.api_client, main_window=self) # Added SearchTab instance
+
         self.live_tab.add_to_favorites.connect(self.add_to_favorites)
         self.movies_tab.add_to_favorites.connect(self.add_to_favorites)
         self.series_tab.add_to_favorites.connect(self.add_to_favorites)
-        self.tabs.addTab(self.live_tab, self.translations["Live TV"])
-        self.tabs.addTab(self.movies_tab, self.translations["Movies"])
-        self.tabs.addTab(self.series_tab, self.translations["Series"])
+        # Connect SearchTab signals for item clicks
+        self.search_tab.movie_selected.connect(self.show_movie_details_from_search)
+        self.search_tab.series_selected.connect(self.show_series_details_from_search)
+        self.search_tab.channel_selected.connect(self.play_channel_from_search)
+
+        self.tabs.addTab(self.live_tab, self.translations.get("Live TV", "Live TV"))
+        self.tabs.addTab(self.movies_tab, self.translations.get("Movies", "Movies"))
+        self.tabs.addTab(self.series_tab, self.translations.get("Series", "Series"))
+        self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search")) # Added Search tab
+
         self.live_tab.main_window = self
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
+        self.search_tab.main_window = self # Set main_window for search_tab
         self.setCentralWidget(self.tabs)
 
         # Connect tab change to handler
@@ -149,23 +160,59 @@ class MainWindow(QMainWindow):
         """Switches to Series tab and shows details for a series from search results."""
         if hasattr(self, 'series_tab') and self.series_tab:
             self.tabs.setCurrentWidget(self.series_tab)
-            # Ensure series_tab is ready and then call its method to show details
-            # This might need a small delay or a signal if series_tab loads data lazily
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(0, lambda: self.series_tab.show_series_details_by_data(series_data))
+        else:
+            QMessageBox.warning(self, "Navigation Error", "Series tab is not available.")
+
+    def show_movie_details_from_search(self, movie_data):
+        """Switches to Movies tab and shows details for a movie from search results."""
+        if hasattr(self, 'movies_tab') and self.movies_tab:
+            self.tabs.setCurrentWidget(self.movies_tab)
+            # Assuming movies_tab has a method like show_movie_details_by_data
+            # You might need to implement this in movies_tab.py
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.movies_tab.show_movie_details_by_data(movie_data) if hasattr(self.movies_tab, 'show_movie_details_by_data') else QMessageBox.warning(self, "Not Implemented", "Movie details view from search is not fully implemented in MoviesTab."))
+        else:
+            QMessageBox.warning(self, "Navigation Error", "Movies tab is not available.")
+
+    def play_channel_from_search(self, channel_data):
+        """Switches to Live TV tab and plays the selected channel."""
+        if hasattr(self, 'live_tab') and self.live_tab:
+            # self.tabs.setCurrentWidget(self.live_tab) # Optional: switch to live tab
+            # Assuming live_tab has a method to play a channel directly
+            # You might need to implement this in live_tab.py
+            if hasattr(self.live_tab, 'play_channel_by_data'):
+                self.live_tab.play_channel_by_data(channel_data)
+            elif self.player_window and channel_data.get('stream_url'): # Fallback to direct play if URL is in data
+                self.player_window.play(channel_data['stream_url'], channel_data)
+                self.player_window.show()
+            else:
+                QMessageBox.warning(self, "Not Implemented", "Playing channel from search is not fully implemented in LiveTab or data is insufficient.")
+        else:
+            QMessageBox.warning(self, "Navigation Error", "Live TV tab is not available.")
+
 
     def on_tab_changed(self, index):
-        # If Home tab selected, update home screen info if needed
-        if index == 0 and hasattr(self, 'home_screen'):
+        current_widget = self.tabs.widget(index)
+        if current_widget == self.home_screen:
             self.home_screen.update_expiry_date(self.expiry_str)
-            current_widget = self.tabs.widget(index)
-            if current_widget == self.series_tab and hasattr(self.series_tab, 'tab_selected'):
-                self.series_tab.tab_selected()
+        elif current_widget == self.series_tab and hasattr(self.series_tab, 'tab_selected'):
+            self.series_tab.tab_selected()
+        elif current_widget == self.search_tab and hasattr(self.search_tab, 'refresh_search'):
+            # self.search_tab.refresh_search() # Optionally refresh search or clear
+            pass # Search tab handles its state internally mostly
+
     def handle_home_tile_clicked(self, key):
         # Switch to the appropriate tab when a tile is clicked
-        tab_map = {'live': 1, 'movies': 2, 'series': 3}
+        # Home: 0, Live: 1, Movies: 2, Series: 3, Search: 4 (new)
+        tab_map = {'live': 1, 'movies': 2, 'series': 3, 'search': 4}
         if key in tab_map:
             self.tabs.setCurrentIndex(tab_map[key])
+            if key == 'search' and hasattr(self, 'search_tab'):
+                self.search_tab.search_input.setFocus() # Focus search input
+        elif key == 'settings': # Assuming 'settings' key for account management
+            self.show_account_management_screen()
 
     def create_menu_bar(self):
         """Create the menu bar"""
@@ -668,9 +715,10 @@ class MainWindow(QMainWindow):
         """Apply language to UI elements"""
         # Set tab titles
         self.tabs.setTabText(0, self.translations.get("Home", "Home"))
-        self.tabs.setTabText(1, self.translations["Live TV"])
-        self.tabs.setTabText(2, self.translations["Movies"])
-        self.tabs.setTabText(3, self.translations["Series"])
+        self.tabs.setTabText(1, self.translations.get("Live TV", "Live TV"))
+        self.tabs.setTabText(2, self.translations.get("Movies", "Movies"))
+        self.tabs.setTabText(3, self.translations.get("Series", "Series"))
+        self.tabs.setTabText(4, self.translations.get("Search", "Search")) # Added Search tab title
         
         # Set layout direction
         if self.language == "ar":

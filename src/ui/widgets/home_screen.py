@@ -38,10 +38,12 @@ class HomeScreenWidget(QWidget):
         reload_btn.clicked.connect(self.reload_requested.emit)
         nav_bar.addWidget(reload_btn)
         search_btn = QPushButton()
+        search_btn.setObjectName("search_btn") # Added object name
         search_btn.setIcon(QIcon(os.path.join('assets', 'search.png')))
         search_btn.setIconSize(QSize(48, 48))
         search_btn.setToolTip('Search')
         search_btn.setFlat(True)
+        search_btn.clicked.connect(lambda: self.handle_tile_click('search')) # Connect to handle_tile_click
         nav_bar.addWidget(search_btn)
         settings_btn = QPushButton()
         settings_btn.setIcon(QIcon(os.path.join('assets', 'settings.png')))
@@ -108,4 +110,3 @@ class HomeScreenWidget(QWidget):
         main_window = self.window()
         if hasattr(main_window, 'show_account_management_screen'):
             main_window.show_account_management_screen()
-    
