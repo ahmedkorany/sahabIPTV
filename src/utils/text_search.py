@@ -119,9 +119,9 @@ def search_all_data(api_client, query):
         normalized_name = TextSearch.normalize_text(name)
         if normalized_query in normalized_name:
             result_item = {
-                'stream_type': 'movies', # Changed 'movie' to 'movies'
+                'stream_type': 'movie',
                 'name': name,
-                'movie_id': item.get('stream_id'), # Assuming stream_id is the movie_id for VOD
+                'stream_id': item.get('stream_id'), # Use stream_id consistently
                 'cover': item.get('stream_icon') or item.get('movie_image'),
                 'rating': item.get('rating', 0),
                 'year': item.get('year'),
@@ -167,8 +167,8 @@ def search_all_data(api_client, query):
         item_id = None
         if item['stream_type'] == 'live':
             item_id = item.get('stream_id')
-        elif item['stream_type'] == 'movies': # Changed 'movie' to 'movies'
-            item_id = item.get('movie_id')
+        elif item['stream_type'] == 'movie':
+            item_id = item.get('stream_id') # Use stream_id here as well for consistency during de-duplication
         elif item['stream_type'] == 'series':
             item_id = item.get('series_id')
         

@@ -153,10 +153,13 @@ class SearchTab(QWidget):
             if self.current_filter == "All":
                 self.search_results = all_raw_results
             else:
+                filter_value = self.current_filter.lower()
+                if filter_value == "movies": # Adjust for the 'Movies' filter selection
+                    filter_value = "movie"
                 self.search_results = [
                     item for item in all_raw_results
-                    if item.get('stream_type', '').lower() == self.current_filter.lower() or \
-                       (item.get('type', '').lower() == self.current_filter.lower()) # Handle 'type' or 'stream_type'
+                    if item.get('stream_type', '').lower() == filter_value or \
+                       (item.get('type', '').lower() == filter_value) # Handle 'type' or 'stream_type'
                 ]
 
         except Exception as e:
