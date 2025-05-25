@@ -135,6 +135,7 @@ class SeriesTab(QWidget):
         self.filtered_series = []
         self.all_series = []  # Store all series across categories
         self.current_series = None
+        self._opened_from_search = False
         self.setup_ui()
         self.api_client = api_client
         self.main_window = main_window
@@ -226,6 +227,16 @@ class SeriesTab(QWidget):
             self.details_widget.deleteLater()
             self.details_widget = None
 
+    def _handle_back_from_details(self):
+        if self._opened_from_search:
+            if self.main_window and hasattr(self.main_window, 'search_tab') and self.main_window.search_tab:
+                self.main_window.tabs.setCurrentWidget(self.main_window.search_tab)
+            self._opened_from_search = False # Reset flag
+            # Ensure the series tab is reset to grid view for future navigation to it
+            self._show_grid_view()
+        else:
+            self._show_grid_view()
+
     def show_series_details(self, series_data):
         if self.details_widget:
             self.stacked_widget.removeWidget(self.details_widget)
@@ -241,7 +252,7 @@ class SeriesTab(QWidget):
         )
 
         # Connect signals from SeriesDetailsWidget to handlers in SeriesTab
-        self.details_widget.back_clicked.connect(self._show_grid_view)
+        self.details_widget.back_clicked.connect(self._handle_back_from_details)
         self.details_widget.play_episode_requested.connect(self._handle_play_episode_request)
         self.details_widget.toggle_favorite_series_requested.connect(self._handle_toggle_favorite_request)
         # self.details_widget.download_episode_requested.connect(self._handle_download_episode_request) # Removed
@@ -266,6 +277,7 @@ class SeriesTab(QWidget):
 
     def show_series_details_by_data(self, series_data):
         """Shows series details based on provided series_data, typically from an external source like search."""
+        self._opened_from_search = True
         # This method is similar to show_series_details but callable with data directly.
         if not series_data or not isinstance(series_data, dict):
             QMessageBox.warning(self, "Error", "Invalid series data provided.")
@@ -286,7 +298,7 @@ class SeriesTab(QWidget):
         )
 
         # Connect signals from SeriesDetailsWidget
-        self.details_widget.back_clicked.connect(self._show_grid_view)
+        self.details_widget.back_clicked.connect(self._handle_back_from_details)
         self.details_widget.play_episode_requested.connect(self._handle_play_episode_request)
         self.details_widget.toggle_favorite_series_requested.connect(self._handle_toggle_favorite_request)
         self.details_widget.export_season_requested.connect(self._handle_export_season_request)
@@ -677,6 +689,7 @@ class SeriesTab(QWidget):
                 row += 1
 
     def series_tile_clicked(self, series):
+        self._opened_from_search = False
         self.current_series = series
         self.show_series_details(series)
 

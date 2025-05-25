@@ -27,6 +27,7 @@ class MoviesTab(QWidget):
         self.details_widget = None
         self.movies = []
         self.all_movies = []  # Store all movies across categories
+        self._opened_from_search = False
         self.filtered_movies = []  # Store filtered movies for search (now just a copy of movies)
         self.current_movie = None
         
@@ -439,7 +440,7 @@ class MoviesTab(QWidget):
             tmdb_client=self.tmdb_client,
             parent=self
         )
-        self.details_widget.back_btn.clicked.connect(self.show_movie_grid)
+        self.details_widget.back_btn.clicked.connect(self._handle_back_from_details)
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
         self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
@@ -449,8 +450,19 @@ class MoviesTab(QWidget):
     def show_movie_grid(self):
         self.stacked_widget.setCurrentIndex(0)
 
+    def _handle_back_from_details(self):
+        if self._opened_from_search:
+            if self.main_window and hasattr(self.main_window, 'search_tab') and self.main_window.search_tab:
+                self.main_window.tabs.setCurrentWidget(self.main_window.search_tab)
+            self._opened_from_search = False # Reset flag
+            # Ensure the movie tab is reset to grid view for future navigation to it
+            self.show_movie_grid()
+        else:
+            self.show_movie_grid()
+
     def show_movie_details_by_data(self, movie_data):
         """Show movie details from search data"""
+        self._opened_from_search = True
         # Remove old details widget if present
         if self.details_widget:
             self.stacked_widget.removeWidget(self.details_widget)
@@ -465,7 +477,7 @@ class MoviesTab(QWidget):
             tmdb_client=self.tmdb_client,
             parent=self
         )
-        self.details_widget.back_btn.clicked.connect(self.show_movie_grid)
+        self.details_widget.back_btn.clicked.connect(self._handle_back_from_details)
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
         self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
@@ -474,6 +486,7 @@ class MoviesTab(QWidget):
 
     def movie_tile_clicked(self, movie):
         """Handle movie tile click"""
+        self._opened_from_search = False
         self.current_movie = movie
         self.show_movie_details(movie)
 
