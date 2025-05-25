@@ -169,26 +169,17 @@ class MainWindow(QMainWindow):
         """Switches to Movies tab and shows details for a movie from search results."""
         if hasattr(self, 'movies_tab') and self.movies_tab:
             self.tabs.setCurrentWidget(self.movies_tab)
-            # Assuming movies_tab has a method like show_movie_details_by_data
-            # You might need to implement this in movies_tab.py
             from PyQt5.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self.movies_tab.show_movie_details_by_data(movie_data) if hasattr(self.movies_tab, 'show_movie_details_by_data') else QMessageBox.warning(self, "Not Implemented", "Movie details view from search is not fully implemented in MoviesTab."))
+            QTimer.singleShot(0, lambda: self.movies_tab.show_movie_details_by_data(movie_data))
         else:
             QMessageBox.warning(self, "Navigation Error", "Movies tab is not available.")
 
     def play_channel_from_search(self, channel_data):
         """Switches to Live TV tab and plays the selected channel."""
         if hasattr(self, 'live_tab') and self.live_tab:
-            # self.tabs.setCurrentWidget(self.live_tab) # Optional: switch to live tab
-            # Assuming live_tab has a method to play a channel directly
-            # You might need to implement this in live_tab.py
-            if hasattr(self.live_tab, 'play_channel_by_data'):
-                self.live_tab.play_channel_by_data(channel_data)
-            elif self.player_window and channel_data.get('stream_url'): # Fallback to direct play if URL is in data
-                self.player_window.play(channel_data['stream_url'], channel_data)
-                self.player_window.show()
-            else:
-                QMessageBox.warning(self, "Not Implemented", "Playing channel from search is not fully implemented in LiveTab or data is insufficient.")
+            # Optional: switch to live tab
+            # self.tabs.setCurrentWidget(self.live_tab)
+            self.live_tab.play_channel_by_data(channel_data)
         else:
             QMessageBox.warning(self, "Navigation Error", "Live TV tab is not available.")
 

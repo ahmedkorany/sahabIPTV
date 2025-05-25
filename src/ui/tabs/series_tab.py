@@ -185,6 +185,7 @@ class SeriesTab(QWidget):
         splitter_layout.addWidget(splitter)
 
         self.stacked_widget.addWidget(splitter_widget)  # Index 0: grid view
+        self.grid_view_widget = splitter_widget  # Store reference to grid view widget
         self.details_widget = None
         self.stacked_widget.addWidget(QWidget())  # Placeholder for details
 

@@ -333,6 +333,48 @@ class LiveTab(QWidget):
             QMessageBox.critical(self, "Playback Error", f"Could not open the stream. The channel may be temporarily unavailable.\n\nError: {str(e)}")
         # Optionally update current_channel again if needed
     
+    def play_channel_by_data(self, channel_data):
+        """Play a channel from search data"""
+        try:
+            # Extract necessary information from search data
+            stream_id = channel_data.get('stream_id') or channel_data.get('id')
+            if not stream_id:
+                QMessageBox.warning(self, "Error", "Channel data is missing stream ID")
+                return
+            
+            # Create channel object similar to existing format
+            channel = {
+                'name': channel_data.get('name', 'Unknown Channel'),
+                'stream_id': stream_id,
+                'stream_type': 'live'
+            }
+            
+            # Set current channel with stream URL
+            self.current_channel = {
+                'name': channel['name'],
+                'stream_url': self.api_client.get_live_stream_url(channel['stream_id']),
+                'stream_id': channel['stream_id'],
+                'stream_type': 'live'
+            }
+            
+            # Play the channel using existing logic
+            stream_url = self.current_channel.get('stream_url')
+            main_window = self.main_window if hasattr(self, 'main_window') else None
+            
+            if main_window and hasattr(main_window, 'player_window'):
+                player_window = main_window.player_window
+                player_window.play(stream_url, self.current_channel)
+                player_window.show()
+                player_window.raise_()
+                player_window.activateWindow()
+            else:
+                if not hasattr(self, 'player'):
+                    self.player = MediaPlayer()
+                self.player.play(stream_url)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Playback Error", f"Could not play the channel from search.\n\nError: {str(e)}")
+    
     def record_channel(self):
         """Record the current channel"""
         if not self.current_channel:

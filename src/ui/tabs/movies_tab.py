@@ -449,6 +449,29 @@ class MoviesTab(QWidget):
     def show_movie_grid(self):
         self.stacked_widget.setCurrentIndex(0)
 
+    def show_movie_details_by_data(self, movie_data):
+        """Show movie details from search data"""
+        # Remove old details widget if present
+        if self.details_widget:
+            self.stacked_widget.removeWidget(self.details_widget)
+            self.details_widget.deleteLater()
+            self.details_widget = None
+        
+        # Create a new details widget using MovieDetailsWidget
+        self.details_widget = MovieDetailsWidget(
+            movie_data,
+            api_client=self.api_client,
+            main_window=self.main_window,
+            tmdb_client=self.tmdb_client,
+            parent=self
+        )
+        self.details_widget.back_btn.clicked.connect(self.show_movie_grid)
+        self.details_widget.play_clicked.connect(self._play_movie_from_details)
+        self.details_widget.trailer_clicked.connect(self._play_trailer)
+        self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
+        self.stacked_widget.addWidget(self.details_widget)
+        self.stacked_widget.setCurrentWidget(self.details_widget)
+
     def movie_tile_clicked(self, movie):
         """Handle movie tile click"""
         self.current_movie = movie
