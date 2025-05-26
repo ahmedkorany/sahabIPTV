@@ -381,21 +381,20 @@ class MainWindow(QMainWindow):
                 'password': credentials['password'],
                 'account_name': name
             }
-            # Handle add mode vs edit mode differently
-            if is_add_mode:
-                # In add mode, just add the new account without changing current account
-                self.accounts[name] = acc
-                self.settings.setValue("accounts", self.accounts)
-            else:
+            # Save account
+            self.accounts[name] = acc
+            self.settings.setValue("accounts", self.accounts)
+
+            # Handle edit mode specific actions
+            if not is_add_mode:
                 # In edit mode, remove old name if renaming and set as current
                 if self.current_account and self.current_account in self.accounts and self.current_account != name:
-                    self.accounts.pop(self.current_account)
-                self.accounts[name] = acc
+                    self.accounts.pop(self.current_account) # Remove old if name changed
+                # Update current_account only in edit mode
                 self.current_account = name
-                self.settings.setValue("accounts", self.accounts)
                 self.settings.setValue("current_account", name)
-            # Save credentials if remember is checked (only in edit mode)
-            if not is_add_mode:
+                
+                # Save credentials if remember is checked (only in edit mode)
                 if credentials['remember']:
                     self.settings.setValue("server", credentials['server'])
                     self.settings.setValue("username", credentials['username'])
@@ -406,10 +405,11 @@ class MainWindow(QMainWindow):
                     self.settings.remove("username")
                     self.settings.remove("password")
                     self.settings.setValue("remember_credentials", False)
+                
                 # Connect to server only in edit mode
                 self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
                 self.update_account_label()  # Update app title after login
-        elif account_switch:
+        elif account_switch and not is_add_mode: # Only show switch dialog if not adding and login was cancelled
             self.show_account_switch_dialog()
 
     def clear_grids(self):
