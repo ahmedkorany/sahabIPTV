@@ -355,46 +355,58 @@ class MainWindow(QMainWindow):
             server = prefill.get('server', '')
             username = prefill.get('username', '')
             password = prefill.get('password', '')
-            remember = True
+            remember = True # In edit mode, 'remember' is implicitly true for existing data
             account_name = prefill.get('account_name', self.current_account or "")
-        else:
+        else: # This is typically for add mode or initial login
             server = self.settings.value("server", "")
             username = self.settings.value("username", "")
             password = self.settings.value("password", "")
             remember = self.settings.value("remember_credentials", True, type=bool)
-            account_name = self.current_account or ""
+            account_name = "" # Start with empty name for add mode
+
         from src.ui.widgets.dialogs import LoginDialog
-        from PyQt5.QtWidgets import QLineEdit, QLabel, QVBoxLayout
-        dialog = LoginDialog(self, server, username, password, remember)
-        # Add account name field to the dialog
-        name_label = QLabel("Account Name:")
-        name_edit = QLineEdit(account_name)
-        dialog.layout().insertWidget(0, name_edit)
-        dialog.layout().insertWidget(0, name_label)
+        # Pass account_name and is_add_mode to LoginDialog constructor
+        dialog = LoginDialog(self, account_name, server, username, password, remember, is_add_mode)
+
+        if is_add_mode:
+            dialog.setWindowTitle("Add New Account")
+            # Button text is already handled by LoginDialog's new __init__ and setup_ui
+        else:
+            dialog.setWindowTitle(f"Edit Account: {account_name}")
+            # Button text is already handled by LoginDialog's new __init__ and setup_ui
+
         if dialog.exec_():
             credentials = dialog.get_credentials()
-            name = name_edit.text().strip() or f"Account {len(self.accounts)+1}"
-            # Save account
+            new_account_name = credentials.get('account_name', '').strip()
+
+            if not new_account_name:
+                QMessageBox.warning(self, "Input Error", "Account name cannot be empty.")
+                return # Or re-show dialog
+
+            # Check for duplicate account name (only if it's a new name or add mode)
+            if (is_add_mode and new_account_name in self.accounts) or \
+               (not is_add_mode and new_account_name != account_name and new_account_name in self.accounts):
+                QMessageBox.warning(self, "Input Error", f"An account with the name '{new_account_name}' already exists.")
+                return # Or re-show dialog
+
             acc = {
                 'server': credentials['server'],
                 'username': credentials['username'],
                 'password': credentials['password'],
-                'account_name': name
+                'account_name': new_account_name # Use the new name from dialog
             }
-            # Save account
-            self.accounts[name] = acc
+
+            # If editing and name changed, remove old entry
+            if not is_add_mode and account_name and account_name != new_account_name and account_name in self.accounts:
+                del self.accounts[account_name]
+            
+            self.accounts[new_account_name] = acc
             self.settings.setValue("accounts", self.accounts)
 
-            # Handle edit mode specific actions
-            if not is_add_mode:
-                # In edit mode, remove old name if renaming and set as current
-                if self.current_account and self.current_account in self.accounts and self.current_account != name:
-                    self.accounts.pop(self.current_account) # Remove old if name changed
-                # Update current_account only in edit mode
-                self.current_account = name
-                self.settings.setValue("current_account", name)
+            if not is_add_mode: # Only connect and set as current if NOT in add mode
+                self.current_account = new_account_name
+                self.settings.setValue("current_account", new_account_name)
                 
-                # Save credentials if remember is checked (only in edit mode)
                 if credentials['remember']:
                     self.settings.setValue("server", credentials['server'])
                     self.settings.setValue("username", credentials['username'])
@@ -406,11 +418,20 @@ class MainWindow(QMainWindow):
                     self.settings.remove("password")
                     self.settings.setValue("remember_credentials", False)
                 
-                # Connect to server only in edit mode
                 self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
-                self.update_account_label()  # Update app title after login
-        elif account_switch and not is_add_mode: # Only show switch dialog if not adding and login was cancelled
-            self.show_account_switch_dialog()
+                self.update_account_label()
+            else:
+                # In add mode, we just save and return to account management. No auto-switch.
+                self.show_status_message(f"Account '{new_account_name}' added successfully.")
+                # The account management screen should refresh itself or be re-shown
+
+            # Refresh account management if it's open or re-trigger it
+            # This part might need adjustment based on how AccountManagementScreen is structured
+            # For now, assume it will be re-shown or refreshed by the caller
+
+        else: # Dialog was cancelled
+            if account_switch:
+                self.close() # Close app if initial login is cancelled
 
     def clear_grids(self):
         # Clear Live grid
@@ -746,28 +767,18 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def edit_account(self, name, acc):
-        from src.ui.widgets.dialogs import LoginDialog
-        dialog = LoginDialog(self, acc.get('server', ''), acc.get('username', ''), acc.get('password', ''), True)
-        if dialog.exec_():
-            credentials = dialog.get_credentials()
-            # Optionally allow renaming
-            from PyQt5.QtWidgets import QInputDialog
-            new_name, ok = QInputDialog.getText(self, "Edit Account Name", "Edit account name:", text=name)
-            if not ok or not new_name.strip():
-                new_name = name
-            # Update account
-            self.accounts.pop(name)
-            self.accounts[new_name] = {
-                'server': credentials['server'],
-                'username': credentials['username'],
-                'password': credentials['password']
-            }
-            self.current_account = new_name
-            self.settings.setValue("accounts", self.accounts)
-            self.settings.setValue("current_account", new_name)
-            self.api_client.set_credentials(credentials['server'], credentials['username'], credentials['password'])
-            self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
-            self.update_account_label()
+        # Ensure the account data being prefilled has the 'account_name' key
+        # which show_login_dialog expects in prefill.
+        # The 'acc' dictionary from self.accounts should already have this.
+        if 'account_name' not in acc:
+            acc['account_name'] = name # Ensure it's there for prefill
+
+        # Call the centralized show_login_dialog for editing
+        self.show_login_dialog(prefill=acc, is_add_mode=False, account_switch=False)
+        # After show_login_dialog completes, the account management screen (if open)
+        # or the main UI should reflect changes. If AccountManagementScreen is a dialog,
+        # it might need to be closed and reopened or have a refresh mechanism.
+        # For now, we assume show_login_dialog handles all necessary updates if successful.
 
     def edit_current_account(self):
         if self.current_account and self.current_account in self.accounts:

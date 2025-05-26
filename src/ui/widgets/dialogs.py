@@ -13,16 +13,25 @@ from src.utils.image_cache import ImageCache
 class LoginDialog(QDialog):
     """Dialog for entering IPTV server credentials"""
     
-    def __init__(self, parent=None, server="", username="", password="", remember=True):
+    def __init__(self, parent=None, account_name="", server="", username="", password="", remember=True, is_add_mode=True):
         super().__init__(parent)
-        self.setWindowTitle("Connect to IPTV Server")
+        self.setWindowTitle("Add/Edit Account") # Changed title to be more generic
         self.setMinimumWidth(400)
+        self.is_add_mode = is_add_mode # Store mode
         
-        self.setup_ui(server, username, password, remember)
+        self.setup_ui(account_name, server, username, password, remember)
     
-    def setup_ui(self, server, username, password, remember):
+    def setup_ui(self, account_name, server, username, password, remember):
         """Set up the UI components"""
         layout = QVBoxLayout(self)
+
+        # Account Name
+        account_name_layout = QHBoxLayout()
+        account_name_label = QLabel("Account Name:")
+        self.account_name_input = QLineEdit(account_name)
+        self.account_name_input.setPlaceholderText("My IPTV Account")
+        account_name_layout.addWidget(account_name_label)
+        account_name_layout.addWidget(self.account_name_input)
         
         # Server URL
         server_layout = QHBoxLayout()
@@ -53,14 +62,15 @@ class LoginDialog(QDialog):
         
         # Buttons
         buttons_layout = QHBoxLayout()
-        self.connect_button = QPushButton("Connect")
-        self.connect_button.clicked.connect(self.accept)
+        self.save_button = QPushButton("Save") # Changed from "Connect"
+        self.save_button.clicked.connect(self.accept)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
-        buttons_layout.addWidget(self.connect_button)
+        buttons_layout.addWidget(self.save_button) # Changed from self.connect_button
         buttons_layout.addWidget(self.cancel_button)
         
         # Add all layouts to main layout
+        layout.addLayout(account_name_layout) # Added account name layout
         layout.addLayout(server_layout)
         layout.addLayout(username_layout)
         layout.addLayout(password_layout)
@@ -70,6 +80,7 @@ class LoginDialog(QDialog):
     def get_credentials(self):
         """Get the entered credentials"""
         return {
+            'account_name': self.account_name_input.text(), # Added account_name
             'server': self.server_input.text(),
             'username': self.username_input.text(),
             'password': self.password_input.text(),
