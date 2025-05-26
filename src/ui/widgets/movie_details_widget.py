@@ -12,16 +12,17 @@ class MovieDetailsWidget(QWidget):
 
     def __init__(self, movie, api_client=None, main_window=None, tmdb_client=None, parent=None):
         super().__init__(parent)
-        self.movie = movie
         self.api_client = api_client
+        self.tmdb_client = tmdb_client
+        self.stream_id = movie.get('stream_id')
+        self.movie = movie
         self.main_window = main_window
         self._is_favorite = False
-        self.tmdb_client = tmdb_client
-        self.network_manager = QNetworkAccessManager()
+        self.poseter_load_failed = False
+        self.tmdb_id = movie.get('tmdb_id')
+        self.tmdb_id_for_poster_fallback = self.tmdb_id
         self.setup_ui()
         self.update_metadata_from_api()
-        self.poseter_load_failed = False
-
     def _clear_layout(self, layout):
         if layout is not None:
             while layout.count():
@@ -44,9 +45,9 @@ class MovieDetailsWidget(QWidget):
         self.poster.setAlignment(Qt.AlignTop)
         self.poseter_load_failed = False
         if self.movie.get('stream_icon'):
-            load_image_async(self.movie['stream_icon'], self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self, on_failure=self.load_poster_from_TMDB)
+            load_image_async(self.movie['stream_icon'], self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self, on_failure=self.onPosterLoadFailed)
         else:
-            self.load_poster_from_TMDB()
+            self.load_poster_from_TMDB(self.tmdb_id)
         # Overlay rated-r icon if movie is for adults
         if self.movie.get('adult'):
             rated_r_label = QLabel(self.poster)
@@ -140,7 +141,8 @@ class MovieDetailsWidget(QWidget):
                         if tmdb_poster_url:
                                 # print(f"[MovieDetailsWidget] Found TMDB poster: {tmdb_poster_url}") # Original debug log
                             self.movie['stream_icon'] = tmdb_poster_url
-                            load_image_async(tmdb_poster_url, self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self.main_window)
+
+                            load_image_async(tmdb_poster_url, self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self.main_window, on_failure=self.onPosterLoadFailed)
                         else:
                                 # print(f"[MovieDetailsWidget] Failed to construct TMDB poster URL for tmdb_id: {tmdb_id}") # Original debug log
                             self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -156,10 +158,19 @@ class MovieDetailsWidget(QWidget):
         else:
                 # print(f"[MovieDetailsWidget] No tmdb_id or tmdb_client available to fetch poster.") # Original debug log
             self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-    def onPosterLoadFailed(self):
-        print("[MovieDetailsWidget] Poster load failed.")
-        self.poseter_load_failed = True
+    @pyqtSlot()
+    def onPosterLoadFailed(self, is_network_error=False):
+        if is_network_error:
+            print("[MovieDetailsWidget] Poster load failed due to network error. Not re-attempting TMDB fetch.")
+            self.poseter_load_failed = True
+        else:
+            print("[MovieDetailsWidget] Poster load failed. Will attempt to load from TMDB.")
+            self.poseter_load_failed = True
+            # Pass the tmdb_id to load_poster_from_TMDB when called from onPosterLoadFailed
+            if hasattr(self, 'tmdb_id_for_poster_fallback') and self.tmdb_id_for_poster_fallback:
+                self.load_poster_from_TMDB(self.tmdb_id_for_poster_fallback)
+            else:
+                print("[MovieDetailsWidget] No tmdb_id available for poster fallback.")
 
     def update_favorite_state(self):
         main_window = self.main_window
@@ -196,9 +207,11 @@ class MovieDetailsWidget(QWidget):
                 print(f"[MovieDetailsWidget] VOD Info received: {vod_info}") # Log snippet
                 tmdb_id = None
                 if 'movie_data' in vod_info and isinstance(vod_info['movie_data'], dict) and 'tmdb_id' in vod_info['movie_data']:
-                    tmdb_id = vod_info['movie_data']['tmdb_id']
+                    self.tmdb_id = vod_info['movie_data']['tmdb_id']
+                    self.tmdb_id_for_poster_fallback = self.tmdb_id
                 elif 'info' in vod_info and isinstance(vod_info['info'], dict) and 'tmdb_id' in vod_info['info']:
-                    tmdb_id = vod_info['info']['tmdb_id']
+                    self.tmdb_id = vod_info['info']['tmdb_id']
+                    self.tmdb_id_for_poster_fallback = self.tmdb_id
 
                 info_data = vod_info.get('info', {})
                 self.genre_label.setText(info_data.get('genre', 'N/A'))
@@ -225,15 +238,15 @@ class MovieDetailsWidget(QWidget):
                         # A more robust solution might involve checking and adding the button if it wasn't there.
                         print("[MovieDetailsWidget] Trailer URL updated, but button not found to re-enable or re-create.")
 
-                if tmdb_id and self.tmdb_client:
-                    print(f"[MovieDetailsWidget] Found TMDB ID: {tmdb_id}. Fetching credits...")
-                    self._fetch_tmdb_credits(tmdb_id)
-                    if not self.poseter_load_failed:
-                        self.load_poster_from_TMDB(tmdb_id)
+                if self.tmdb_id and self.tmdb_client:
+                    print(f"[MovieDetailsWidget] Found TMDB ID: {self.tmdb_id}. Fetching credits...")
+                    self._fetch_tmdb_credits(self.tmdb_id)
                 elif not self.tmdb_client:
                     print("[MovieDetailsWidget] TMDB client not provided. Cannot fetch cast information.")
                 else:
                     print(f"[MovieDetailsWidget] TMDB ID not found in VOD info for stream_id: {self.stream_id}. VOD info: {str(vod_info)[:200]}")
+                if self.tmdb_id:
+                    self.load_poster_from_TMDB(self.tmdb_id)
             else:
                 print(f"[MovieDetailsWidget] Failed to get VOD info or VOD info is empty. Success: {success}")
         except Exception as e:

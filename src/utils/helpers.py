@@ -3517,6 +3517,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         try:
             if not hasattr(label, 'setPixmap'):
                 return
+
             label.setPixmap(pixmap.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         except RuntimeError:
             return
@@ -3526,6 +3527,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                 main_window.loading_icon_controller.show_icon.emit()
             
             final_pix = QPixmap() 
+            download_successful = False
 
             try:
                 if not image_url:
@@ -3549,6 +3551,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                                 response = requests.get(image_url, timeout=10) 
                                 response.raise_for_status() 
                                 image_data = response.content
+                                download_successful = True
                             except requests.RequestException as e:
                                 print(f"[load_image_async] Error downloading image with requests: {e}")
                                 image_data = None 
@@ -3561,6 +3564,8 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                             try:
                                 if api_client:
                                     image_data = api_client.get_image_data(image_url)
+                                    if image_data:
+                                        download_successful = True
                                 else:
                                     print("[load_image_async] Could not find api_client for image download!")
                                     image_data = None 
@@ -3579,6 +3584,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                             else:
                                 print(f"[load_image_async] Failed to load image from data for: {image_url}")
                                 # final_pix remains empty
+                                download_successful = False
                         # else: image_data is None, final_pix remains empty
             
             except AttributeError as e: 
@@ -3592,15 +3598,20 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
             if pix_to_set.isNull(): 
                 pix_to_set = default_pixmap 
                 if on_failure:
+                    is_network_error = not download_successful and (image_url.startswith('http://') or image_url.startswith('https://'))
                     if hasattr(on_failure, '__self__') and isinstance(on_failure.__self__, QObject) and hasattr(on_failure, '__name__'):
-                        QMetaObject.invokeMethod(on_failure.__self__, on_failure.__name__, Qt.QueuedConnection)
+                        QMetaObject.invokeMethod(on_failure.__self__, on_failure.__name__, Qt.QueuedConnection, QGenericArgument("bool", is_network_error))
                     else:
                         print(f"[load_image_async] on_failure callback '{on_failure}' is not a recognized QObject method or slot.")
             
             try:
                 if hasattr(label, 'setPixmap'): 
                     scaled_pixmap = pix_to_set.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
                     QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, scaled_pixmap))
+                else:
+                    print(f"[load_image_async] Label {label} does not have setPixmap method.")
             except RuntimeError: 
                 pass 
 
