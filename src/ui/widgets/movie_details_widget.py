@@ -1,4 +1,4 @@
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QScrollArea, QGridLayout
 from PyQt5.QtGui import QPixmap, QFont
 from src.utils.helpers import load_image_async
@@ -20,6 +20,7 @@ class MovieDetailsWidget(QWidget):
         self.network_manager = QNetworkAccessManager()
         self.setup_ui()
         self.update_metadata_from_api()
+        self.poseter_load_failed = False
 
     def _clear_layout(self, layout):
         if layout is not None:
@@ -41,8 +42,9 @@ class MovieDetailsWidget(QWidget):
         left_layout.addWidget(self.back_btn, alignment=Qt.AlignLeft)
         self.poster = QLabel()
         self.poster.setAlignment(Qt.AlignTop)
+        self.poseter_load_failed = False
         if self.movie.get('stream_icon'):
-            load_image_async(self.movie['stream_icon'], self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self.main_window)
+            load_image_async(self.movie['stream_icon'], self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self, on_failure=self.load_poster_from_TMDB)
         else:
             self.load_poster_from_TMDB()
         # Overlay rated-r icon if movie is for adults
@@ -125,8 +127,8 @@ class MovieDetailsWidget(QWidget):
         self.update_favorite_btn()
         self.update_favorite_state()
 
-    def load_poster_from_TMDB(self):
-        tmdb_id = self.movie.get('tmdb_id')
+    @pyqtSlot()
+    def load_poster_from_TMDB(self, tmdb_id=None):
         if tmdb_id and self.tmdb_client:
             print(f"[MovieDetailsWidget] stream_icon missing, attempting to fetch poster from TMDB using tmdb_id: {tmdb_id}") # Original debug log
             try:
@@ -154,6 +156,10 @@ class MovieDetailsWidget(QWidget):
         else:
                 # print(f"[MovieDetailsWidget] No tmdb_id or tmdb_client available to fetch poster.") # Original debug log
             self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def onPosterLoadFailed(self):
+        print("[MovieDetailsWidget] Poster load failed.")
+        self.poseter_load_failed = True
 
     def update_favorite_state(self):
         main_window = self.main_window
@@ -222,6 +228,8 @@ class MovieDetailsWidget(QWidget):
                 if tmdb_id and self.tmdb_client:
                     print(f"[MovieDetailsWidget] Found TMDB ID: {tmdb_id}. Fetching credits...")
                     self._fetch_tmdb_credits(tmdb_id)
+                    if not self.poseter_load_failed:
+                        self.load_poster_from_TMDB(tmdb_id)
                 elif not self.tmdb_client:
                     print("[MovieDetailsWidget] TMDB client not provided. Cannot fetch cast information.")
                 else:

@@ -4,7 +4,7 @@ Helper functions for the application
 import os
 import json
 from PyQt5.QtGui import QPalette, QColor, QPixmap
-from PyQt5.QtCore import Qt, QMetaObject, Q_ARG
+from PyQt5.QtCore import Qt, QMetaObject, Q_ARG, QObject
 import threading
 import requests # Added import
 from .image_cache import ImageCache
@@ -3510,7 +3510,7 @@ def get_api_client_from_label(label, main_window):
         parent = parent.parent() if hasattr(parent, 'parent') else None
     return None
 
-def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None):
+def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), main_window=None, loading_counter=None, on_failure=None):
     ImageCache.ensure_cache_dir()
     cache_path = ImageCache.get_cache_path(image_url)
     def set_pixmap(pixmap):
@@ -3521,65 +3521,97 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
         except RuntimeError:
             return
     def worker():
-       # print(f"[DEBUG] Start loading image: {image_url}")
-        if main_window and hasattr(main_window, 'loading_icon_controller'):
-            main_window.loading_icon_controller.show_icon.emit()
-        pix = QPixmap()
-        if os.path.exists(cache_path):
-            #print(f"[DEBUG] Image found in cache: {cache_path}")
-            pix.load(cache_path)
-        else:
-            image_data = None
-            if image_url.startswith('http://') or image_url.startswith('https://'):
-                print(f"[load_image_async] Downloading image via requests: {image_url}")
-                try:
-                    response = requests.get(image_url, timeout=10) # Set a reasonable timeout
-                    response.raise_for_status() # Raise an exception for bad status codes
-                    image_data = response.content
-                except requests.RequestException as e:
-                    print(f"[load_image_async] Error downloading image with requests: {e}")
-                    image_data = None
-                except Exception as e: # Catch any other potential errors
-                    print(f"[load_image_async] Unexpected error downloading with requests: {e}")
-                    image_data = None
-            else:
-                print(f"[load_image_async] Downloading image via api_client: {image_url}")
-                api_client = get_api_client_from_label(label, main_window)
-                try:
-                    if api_client:
-                        image_data = api_client.get_image_data(image_url)
-                    else:
-                        print("[load_image_async] Could not find api_client for image download!")
-                        image_data = None # Ensure image_data is None if no client
-                except Exception as e:
-                    print(f"[load_image_async] Error downloading image via api_client: {e}")
-                    image_data = None
-            
-            if image_data:
-                loaded = pix.loadFromData(image_data)
-                if loaded and not pix.isNull():
-                    try:
-                        saved = pix.save(cache_path)
-                        #print(f"[load_image_async] Image downloaded and cached: {cache_path}, save result: {saved}")
-                    except Exception as e:
-                        print(f"[load_image_async] Error saving image to cache: {e}")
-                else:
-                    print(f"[load_image_async] Failed to load image from data for: {image_url}")
-        if not pix or pix.isNull(): # If pixmap is still null (e.g. download failed or data was bad)
-            pix = default_pixmap
-        try:
-            if hasattr(label, 'setPixmap'):
-                QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, pix.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
-        except RuntimeError:
-            return
-        if loading_counter is not None:
-            loading_counter['count'] -= 1
-            if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
-                main_window.loading_icon_controller.hide_icon.emit()
-        else:
+            # print(f"[DEBUG] Start loading image: {image_url}")
             if main_window and hasattr(main_window, 'loading_icon_controller'):
-                main_window.loading_icon_controller.hide_icon.emit()
-        #print(f"[DEBUG] Finished loading image: {image_url}")
+                main_window.loading_icon_controller.show_icon.emit()
+            
+            final_pix = QPixmap() 
+
+            try:
+                if not image_url:
+                    print(f"[load_image_async] Invalid image_url (None or empty). Using default.")
+                    # final_pix remains empty, will lead to default_pixmap and on_failure
+                else:
+                    # cache_path is from outer scope
+                    temp_pix_worker = QPixmap() 
+                    if os.path.exists(cache_path):
+                        if temp_pix_worker.load(cache_path) and not temp_pix_worker.isNull():
+                            final_pix = temp_pix_worker
+                        else:
+                            print(f"[load_image_async] Failed to load image from cache or cache invalid: {cache_path}")
+                            # final_pix remains empty
+                    
+                    if final_pix.isNull(): # If not loaded from cache or cache was bad
+                        image_data = None
+                        if image_url.startswith('http://') or image_url.startswith('https://'):
+                            print(f"[load_image_async] Downloading image via requests: {image_url}")
+                            try:
+                                response = requests.get(image_url, timeout=10) 
+                                response.raise_for_status() 
+                                image_data = response.content
+                            except requests.RequestException as e:
+                                print(f"[load_image_async] Error downloading image with requests: {e}")
+                                image_data = None 
+                            except Exception as e:
+                                print(f"[load_image_async] Unexpected error downloading with requests: {e}")
+                                image_data = None 
+                        else:
+                            print(f"[load_image_async] Downloading image via api_client: {image_url}")
+                            api_client = get_api_client_from_label(label, main_window)
+                            try:
+                                if api_client:
+                                    image_data = api_client.get_image_data(image_url)
+                                else:
+                                    print("[load_image_async] Could not find api_client for image download!")
+                                    image_data = None 
+                            except Exception as e: 
+                                print(f"[load_image_async] Error downloading image via api_client: {e}")
+                                image_data = None 
+                        
+                        if image_data:
+                            if temp_pix_worker.loadFromData(image_data) and not temp_pix_worker.isNull():
+                                final_pix = temp_pix_worker
+                                try:
+                                    saved = final_pix.save(cache_path) # Use cache_path from outer scope
+                                    # print(f"[load_image_async] Image downloaded and cached: {cache_path}, save result: {saved}")
+                                except Exception as e:
+                                    print(f"[load_image_async] Error saving image to cache: {e}")
+                            else:
+                                print(f"[load_image_async] Failed to load image from data for: {image_url}")
+                                # final_pix remains empty
+                        # else: image_data is None, final_pix remains empty
+            
+            except AttributeError as e: 
+                print(f"[load_image_async] AttributeError in worker, likely due to invalid image_url '{image_url}': {e}")
+                # final_pix remains empty
+            except Exception as e: 
+                print(f"[load_image_async] Unexpected error in image loading worker for '{image_url}': {e}")
+                # final_pix remains empty
+
+            pix_to_set = final_pix 
+            if pix_to_set.isNull(): 
+                pix_to_set = default_pixmap 
+                if on_failure:
+                    if hasattr(on_failure, '__self__') and isinstance(on_failure.__self__, QObject) and hasattr(on_failure, '__name__'):
+                        QMetaObject.invokeMethod(on_failure.__self__, on_failure.__name__, Qt.QueuedConnection)
+                    else:
+                        print(f"[load_image_async] on_failure callback '{on_failure}' is not a recognized QObject method or slot.")
+            
+            try:
+                if hasattr(label, 'setPixmap'): 
+                    scaled_pixmap = pix_to_set.scaled(*update_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    QMetaObject.invokeMethod(label, "setPixmap", Qt.QueuedConnection, Q_ARG(QPixmap, scaled_pixmap))
+            except RuntimeError: 
+                pass 
+
+            if loading_counter is not None:
+                loading_counter['count'] -= 1
+                if loading_counter['count'] <= 0 and main_window and hasattr(main_window, 'loading_icon_controller'):
+                    main_window.loading_icon_controller.hide_icon.emit()
+            else: 
+                if main_window and hasattr(main_window, 'loading_icon_controller'):
+                    main_window.loading_icon_controller.hide_icon.emit()
+            #print(f"[DEBUG] Finished loading image: {image_url}")
     # Set cached or placeholder immediately
     if os.path.exists(cache_path):
         pix = QPixmap()
