@@ -403,23 +403,39 @@ class MainWindow(QMainWindow):
             self.accounts[new_account_name] = acc
             self.settings.setValue("accounts", self.accounts)
 
-            if not is_add_mode: # Only connect and set as current if NOT in add mode
-                self.current_account = new_account_name
-                self.settings.setValue("current_account", new_account_name)
-                
-                if credentials['remember']:
-                    self.settings.setValue("server", credentials['server'])
-                    self.settings.setValue("username", credentials['username'])
-                    self.settings.setValue("password", credentials['password'])
-                    self.settings.setValue("remember_credentials", True)
+            if not is_add_mode: # Editing an existing account
+                # Only switch and connect if account_switch is True
+                if account_switch:
+                    self.current_account = new_account_name
+                    self.settings.setValue("current_account", new_account_name)
+                    
+                    if credentials['remember']:
+                        self.settings.setValue("server", credentials['server'])
+                        self.settings.setValue("username", credentials['username'])
+                        self.settings.setValue("password", credentials['password'])
+                        self.settings.setValue("remember_credentials", True)
+                    else:
+                        self.settings.remove("server")
+                        self.settings.remove("username")
+                        self.settings.remove("password")
+                        self.settings.setValue("remember_credentials", False)
+                    
+                    self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
+                    self.update_account_label()
                 else:
-                    self.settings.remove("server")
-                    self.settings.remove("username")
-                    self.settings.remove("password")
-                    self.settings.setValue("remember_credentials", False)
-                
-                self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
-                self.update_account_label()
+                    # If not switching, just show a success message. 
+                    # The current account remains unchanged.
+                    self.show_status_message(f"Account '{new_account_name}' updated successfully.")
+                    # We might need to update the account label if the *current* account's name changed,
+                    # but not switch to the *edited* account if it wasn't the current one.
+                    # If the edited account *was* the current one and its name changed, 
+                    # current_account might be stale. Let's update it if the name changed.
+                    if self.current_account == account_name and account_name != new_account_name:
+                        # The current account was renamed, update self.current_account to the new name
+                        # but don't trigger a full connect/switch if account_switch is False.
+                        self.current_account = new_account_name
+                        self.settings.setValue("current_account", self.current_account)
+                    self.update_account_label() # Refresh label, might show old or new name based on current_account
             else:
                 # In add mode, we just save and return to account management. No auto-switch.
                 self.show_status_message(f"Account '{new_account_name}' added successfully.")
