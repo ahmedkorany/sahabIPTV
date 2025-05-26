@@ -430,7 +430,10 @@ class MainWindow(QMainWindow):
             # For now, assume it will be re-shown or refreshed by the caller
 
         else: # Dialog was cancelled
-            if account_switch:
+            # Only close the app if it's an initial login (account_switch=True)
+            # AND it's NOT the "Add Account" dialog being cancelled (is_add_mode=False).
+            # If is_add_mode is True, cancelling should just return to account management.
+            if account_switch and not is_add_mode:
                 self.close() # Close app if initial login is cancelled
 
     def clear_grids(self):
