@@ -44,34 +44,7 @@ class MovieDetailsWidget(QWidget):
         if self.movie.get('stream_icon'):
             load_image_async(self.movie['stream_icon'], self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self.main_window)
         else:
-            tmdb_id = self.movie.get('tmdb_id')
-            if tmdb_id and self.tmdb_client:
-                # print(f"[MovieDetailsWidget] stream_icon missing, attempting to fetch poster from TMDB using tmdb_id: {tmdb_id}") # Original debug log
-                try:
-                    details = self.tmdb_client.get_movie_details(tmdb_id)
-                    if details:
-                        poster_path = details.get('poster_path')
-                        if poster_path:
-                            tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
-                            if tmdb_poster_url:
-                                # print(f"[MovieDetailsWidget] Found TMDB poster: {tmdb_poster_url}") # Original debug log
-                                self.movie['stream_icon'] = tmdb_poster_url
-                                load_image_async(tmdb_poster_url, self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self.main_window)
-                            else:
-                                # print(f"[MovieDetailsWidget] Failed to construct TMDB poster URL for tmdb_id: {tmdb_id}") # Original debug log
-                                self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                        else:
-                            # print(f"[MovieDetailsWidget] No poster_path found in TMDB details for tmdb_id: {tmdb_id}") # Original debug log
-                            self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                    else:
-                        # print(f"[MovieDetailsWidget] Failed to fetch details from TMDB for tmdb_id: {tmdb_id}") # Original debug log
-                        self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                except Exception as e:
-                    # print(f"[MovieDetailsWidget] Error fetching details from TMDB for tmdb_id: {tmdb_id} - {e}") # Original debug log
-                    self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            else:
-                # print(f"[MovieDetailsWidget] No tmdb_id or tmdb_client available to fetch poster.") # Original debug log
-                self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.load_poster_from_TMDB()
         # Overlay rated-r icon if movie is for adults
         if self.movie.get('adult'):
             rated_r_label = QLabel(self.poster)
@@ -151,6 +124,36 @@ class MovieDetailsWidget(QWidget):
         layout.addLayout(right_layout)
         self.update_favorite_btn()
         self.update_favorite_state()
+
+    def load_poster_from_TMDB(self):
+        tmdb_id = self.movie.get('tmdb_id')
+        if tmdb_id and self.tmdb_client:
+            print(f"[MovieDetailsWidget] stream_icon missing, attempting to fetch poster from TMDB using tmdb_id: {tmdb_id}") # Original debug log
+            try:
+                details = self.tmdb_client.get_movie_details(tmdb_id)
+                if details:
+                    poster_path = details.get('poster_path')
+                    if poster_path:
+                        tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
+                        if tmdb_poster_url:
+                                # print(f"[MovieDetailsWidget] Found TMDB poster: {tmdb_poster_url}") # Original debug log
+                            self.movie['stream_icon'] = tmdb_poster_url
+                            load_image_async(tmdb_poster_url, self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self.main_window)
+                        else:
+                                # print(f"[MovieDetailsWidget] Failed to construct TMDB poster URL for tmdb_id: {tmdb_id}") # Original debug log
+                            self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                    else:
+                            # print(f"[MovieDetailsWidget] No poster_path found in TMDB details for tmdb_id: {tmdb_id}") # Original debug log
+                        self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                else:
+                        # print(f"[MovieDetailsWidget] Failed to fetch details from TMDB for tmdb_id: {tmdb_id}") # Original debug log
+                    self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            except Exception as e:
+                    # print(f"[MovieDetailsWidget] Error fetching details from TMDB for tmdb_id: {tmdb_id} - {e}") # Original debug log
+                self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+                # print(f"[MovieDetailsWidget] No tmdb_id or tmdb_client available to fetch poster.") # Original debug log
+            self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def update_favorite_state(self):
         main_window = self.main_window
