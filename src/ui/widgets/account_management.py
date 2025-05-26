@@ -50,7 +50,14 @@ class AccountManagementScreen(QWidget):
             self.list_widget.addItem(item)
 
     def add_account(self):
-        self.main_window.show_login_dialog(account_switch=True)
+        # Pass empty prefill data to ensure clean form for new account
+        empty_prefill = {
+            'server': '',
+            'username': '',
+            'password': '',
+            'account_name': ''
+        }
+        self.main_window.show_login_dialog(account_switch=True, prefill=empty_prefill, is_add_mode=True)
         self.accounts = self.main_window.accounts
         self.current_account = self.main_window.current_account
         self.refresh_list()

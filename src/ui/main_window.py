@@ -349,7 +349,7 @@ class MainWindow(QMainWindow):
     def show_account_switch_dialog(self):
         self.show_account_management_screen()
 
-    def show_login_dialog(self, account_switch=False, prefill=None):
+    def show_login_dialog(self, account_switch=False, prefill=None, is_add_mode=False):
         # Get saved credentials or prefill
         if prefill:
             server = prefill.get('server', '')
@@ -381,27 +381,34 @@ class MainWindow(QMainWindow):
                 'password': credentials['password'],
                 'account_name': name
             }
-            # Remove old name if renaming
-            if self.current_account and self.current_account in self.accounts and self.current_account != name:
-                self.accounts.pop(self.current_account)
-            self.accounts[name] = acc
-            self.current_account = name
-            self.settings.setValue("accounts", self.accounts)
-            self.settings.setValue("current_account", name)
-            # Save credentials if remember is checked
-            if credentials['remember']:
-                self.settings.setValue("server", credentials['server'])
-                self.settings.setValue("username", credentials['username'])
-                self.settings.setValue("password", credentials['password'])
-                self.settings.setValue("remember_credentials", True)
+            # Handle add mode vs edit mode differently
+            if is_add_mode:
+                # In add mode, just add the new account without changing current account
+                self.accounts[name] = acc
+                self.settings.setValue("accounts", self.accounts)
             else:
-                self.settings.remove("server")
-                self.settings.remove("username")
-                self.settings.remove("password")
-                self.settings.setValue("remember_credentials", False)
-            # Connect to server
-            self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
-            self.update_account_label()  # Update app title after login
+                # In edit mode, remove old name if renaming and set as current
+                if self.current_account and self.current_account in self.accounts and self.current_account != name:
+                    self.accounts.pop(self.current_account)
+                self.accounts[name] = acc
+                self.current_account = name
+                self.settings.setValue("accounts", self.accounts)
+                self.settings.setValue("current_account", name)
+            # Save credentials if remember is checked (only in edit mode)
+            if not is_add_mode:
+                if credentials['remember']:
+                    self.settings.setValue("server", credentials['server'])
+                    self.settings.setValue("username", credentials['username'])
+                    self.settings.setValue("password", credentials['password'])
+                    self.settings.setValue("remember_credentials", True)
+                else:
+                    self.settings.remove("server")
+                    self.settings.remove("username")
+                    self.settings.remove("password")
+                    self.settings.setValue("remember_credentials", False)
+                # Connect to server only in edit mode
+                self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
+                self.update_account_label()  # Update app title after login
         elif account_switch:
             self.show_account_switch_dialog()
 
