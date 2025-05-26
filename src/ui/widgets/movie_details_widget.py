@@ -1,10 +1,8 @@
-import requests
-from PyQt5.QtCore import pyqtSignal, Qt, QUrl
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QScrollArea, QGridLayout, QSizePolicy
+from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QScrollArea, QGridLayout
 from PyQt5.QtGui import QPixmap, QFont
-from src.utils.helpers import load_image_async # Updated import
-from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from src.api.tmdb import TMDBClient
+from src.utils.helpers import load_image_async
+from PyQt5.QtNetwork import QNetworkAccessManager
 from src.ui.widgets.cast_widget import CastWidget
 
 class MovieDetailsWidget(QWidget):
@@ -18,9 +16,8 @@ class MovieDetailsWidget(QWidget):
         self.api_client = api_client
         self.main_window = main_window
         self._is_favorite = False
-        # Remove dotenv and os.getenv for TMDB key
         self.tmdb_client = tmdb_client
-        self.network_manager = QNetworkAccessManager() # For image loading, if load_image_async needs it directly
+        self.network_manager = QNetworkAccessManager()
         self.setup_ui()
         self.update_metadata_from_api()
 
@@ -38,12 +35,10 @@ class MovieDetailsWidget(QWidget):
 
     def setup_ui(self):
         layout = QHBoxLayout(self)
-        # --- Left: Poster and Back button ---
         left_layout = QVBoxLayout()
         self.back_btn = QPushButton("\u2190 Back")
         self.back_btn.setFixedWidth(80)
         left_layout.addWidget(self.back_btn, alignment=Qt.AlignLeft)
-        # Poster
         self.poster = QLabel()
         self.poster.setAlignment(Qt.AlignTop)
         if self.movie.get('stream_icon'):
@@ -169,7 +164,6 @@ class MovieDetailsWidget(QWidget):
                 elif 'info' in vod_info and isinstance(vod_info['info'], dict) and 'tmdb_id' in vod_info['info']:
                     tmdb_id = vod_info['info']['tmdb_id']
 
-                # Update other metadata from vod_info['info']
                 info_data = vod_info.get('info', {})
                 self.genre_label.setText(info_data.get('genre', 'N/A'))
                 self.plot_label.setText(info_data.get('plot', 'N/A'))
@@ -177,10 +171,8 @@ class MovieDetailsWidget(QWidget):
                 self.director_label.setText(info_data.get('director', 'N/A'))
                 self.releasedate_label.setText(info_data.get('releasedate', 'N/A'))
                 
-                # Update trailer URL if available in VOD info (might be more up-to-date)
                 new_trailer_url = info_data.get('youtube_trailer')
                 if new_trailer_url:
-                    # Construct full YouTube URL if only ID is provided
                     if not new_trailer_url.startswith('http'):
                         self.trailer_url = f"https://www.youtube.com/watch?v={new_trailer_url}"
                     else:
