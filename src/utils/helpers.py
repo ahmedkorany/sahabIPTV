@@ -6,6 +6,7 @@ import json
 from PyQt5.QtGui import QPalette, QColor, QPixmap
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG
 import threading
+import requests # Added import
 from .image_cache import ImageCache
 import unicodedata
 
@@ -3528,27 +3529,43 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
             #print(f"[DEBUG] Image found in cache: {cache_path}")
             pix.load(cache_path)
         else:
-            #print(f"[DEBUG] Downloading image: {image_url}")
             image_data = None
-            api_client = get_api_client_from_label(label, main_window)
-            try:
-                if api_client:
-                    image_data = api_client.get_image_data(image_url)
-                else:
-                    print("[DEBUG] Could not find api_client for image download!")
-            except Exception as e:
-                print(f"[DEBUG] Error downloading image: {e}")
+            if image_url.startswith('http://') or image_url.startswith('https://'):
+                print(f"[load_image_async] Downloading image via requests: {image_url}")
+                try:
+                    response = requests.get(image_url, timeout=10) # Set a reasonable timeout
+                    response.raise_for_status() # Raise an exception for bad status codes
+                    image_data = response.content
+                except requests.RequestException as e:
+                    print(f"[load_image_async] Error downloading image with requests: {e}")
+                    image_data = None
+                except Exception as e: # Catch any other potential errors
+                    print(f"[load_image_async] Unexpected error downloading with requests: {e}")
+                    image_data = None
+            else:
+                print(f"[load_image_async] Downloading image via api_client: {image_url}")
+                api_client = get_api_client_from_label(label, main_window)
+                try:
+                    if api_client:
+                        image_data = api_client.get_image_data(image_url)
+                    else:
+                        print("[load_image_async] Could not find api_client for image download!")
+                        image_data = None # Ensure image_data is None if no client
+                except Exception as e:
+                    print(f"[load_image_async] Error downloading image via api_client: {e}")
+                    image_data = None
+            
             if image_data:
                 loaded = pix.loadFromData(image_data)
                 if loaded and not pix.isNull():
                     try:
                         saved = pix.save(cache_path)
-                        #print(f"[DEBUG] Image downloaded and cached: {cache_path}, save result: {saved}")
+                        #print(f"[load_image_async] Image downloaded and cached: {cache_path}, save result: {saved}")
                     except Exception as e:
-                        print(f"[DEBUG] Error saving image to cache: {e}")
+                        print(f"[load_image_async] Error saving image to cache: {e}")
                 else:
-                    print(f"[DEBUG] Failed to load image from data for: {image_url}")
-        if not pix or pix.isNull():
+                    print(f"[load_image_async] Failed to load image from data for: {image_url}")
+        if not pix or pix.isNull(): # If pixmap is still null (e.g. download failed or data was bad)
             pix = default_pixmap
         try:
             if hasattr(label, 'setPixmap'):
