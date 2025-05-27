@@ -3,6 +3,7 @@ Movies tab for the application
 """
 from operator import contains
 import time
+from functools import partial
 from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox, QListWidgetItem, QScrollArea, QGridLayout, QComboBox, QFrame
@@ -367,7 +368,7 @@ class MoviesTab(QWidget):
 
             default_pix = QPixmap('assets/movies.png')
             if movie.get('stream_icon'):
-                load_image_async(movie['stream_icon'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window,on_failure= self.onPosterDownloadFailed(movie))
+                load_image_async(movie['stream_icon'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, on_failure=partial(self.onPosterDownloadFailed, movie))
             else:
                 poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
