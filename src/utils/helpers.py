@@ -319,7 +319,7 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                 if on_failure:
                     is_network_error = not download_successful and (image_url.startswith('http://') or image_url.startswith('https://'))
                     if hasattr(on_failure, '__self__') and isinstance(on_failure.__self__, QObject) and hasattr(on_failure, '__name__'):
-                        QMetaObject.invokeMethod(on_failure.__self__, on_failure.__name__, Qt.QueuedConnection, QGenericArgument("bool", is_network_error))
+                        QMetaObject.invokeMethod(on_failure.__self__, on_failure.__name__, Qt.QueuedConnection, Q_ARG(bool, is_network_error))
                     else:
                         print(f"[load_image_async] on_failure callback '{on_failure}' is not a recognized QObject method or slot.")
             
