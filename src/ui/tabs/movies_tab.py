@@ -1,6 +1,7 @@
 """
 Movies tab for the application
 """
+from operator import contains
 import time
 from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (
@@ -366,7 +367,7 @@ class MoviesTab(QWidget):
 
             default_pix = QPixmap('assets/movies.png')
             if movie.get('stream_icon'):
-                load_image_async(movie['stream_icon'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window)
+                load_image_async(movie['stream_icon'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, on_failure=lambda: self.onPosterDownloadFailed(movie))
             else:
                 poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
@@ -644,3 +645,69 @@ class MoviesTab(QWidget):
         if 'name' not in movie:
             movie['name'] = movie.get('title', 'Movie')
         self.add_to_favorites.emit(movie)
+
+    @pyqtSlot(dict)
+    def onPosterDownloadFailed(self, movie=None):
+        if movie:
+            if 'tmdb' in movie['stream_icon']:
+                print(f"[MovieTab] Failed to download poster from TMDB {movie.get('stream_icon', 'Unknown')}. Using default poster.")
+                # Final fallback to default poster when TMDB also fails
+                stream_id_str = str(movie.get('stream_id'))
+                if stream_id_str in self.poster_labels:
+                    poster_label_widget = self.poster_labels[stream_id_str]
+                    poster_width = 125
+                    poster_height = 188
+                    default_pix = QPixmap('assets/movies.png')
+                    poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                return
+            
+            tmdb_id = None
+            if movie.get('tmdb_id'):
+                tmdb_id = movie.get('tmdb_id')
+            else:
+                try:
+                    success, vod_info = self.api_client.get_vod_info(movie.get('stream_id'))
+                    if 'movie_data' in vod_info and isinstance(vod_info['movie_data'], dict) and 'tmdb_id' in vod_info['movie_data']:
+                        tmdb_id = vod_info['movie_data']['tmdb_id']
+                    elif 'info' in vod_info and isinstance(vod_info['info'], dict) and 'tmdb_id' in vod_info['info']:
+                        tmdb_id = vod_info['info']['tmdb_id']
+                except Exception as e:
+                    print(f"[MovieTab] Error getting VOD info for TMDB fallback: {e}")
+            
+            if tmdb_id:
+                try:
+                    details = self.tmdb_client.get_movie_details(tmdb_id)
+                    if details:
+                        poster_path = details.get('poster_path')
+                        tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
+                        if tmdb_poster_url:
+                            print(f"[MovieTab] Failed to download poster from {movie['stream_icon']}. Using TMDB poster instead: {tmdb_poster_url}")
+                            movie['tmdb_id'] = tmdb_id
+                            movie['stream_icon'] = tmdb_poster_url
+                            self.api_client.update_movie_cache(movie)
+                            stream_id_str = str(movie.get('stream_id'))
+                            if stream_id_str in self.poster_labels:
+                                poster_label_widget = self.poster_labels[stream_id_str]
+                                poster_width = 125
+                                poster_height = 188
+                                default_pix = QPixmap('assets/movies.png')
+                                # Add final fallback callback for TMDB failures
+                                load_image_async(tmdb_poster_url, poster_label_widget, 
+                                               default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), 
+                                               update_size=(poster_width, poster_height), 
+                                               main_window=self.main_window,
+                                               on_failure=lambda: self.onPosterDownloadFailed(movie))
+                            return
+                except Exception as e:
+                    print(f"[MovieTab] Error getting TMDB details: {e}")
+            
+            # Final fallback when no TMDB ID or TMDB fails
+            print(f"[MovieTab] No TMDB fallback available for {movie.get('name', 'Unknown')}. Using default poster.")
+            stream_id_str = str(movie.get('stream_id'))
+            if stream_id_str in self.poster_labels:
+                poster_label_widget = self.poster_labels[stream_id_str]
+                poster_width = 125
+                poster_height = 188
+                default_pix = QPixmap('assets/movies.png')
+                poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            

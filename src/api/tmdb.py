@@ -35,7 +35,7 @@ class TMDBClient:
         return f"{self.IMAGE_BASE_URL}{size}/{poster_path}"
 
     def get_movie_details(self, tmdb_id):
-        """Fetch movie details from TMDB by tmdb_id."""
+        """Fetch movie details from TMDB by tmdb_id with retry logic."""
         url = f"{self.BASE_URL}/movie/{tmdb_id}"
         headers = {}
         params = {}
@@ -43,6 +43,28 @@ class TMDBClient:
             params["api_key"] = self.api_key
         elif self.read_access_token:
             headers["Authorization"] = f"Bearer {self.read_access_token}"
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json()
+        
+        # Retry logic for TMDB API calls
+        max_retries = 2
+        base_delay = 0.5  # Shorter delay for API calls
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))  # 0.5s, 1s
+                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} after {delay}s delay")
+                    import time
+                    time.sleep(delay)
+                
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                response.raise_for_status()
+                return response.json()
+                
+            except requests.RequestException as e:
+                print(f"[TMDB] Request error on attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt == max_retries - 1:  # Last attempt
+                    raise e
+                # Continue to next retry attempt
+            except Exception as e:
+                print(f"[TMDB] Unexpected error: {e}")
+                raise e

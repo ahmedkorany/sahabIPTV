@@ -168,7 +168,7 @@ class MovieDetailsWidget(QWidget):
         else:
                 # print(f"[MovieDetailsWidget] No tmdb_id or tmdb_client available to fetch poster.") # Original debug log
             self.poster.setPixmap(QPixmap('assets/movies.png').scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-    @pyqtSlot()
+    @pyqtSlot(bool)
     def onPosterLoadFailed(self, is_network_error=False):
         if is_network_error:
             print("[MovieDetailsWidget] Poster load failed due to network error. Not re-attempting TMDB fetch.")
