@@ -49,6 +49,44 @@ def _save_cache(key, value):
         print(f"[CACHE] Error saving cache for key {key}: {e}")
 
 class XtreamClient:
+    def update_movie_cache(self, movie_to_update):
+        """Updates a specific movie's details within its cached category list."""
+        category_id = movie_to_update.get('category_id')
+        stream_id_to_update = movie_to_update.get('stream_id')
+        new_stream_icon = movie_to_update.get('stream_icon') # Assuming this is the primary field to update
+
+        if not (category_id and stream_id_to_update and self.server_url and self.username):
+            # print(f"[XtreamClient.update_movie_cache] Missing necessary data: category_id='{category_id}', stream_id='{stream_id_to_update}', server_url, or username.")
+            return False
+
+        cache_key = f'vod_streams_{self.server_url}_{self.username}_{category_id}'
+        # print(f"[XtreamClient.update_movie_cache] Attempting to update movie in category cache. Key: {cache_key}")
+        
+        cached_category_movies = _load_cache(cache_key)
+        
+        if isinstance(cached_category_movies, list):
+            updated = False
+            for i, movie_in_cache in enumerate(cached_category_movies):
+                if isinstance(movie_in_cache, dict) and movie_in_cache.get('stream_id') == stream_id_to_update:
+                    # Update the specific movie's details
+                    # For now, primarily stream_icon. Extend if other fields in movie_to_update need to be synced.
+                    movie_in_cache['stream_icon'] = new_stream_icon 
+                    # Example: movie_in_cache.update({k: v for k, v in movie_to_update.items() if k in movie_in_cache}) # More generic update
+                    cached_category_movies[i] = movie_in_cache # Ensure the list is updated with the modified dict
+                    updated = True
+                    break
+            
+            if updated:
+                _save_cache(cache_key, cached_category_movies)
+                # print(f"[XtreamClient.update_movie_cache] Updated movie (ID: {stream_id_to_update}) in cached category '{category_id}'.")
+                return True
+            else:
+                # print(f"[XtreamClient.update_movie_cache] Movie (ID: {stream_id_to_update}) not found in cached category '{category_id}'.")
+                return False
+        else:
+            # print(f"[XtreamClient.update_movie_cache] No cached data or invalid format for category '{category_id}'. Key: {cache_key}")
+            return False
+
     """Client for Xtream Codes API"""
     
     def __init__(self):

@@ -4,6 +4,7 @@ from PyQt5.QtGui import QPixmap, QFont
 from src.utils.helpers import load_image_async
 from PyQt5.QtNetwork import QNetworkAccessManager
 from src.ui.widgets.cast_widget import CastWidget
+from src.api.xtream import _save_cache, _load_cache # Added _load_cache for future use
 
 class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
@@ -131,7 +132,7 @@ class MovieDetailsWidget(QWidget):
     @pyqtSlot()
     def load_poster_from_TMDB(self, tmdb_id=None):
         if tmdb_id and self.tmdb_client:
-            print(f"[MovieDetailsWidget] stream_icon missing, attempting to fetch poster from TMDB using tmdb_id: {tmdb_id}") # Original debug log
+            # print(f"[MovieDetailsWidget] stream_icon missing, attempting to fetch poster from TMDB using tmdb_id: {tmdb_id}") # Original debug log
             try:
                 details = self.tmdb_client.get_movie_details(tmdb_id)
                 if details:
@@ -139,8 +140,17 @@ class MovieDetailsWidget(QWidget):
                     if poster_path:
                         tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
                         if tmdb_poster_url:
-                                # print(f"[MovieDetailsWidget] Found TMDB poster: {tmdb_poster_url}") # Original debug log
+                            original_stream_icon = self.movie.get('stream_icon')
                             self.movie['stream_icon'] = tmdb_poster_url
+                            # print(f"[MovieDetailsWidget] Found TMDB poster: {tmdb_poster_url}")
+
+                            # --- Update movie in category cache using XtreamClient method ---
+                            if hasattr(self.main_window, 'api_client') and self.main_window.api_client:
+                                # self.movie dictionary should already contain category_id, stream_id, and the new stream_icon
+                                self.main_window.api_client.update_movie_cache(self.movie)
+                            # else:
+                                # print("[MovieDetailsWidget] api_client not available for cache update.")
+                            # --- End update movie in category cache ---
 
                             load_image_async(tmdb_poster_url, self.poster, QPixmap('assets/movies.png'), update_size=(180, 260), main_window=self.main_window, on_failure=self.onPosterLoadFailed)
                         else:
