@@ -20,31 +20,33 @@ def _get_cache_path(key):
 
 def _load_cache(key):
     path = _get_cache_path(key)
-    print(f"[CACHE] Loading cache from: {path}")
+    #print(f"[CACHE] Loading cache from: {path}")
     if not os.path.exists(path):
-        print(f"[CACHE] Cache file does not exist: {path}")
+        #print(f"[CACHE] Cache file does not exist: {path}")
         return None
     try:
         with open(path, 'rb') as f:
             data = pickle.load(f)
         if time.time() - data['timestamp'] < CACHE_EXPIRATION_SECONDS:
-            print(f"[CACHE] Cache hit for key: {key}")
+            #print(f"[CACHE] Cache hit for key: {key}")
             return data['value']
         else:
-            print(f"[CACHE] Cache expired for key: {key}")
+            #print(f"[CACHE] Cache expired for key: {key}")
+            pass
     except Exception as e:
-        print(f"[CACHE] Error loading cache for key {key}: {e}")
+        #print(f"[CACHE] Error loading cache for key {key}: {e}")
+        pass
     return None
 
 def _save_cache(key, value):
     if not os.path.exists(CACHE_DIR):
         os.makedirs(CACHE_DIR)
     path = _get_cache_path(key)
-    print(f"[CACHE] Saving cache to: {path}")
+    # print(f"[CACHE] Saving cache to: {path}")
     try:
         with open(path, 'wb') as f:
             pickle.dump({'timestamp': time.time(), 'value': value}, f)
-        print(f"[CACHE] Cache saved for key: {key}")
+        #print(f"[CACHE] Cache saved for key: {key}")
     except Exception as e:
         print(f"[CACHE] Error saving cache for key {key}: {e}")
 
@@ -436,7 +438,7 @@ class XtreamClient:
             if fname.endswith('.pkl'):
                 try:
                     os.remove(os.path.join(CACHE_DIR, fname))
-                    print(f"[CACHE] Deleted cache file: {fname}")
+                    #print(f"[CACHE] Deleted cache file: {fname}")
                 except Exception as e:
                     print(f"[CACHE] Error deleting cache file {fname}: {e}")
         # Do NOT touch favorites file here!

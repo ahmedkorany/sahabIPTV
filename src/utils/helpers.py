@@ -265,48 +265,25 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                     if final_pix.isNull(): # If not loaded from cache or cache was bad
                         image_data = None
                         if image_url.startswith('http://') or image_url.startswith('https://'):
-                            print(f"[load_image_async] Downloading image via requests: {image_url}")
+                            #print(f"[load_image_async] Downloading image via requests: {image_url}")
                             
-                            # Retry logic with exponential backoff for server errors
-                            max_retries = 3
-                            base_delay = 1  # Start with 1 second delay
-                            
-                            for attempt in range(max_retries):
-                                try:
-                                    if attempt > 0:
-                                        delay = base_delay * (2 ** (attempt - 1))  # Exponential backoff: 1s, 2s, 4s
-                                        print(f"[load_image_async] Retry attempt {attempt + 1}/{max_retries} after {delay}s delay")
-                                        import time
-                                        time.sleep(delay)
-                                    
-                                    response = requests.get(image_url, timeout=10) 
-                                    response.raise_for_status() 
-                                    image_data = response.content
-                                    download_successful = True
-                                    break  # Success, exit retry loop
-                                    
-                                except requests.HTTPError as e:
-                                    if hasattr(e.response, 'status_code') and e.response.status_code == 520:
-                                        print(f"[load_image_async] 520 Server Error on attempt {attempt + 1}/{max_retries}: {e}")
-                                        if attempt == max_retries - 1:  # Last attempt
-                                            print(f"[load_image_async] All retry attempts failed for: {image_url}")
-                                            image_data = None
-                                        # Continue to next retry attempt
-                                    else:
-                                        print(f"[load_image_async] HTTP Error (non-520) downloading image: {e}")
-                                        image_data = None
-                                        break  # Don't retry for non-520 errors
+                            try:
+                                response = requests.get(image_url, timeout=10) 
+                                response.raise_for_status() 
+                                image_data = response.content
+                                download_successful = True
+                                
+                            except requests.HTTPError as e:
+                                print(f"[load_image_async] HTTP Error downloading image: {e}")
+                                image_data = None
                                         
-                                except requests.RequestException as e:
-                                    print(f"[load_image_async] Request error on attempt {attempt + 1}/{max_retries}: {e}")
-                                    if attempt == max_retries - 1:  # Last attempt
-                                        image_data = None
-                                    # Continue to next retry attempt for network errors
+                            except requests.RequestException as e:
+                                print(f"[load_image_async] Request error: {e}")
+                                image_data = None
                                     
-                                except Exception as e:
-                                    print(f"[load_image_async] Unexpected error downloading with requests: {e}")
-                                    image_data = None
-                                    break  # Don't retry for unexpected errors 
+                            except Exception as e:
+                                print(f"[load_image_async] Unexpected error downloading with requests: {e}")
+                                image_data = None 
                         else:
                             print(f"[load_image_async] Downloading image via api_client: {image_url}")
                             api_client = get_api_client_from_label(label, main_window)

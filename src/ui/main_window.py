@@ -552,7 +552,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Favorites Error", f"Failed to load favorites: {e}\nFavorites will be reset.")
             self.favorites_by_account = {}
             self.favorites = []
-        print(f"[DEBUG] Loaded favorites for account '{self.current_account}': {self.favorites}")
+        #print(f"[DEBUG] Loaded favorites for account '{self.current_account}': {self.favorites}")
         if hasattr(self, 'favorites_tab'):
             self.favorites_tab.set_favorites(self.favorites)
 
