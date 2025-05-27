@@ -6,7 +6,7 @@ from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox, QListWidgetItem, QScrollArea, QGridLayout, QComboBox, QFrame
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QFont, QFontMetrics
 from PyQt5.QtCore import QRect
 from src.ui.player import MediaPlayer
@@ -30,6 +30,7 @@ class MoviesTab(QWidget):
         self._opened_from_search = False
         self.filtered_movies = []  # Store filtered movies for search (now just a copy of movies)
         self.current_movie = None
+        self.poster_labels = {} # To store poster labels by stream_id
         
         # Pagination
         self.current_page = 1
@@ -359,6 +360,10 @@ class MoviesTab(QWidget):
             poster_label_widget.setGeometry(0, 0, poster_width, poster_height)
             poster_label_widget.setStyleSheet("background-color: #111111;") # Dark placeholder background
 
+            # Store the label for potential updates
+            stream_id_str = str(movie.get('stream_id'))
+            self.poster_labels[stream_id_str] = poster_label_widget
+
             default_pix = QPixmap('assets/movies.png')
             if movie.get('stream_icon'):
                 load_image_async(movie['stream_icon'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window)
@@ -444,6 +449,7 @@ class MoviesTab(QWidget):
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
         self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
+        self.details_widget.poster_updated.connect(self.update_movie_poster) # Connect signal
         self.stacked_widget.addWidget(self.details_widget)
         self.stacked_widget.setCurrentWidget(self.details_widget)
 
@@ -481,6 +487,7 @@ class MoviesTab(QWidget):
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
         self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
+        self.details_widget.poster_updated.connect(self.update_movie_poster) # Connect signal
         self.stacked_widget.addWidget(self.details_widget)
         self.stacked_widget.setCurrentWidget(self.details_widget)
 
@@ -551,6 +558,7 @@ class MoviesTab(QWidget):
 
     def display_current_page(self):
         # Clear previous grid items more thoroughly
+        self.poster_labels.clear() # Clear the poster_labels dictionary as well
         while self.movie_grid_layout.count() > 0:
             item = self.movie_grid_layout.takeAt(0)
             if item:
@@ -577,6 +585,28 @@ class MoviesTab(QWidget):
                 self.empty_state_label.hide()
         self.display_movie_grid(page_items)
         self.update_pagination_controls()
+
+    @pyqtSlot(str, str)
+    def update_movie_poster(self, stream_id, new_poster_url):
+        """Slot to update a movie's poster in the grid."""
+        # print(f"[MoviesTab] Attempting to update poster for stream_id: {stream_id} with new_poster_url: {new_poster_url}")
+        if stream_id in self.poster_labels:
+            poster_label_widget = self.poster_labels[stream_id]
+            # Assuming poster_label_widget is a QLabel
+            # We need its dimensions to scale the default pixmap correctly if new_poster_url fails
+            width = poster_label_widget.width()
+            height = poster_label_widget.height()
+            default_pix = QPixmap('assets/movies.png').scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # print(f"[MoviesTab] Found poster_label_widget for stream_id: {stream_id}. Current size: {width}x{height}")
+            if new_poster_url:
+                # print(f"[MoviesTab] Loading new image: {new_poster_url}")
+                load_image_async(new_poster_url, poster_label_widget, default_pix, update_size=(width, height), main_window=self.main_window)
+            else:
+                # print(f"[MoviesTab] new_poster_url is empty, setting default pixmap.")
+                poster_label_widget.setPixmap(default_pix)
+        # else:
+            # print(f"[MoviesTab] stream_id: {stream_id} not found in self.poster_labels. Keys: {list(self.poster_labels.keys())}")
 
     def movie_double_clicked(self, item):
         """Handle movie double-click"""

@@ -10,6 +10,7 @@ class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
     play_clicked = pyqtSignal(object)
     trailer_clicked = pyqtSignal(str)
+    poster_updated = pyqtSignal(str, str) # stream_id, new_poster_url
 
     def __init__(self, movie, api_client=None, main_window=None, tmdb_client=None, parent=None):
         super().__init__(parent)
@@ -148,6 +149,7 @@ class MovieDetailsWidget(QWidget):
                             if hasattr(self.main_window, 'api_client') and self.main_window.api_client:
                                 # self.movie dictionary should already contain category_id, stream_id, and the new stream_icon
                                 self.main_window.api_client.update_movie_cache(self.movie)
+                                self.poster_updated.emit(str(self.movie.get('stream_id')), tmdb_poster_url) # Emit signal
                             # else:
                                 # print("[MovieDetailsWidget] api_client not available for cache update.")
                             # --- End update movie in category cache ---
