@@ -305,21 +305,28 @@ class MovieDetailsWidget(QWidget):
                 movie_language = None
                 
                 # Check for language indicators in movie data
-                movie_name = self.movie.get('name', '').lower()
+                movie_name = self.movie.get('name', '')
+                movie_name_lower = movie_name.lower()
                 
-                # Simple language detection based on common patterns
-                # You can extend this logic based on your data structure
-                if any(keyword in movie_name for keyword in ['arabic', 'عربي', 'عرب']):
+                # Enhanced language detection
+                # Check for Arabic characters (Unicode range for Arabic)
+                import re
+                arabic_pattern = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
+                if arabic_pattern.search(movie_name):
                     movie_language = 'ar'  # Arabic
-                elif any(keyword in movie_name for keyword in ['french', 'français', 'francais']):
+                    print(f"[MovieDetailsWidget] Detected Arabic characters in movie name: {movie_name}")
+                # Check for specific Arabic keywords
+                elif any(keyword in movie_name_lower for keyword in ['arabic', 'عربي', 'عرب']):
+                    movie_language = 'ar'  # Arabic
+                elif any(keyword in movie_name_lower for keyword in ['french', 'français', 'francais']):
                     movie_language = 'fr'  # French
-                elif any(keyword in movie_name for keyword in ['spanish', 'español', 'espanol']):
+                elif any(keyword in movie_name_lower for keyword in ['spanish', 'español', 'espanol']):
                     movie_language = 'es'  # Spanish
-                elif any(keyword in movie_name for keyword in ['german', 'deutsch']):
+                elif any(keyword in movie_name_lower for keyword in ['german', 'deutsch']):
                     movie_language = 'de'  # German
-                elif any(keyword in movie_name for keyword in ['italian', 'italiano']):
+                elif any(keyword in movie_name_lower for keyword in ['italian', 'italiano']):
                     movie_language = 'it'  # Italian
-                elif any(keyword in movie_name for keyword in ['turkish', 'türkçe', 'turkce']):
+                elif any(keyword in movie_name_lower for keyword in ['turkish', 'türkçe', 'turkce']):
                     movie_language = 'tr'  # Turkish
                 # Add more language detection logic as needed
                 
@@ -351,9 +358,29 @@ class MovieDetailsWidget(QWidget):
                         try:
                             overview = movie_details['overview'].strip()
                             if overview:
-                                self.movie['plot'] = overview
+                                # If we detected a non-English language and got English overview, try to translate
+                                final_overview = overview
+                                if movie_language and movie_language != 'en':
+                                    try:
+                                        from src.utils.translator import get_translation_manager
+                                        translation_manager = get_translation_manager()
+                                        translated_overview = translation_manager.translate_plot(
+                                            overview, 
+                                            target_language=movie_language, 
+                                            source_language='en'
+                                        )
+                                        if translated_overview and translated_overview != overview:
+                                            final_overview = translated_overview
+                                            print(f"[MovieDetailsWidget] Translated plot from English to {movie_language}")
+                                        else:
+                                            print(f"[MovieDetailsWidget] Translation not available, using English plot")
+                                    except Exception as translation_error:
+                                        print(f"[MovieDetailsWidget] Translation error: {translation_error}")
+                                        # Continue with English overview if translation fails
+                                
+                                self.movie['plot'] = final_overview
                                 if hasattr(self, 'desc_text'):
-                                    self.desc_text.setPlainText(overview)
+                                    self.desc_text.setPlainText(final_overview)
                                 updated_data = True
                                 print(f"[MovieDetailsWidget] Updated plot from TMDB overview")
                         except (KeyError, TypeError):

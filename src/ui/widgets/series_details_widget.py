@@ -617,21 +617,28 @@ class SeriesDetailsWidget(QWidget):
                 series_language = None
                 
                 # Check for language indicators in series data
-                series_name = self.series_data.get('name', '').lower()
+                series_name = self.series_data.get('name', '')
+                series_name_lower = series_name.lower()
                 
-                # Simple language detection based on common patterns
-                # You can extend this logic based on your data structure
-                if any(keyword in series_name for keyword in ['arabic', 'عربي', 'عرب']):
+                # Enhanced language detection
+                # Check for Arabic characters (Unicode range for Arabic)
+                import re
+                arabic_pattern = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
+                if arabic_pattern.search(series_name):
                     series_language = 'ar'  # Arabic
-                elif any(keyword in series_name for keyword in ['french', 'français', 'francais']):
+                    print(f"[SeriesDetailsWidget] Detected Arabic characters in series name: {series_name}")
+                # Check for specific Arabic keywords
+                elif any(keyword in series_name_lower for keyword in ['arabic', 'عربي', 'عرب']):
+                    series_language = 'ar'  # Arabic
+                elif any(keyword in series_name_lower for keyword in ['french', 'français', 'francais']):
                     series_language = 'fr'  # French
-                elif any(keyword in series_name for keyword in ['spanish', 'español', 'espanol']):
+                elif any(keyword in series_name_lower for keyword in ['spanish', 'español', 'espanol']):
                     series_language = 'es'  # Spanish
-                elif any(keyword in series_name for keyword in ['german', 'deutsch']):
+                elif any(keyword in series_name_lower for keyword in ['german', 'deutsch']):
                     series_language = 'de'  # German
-                elif any(keyword in series_name for keyword in ['italian', 'italiano']):
+                elif any(keyword in series_name_lower for keyword in ['italian', 'italiano']):
                     series_language = 'it'  # Italian
-                elif any(keyword in series_name for keyword in ['turkish', 'türkçe', 'turkce']):
+                elif any(keyword in series_name_lower for keyword in ['turkish', 'türkçe', 'turkce']):
                     series_language = 'tr'  # Turkish
                 # Add more language detection logic as needed
                 
@@ -687,8 +694,28 @@ class SeriesDetailsWidget(QWidget):
                         try:
                             overview = series_details['overview'].strip()
                             if overview:
-                                self.series_data['plot'] = overview
-                                self.desc_text.setPlainText(overview)
+                                # If we detected a non-English language and got English overview, try to translate
+                                final_overview = overview
+                                if series_language and series_language != 'en':
+                                    try:
+                                        from src.utils.translator import get_translation_manager
+                                        translation_manager = get_translation_manager()
+                                        translated_overview = translation_manager.translate_plot(
+                                            overview, 
+                                            target_language=series_language, 
+                                            source_language='en'
+                                        )
+                                        if translated_overview and translated_overview != overview:
+                                            final_overview = translated_overview
+                                            print(f"[SeriesDetailsWidget] Translated plot from English to {series_language}")
+                                        else:
+                                            print(f"[SeriesDetailsWidget] Translation not available, using English plot")
+                                    except Exception as translation_error:
+                                        print(f"[SeriesDetailsWidget] Translation error: {translation_error}")
+                                        # Continue with English overview if translation fails
+                                
+                                self.series_data['plot'] = final_overview
+                                self.desc_text.setPlainText(final_overview)
                                 updated_data = True
                                 print(f"[SeriesDetailsWidget] Updated plot from TMDB overview")
                         except (KeyError, TypeError):
