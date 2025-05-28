@@ -5,11 +5,12 @@ import os
 import time
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, 
-    QListWidget, QMessageBox, QFileDialog, QListWidgetItem, QComboBox
+    QListWidget, QMessageBox, QFileDialog, QListWidgetItem, QComboBox, QScrollArea
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.api.tmdb import TMDBClient # Added import
+from src.ui.widgets.cast_widget import CastWidget
 
 class SeriesDetailsWidget(QWidget):
     back_clicked = pyqtSignal()
@@ -86,6 +87,30 @@ class SeriesDetailsWidget(QWidget):
         self.desc_text.setReadOnly(True)
         self.desc_text.setMaximumHeight(100) # Increased height
         right_layout.addWidget(self.desc_text)
+
+        # --- Cast Section --- 
+        cast_header = QLabel("Cast")
+        cast_header.setFont(QFont('Arial', 14, QFont.Bold))
+        right_layout.addWidget(cast_header)
+
+        self.cast_scroll_area = QScrollArea()
+        self.cast_scroll_area.setWidgetResizable(True)
+        self.cast_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.cast_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.cast_scroll_area.setMinimumHeight(450)
+
+        self.cast_widget = CastWidget(main_window=self.main_window)
+        self.cast_scroll_area.setWidget(self.cast_widget)
+        
+        # Ensure visibility
+        self.cast_scroll_area.setVisible(True)
+        self.cast_widget.setVisible(True)
+        
+        right_layout.addWidget(self.cast_scroll_area)
+        print(f"[SeriesDetailsWidget] Cast widget and scroll area added to layout")
+        print(f"[SeriesDetailsWidget] Cast scroll area visible: {self.cast_scroll_area.isVisible()}")
+        print(f"[SeriesDetailsWidget] Cast widget visible: {self.cast_widget.isVisible()}")
+        # --- End Cast Section ---
 
         self.episodes_list = QListWidget()
         # self.seasons_list.itemClicked.connect(self._on_season_clicked) # Removed
@@ -191,8 +216,14 @@ class SeriesDetailsWidget(QWidget):
                         self.series_data['cover'] = tmdb_poster_url
                         if new_tmdb_id_found:
                              self.series_data['tmdb_id'] = new_tmdb_id_found
+                             print(f"[SeriesDetailsWidget] Found new TMDB ID: {new_tmdb_id_found}, fetching credits")
+                             # Fetch TMDB credits with the new ID
+                             self._fetch_tmdb_credits(new_tmdb_id_found)
                         elif tmdb_id: # Ensure existing tmdb_id is preserved if used
                             self.series_data['tmdb_id'] = tmdb_id
+                            print(f"[SeriesDetailsWidget] Using existing TMDB ID: {tmdb_id}, fetching credits")
+                            # Fetch TMDB credits with the existing ID
+                            self._fetch_tmdb_credits(tmdb_id)
                         
                         if hasattr(self.api_client, 'update_series_cache'):
                             series_data_to_cache = self.series_data.copy()
@@ -213,6 +244,31 @@ class SeriesDetailsWidget(QWidget):
             self.poster_label.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         
         self._update_favorite_series_button_text()
+
+        # Always attempt to get TMDB ID for credits, even if poster loaded successfully
+        final_tmdb_id = self.series_data.get('tmdb_id')
+        if not final_tmdb_id:
+            print(f"[SeriesDetailsWidget] No TMDB ID in series data, searching TMDB for credits")
+            # Search TMDB for this series to get an ID for credits
+            series_name = self.series_data.get('name')
+            series_year = self.series_data.get('year')
+            if series_name:
+                try:
+                    results = self.tmdb_client.search_series(series_name, year=series_year)
+                    if results and results.get('results'):
+                        first_result = results['results'][0]
+                        final_tmdb_id = first_result.get('id')
+                        if final_tmdb_id:
+                            print(f"[SeriesDetailsWidget] Found TMDB ID from search: {final_tmdb_id}")
+                            self.series_data['tmdb_id'] = final_tmdb_id
+                except Exception as e:
+                    print(f"[SeriesDetailsWidget] Error searching TMDB for '{series_name}': {e}")
+        
+        if final_tmdb_id:
+            print(f"[SeriesDetailsWidget] Fetching credits with TMDB ID: {final_tmdb_id}")
+            self._fetch_tmdb_credits(final_tmdb_id)
+        else:
+            print(f"[SeriesDetailsWidget] No TMDB ID available for credits fetching")
 
         # Fetch detailed series info for trailer, seasons, and potentially more accurate metadata
         if series_id:
@@ -244,6 +300,11 @@ class SeriesDetailsWidget(QWidget):
 
                     # Load seasons using the fetched series_info
                     self._load_seasons_from_info()
+                    
+                    # Fetch TMDB credits if tmdb_id is available
+                    tmdb_id = self.series_data.get('tmdb_id')
+                    if tmdb_id:
+                        self._fetch_tmdb_credits(tmdb_id)
                 else:
                     QMessageBox.warning(self, "Error", f"Failed to load detailed series information: {series_info_full}")
                     self._load_seasons_from_info() # Attempt to load seasons even if full info fails, if series_info has episodes
@@ -434,3 +495,20 @@ class SeriesDetailsWidget(QWidget):
     # Placeholder for current_season if SeriesTab needs it
     def get_current_season(self):
         return self.current_season
+
+    def _fetch_tmdb_credits(self, tmdb_id):
+        """Fetch TMDB credits for the series and populate the cast widget."""
+        if not self.tmdb_client:
+            print("[SeriesDetailsWidget] TMDB client is missing, cannot fetch credits.")
+            return
+        print(f"[SeriesDetailsWidget] Fetching TMDB credits for TMDB ID: {tmdb_id}")
+        try:
+            credits_data = self.tmdb_client.get_series_credits(tmdb_id)
+            print(f"[SeriesDetailsWidget] TMDB credits data received: {str(credits_data)[:200]}...")
+            if 'cast' in credits_data and credits_data['cast']:
+                print(f"[SeriesDetailsWidget] Found {len(credits_data['cast'])} cast members.")
+                self.cast_widget.set_cast(credits_data['cast'])
+            else:
+                print("[SeriesDetailsWidget] 'cast' key not found or empty in TMDB credits response.")
+        except Exception as e:
+            print(f"[SeriesDetailsWidget] Error fetching TMDB credits: {e}")

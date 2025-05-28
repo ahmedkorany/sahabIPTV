@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QLabel, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QSizePolicy
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt
 from src.utils.helpers import load_image_async
@@ -24,6 +24,29 @@ class CastWidget(QWidget):
                     self._clear_layout(sub_layout)
 
     def set_cast(self, cast_data):
+        """Set the cast data and populate the widget."""
+        print(f"[CastWidget] set_cast called with {len(cast_data) if cast_data else 0} cast members")
+        print(f"[CastWidget] Widget visible: {self.isVisible()}, parent visible: {self.parent().isVisible() if self.parent() else 'No parent'}")
+        
+        # Ensure widget is visible
+        self.setVisible(True)
+        if self.parent():
+            self.parent().setVisible(True)
+            print(f"[CastWidget] Parent type: {type(self.parent()).__name__}")
+            
+        # Force update and repaint
+        self.update()
+        self.repaint()
+        if self.parent():
+            self.parent().update()
+            self.parent().repaint()
+            
+        print(f"[CastWidget] After visibility fix - Widget visible: {self.isVisible()}, parent visible: {self.parent().isVisible() if self.parent() else 'No parent'}")
+        print(f"[CastWidget] Widget size: {self.size()}, parent size: {self.parent().size() if self.parent() else 'No parent'}")
+        print(f"[CastWidget] Widget geometry: {self.geometry()}")
+        
+        # Check if widget is actually shown
+        print(f"[CastWidget] Widget isHidden: {self.isHidden()}, isVisible: {self.isVisible()}, isVisibleTo parent: {self.isVisibleTo(self.parent()) if self.parent() else 'No parent'}")
         self.clear()
         MAX_CAST_MEMBERS = 24
         MAX_CAST_COLUMNS = 7

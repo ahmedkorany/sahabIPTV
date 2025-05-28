@@ -15,6 +15,7 @@ class TMDBClient:
         load_dotenv()
         self.api_key = api_key or os.getenv("TMDB_APIACCESS_TOKEN")
         self.read_access_token = read_access_token or os.getenv("TMDB_READACCESS_TOKEN")
+        print(f"[TMDBClient] Initialized with api_key: {'Yes' if self.api_key else 'No'}, read_access_token: {'Yes' if self.read_access_token else 'No'}")
         if not self.api_key and not self.read_access_token:
             raise ValueError("TMDB API key or Read Access Token must be set in .env or passed to TMDBClient.")
         
@@ -90,6 +91,57 @@ class TMDBClient:
         print(f"[TMDB Cache] Cached movie credits for ID: {tmdb_id}")
         
         return data
+
+    def get_series_credits(self, tmdb_id):
+        """Get series credits from TMDB with caching."""
+        print(f"[TMDBClient] get_series_credits called with tmdb_id: {tmdb_id}")
+        cache_file = self._get_cache_file_path(f"series_credits_{tmdb_id}")
+        
+        # Check cache first
+        if self._is_cache_valid(cache_file):
+            cached_data = self._load_from_cache(cache_file)
+            if cached_data:
+                print(f"[TMDBClient] Returning cached series credits for {tmdb_id}")
+                return cached_data
+        
+        # Fetch from API
+        url = f"{self.BASE_URL}/tv/{tmdb_id}/credits"
+        headers = {}
+        params = {}
+        if self.api_key:
+            params["api_key"] = self.api_key
+        elif self.read_access_token:
+            headers["Authorization"] = f"Bearer {self.read_access_token}"
+        
+        print(f"[TMDBClient] Fetching series credits from API: {url}")
+        
+        max_retries = 2
+        base_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                print(f"[TMDBClient] API response status: {response.status_code}")
+                response.raise_for_status()
+                data = response.json()
+                print(f"[TMDBClient] API response data keys: {list(data.keys()) if data else 'None'}")
+                if 'cast' in data:
+                    print(f"[TMDBClient] Found {len(data['cast'])} cast members in API response")
+                
+                # Save to cache
+                self._save_to_cache(cache_file, data)
+                return data
+                
+            except requests.RequestException as e:
+                print(f"[TMDBClient] API request failed (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    time.sleep(delay)
+                    continue
+                else:
+                    raise e
+        
+        return None
 
     def get_full_poster_url(self, poster_path: str, size: str = 'w500') -> str | None:
         if not poster_path:

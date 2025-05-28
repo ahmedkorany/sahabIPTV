@@ -145,6 +145,15 @@ class SeriesTab(QWidget):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        
+        # Search bar
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search series...")
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+        
         # Stacked widget for grid/details views
         self.stacked_widget = QStackedWidget()
 
@@ -219,6 +228,10 @@ class SeriesTab(QWidget):
         grid_parent_layout.insertWidget(grid_parent_layout.indexOf(self.series_grid_scroll), self.order_panel)
 
         self.setLayout(layout)
+
+    def on_search_text_changed(self, text):
+        """Handle search input text changes"""
+        self.search_series(text)
 
     def _show_grid_view(self):
         # Assuming grid view is at index 0 of the stacked_widget
@@ -589,9 +602,62 @@ class SeriesTab(QWidget):
         self._series_sort_cache.clear()  # Clear cache on reload
         self.build_series_search_index() # Populates _normalized_name
         self.search_series(self.search_input.text()) # Apply current search or show all
+
+    def build_series_search_index(self):
+        """Build search index for series with normalized names and sorting keys."""
+        self._series_search_index = {}
+        self._series_lc_names = []
+        if not hasattr(self, 'series') or not self.series:
+            return
+        for idx, series_data in enumerate(self.series):
+            original_name = series_data.get('name', '')
+            normalized_name = original_name.lower().strip()
+            series_data['_normalized_name'] = normalized_name
+            self._series_lc_names.append(normalized_name)
+            series_data['_sort_name'] = normalized_name
+            try:
+                series_data['_sort_date'] = int(series_data.get('added', 0))
+            except (ValueError, TypeError):
+                series_data['_sort_date'] = 0
+            try:
+                series_data['_sort_rating'] = float(series_data.get('rating', 0))
+            except (ValueError, TypeError):
+                 series_data['_sort_rating'] = 0.0
+
+    def search_series(self, text):
+        """Fast search using index, similar to movies/channels."""
+        from src.utils.text_search import TextSearch
+        search_term = text.strip()
+        if not self.series:
+            self.display_series_grid([])
+            return
+        if not search_term:
+            self.display_series_grid(self.series)
+            return
+        query_tokens = TextSearch.normalize_text(search_term).split()
+        matched_indices = set()
+        processed_first_token = False
+        for token in query_tokens:
+            if hasattr(self, '_series_search_index') and token in self._series_search_index:
+                if not processed_first_token:
+                    matched_indices = self._series_search_index[token].copy()
+                    processed_first_token = True
+                else:
+                    matched_indices.intersection_update(self._series_search_index[token])
+            else:
+                matched_indices.clear()
+                break
+        # Fallback: substring search
+        if not matched_indices:
+            for idx, name in enumerate(self._series_lc_names):
+                if search_term.lower() in name:
+                    matched_indices.add(idx)
+        filtered = [self.series[i] for i in sorted(matched_indices)]
+        self.display_series_grid(filtered)
+
         if not self.series:
             # Optionally, show a message in the grid area if no favorites
-            # For now, an empty grid will be shown by display_series_page
+            # For now, an empty grid will be shown by display_series_grid
             pass
 
     def display_series_grid(self, series_list):
