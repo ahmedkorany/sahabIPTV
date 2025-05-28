@@ -5,7 +5,7 @@ import os
 import time
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, 
-    QListWidget, QMessageBox, QFileDialog, QListWidgetItem
+    QListWidget, QMessageBox, QFileDialog, QListWidgetItem, QComboBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
@@ -36,7 +36,7 @@ class SeriesDetailsWidget(QWidget):
     def _setup_ui(self):
         layout = QHBoxLayout(self)
 
-        # --- Left: Poster, Back button, Favorite button --- 
+        # --- Left: Poster, Back button, Favorite button, SEASONS DROPDOWN --- 
         left_layout = QVBoxLayout()
         
         self.back_btn = QPushButton("← Back")
@@ -48,17 +48,23 @@ class SeriesDetailsWidget(QWidget):
         self.poster_label.setAlignment(Qt.AlignTop)
         left_layout.addWidget(self.poster_label)
 
+        # Seasons ComboBox and Label
+        self.seasons_label = QLabel() # For "{x} seasons"
+        self.seasons_label.setAlignment(Qt.AlignCenter)
+        self.seasons_label.setVisible(False) # Initially hidden
+        left_layout.addWidget(self.seasons_label)
+
+        self.seasons_combo = QComboBox()
+        self.seasons_combo.setFixedWidth(180) # Match poster width
+        self.seasons_combo.setVisible(False) # Initially hidden until seasons are loaded
+        # self.seasons_combo.currentIndexChanged.connect(self._on_season_selected) # Connect after populating
+        left_layout.addWidget(self.seasons_combo)
+
         self.favorite_series_btn = QPushButton()
         self.favorite_series_btn.setFixedWidth(180) # Match poster width
         self.favorite_series_btn.clicked.connect(self._on_toggle_favorite_series)
         left_layout.addWidget(self.favorite_series_btn)
         
-        # Placeholder for Download Season and Export Season buttons
-        # self.download_season_btn = QPushButton("Available Offline") # Removed
-        # self.download_season_btn.setVisible(False) # Removed
-        # self.download_season_btn.clicked.connect(self._on_download_season) # Removed
-        # left_layout.addWidget(self.download_season_btn) # Removed
-
         self.export_season_btn = QPushButton("Export Season URLs")
         self.export_season_btn.setVisible(False)
         self.export_season_btn.clicked.connect(self._on_export_season)
@@ -67,7 +73,7 @@ class SeriesDetailsWidget(QWidget):
         left_layout.addStretch() # Pushes buttons to the top
         layout.addLayout(left_layout)
 
-        # --- Right: Metadata, seasons, episodes --- 
+        # --- Right: Metadata, episodes --- 
         right_layout = QVBoxLayout()
         self.title_label = QLabel()
         self.title_label.setFont(QFont('Arial', 16, QFont.Bold))
@@ -81,14 +87,12 @@ class SeriesDetailsWidget(QWidget):
         self.desc_text.setMaximumHeight(100) # Increased height
         right_layout.addWidget(self.desc_text)
 
-        self.seasons_list = QListWidget()
         self.episodes_list = QListWidget()
-        self.seasons_list.itemClicked.connect(self._on_season_clicked)
+        # self.seasons_list.itemClicked.connect(self._on_season_clicked) # Removed
         self.episodes_list.itemDoubleClicked.connect(self._on_episode_double_clicked)
         self.episodes_list.currentItemChanged.connect(self._update_play_and_download_buttons_state)
 
-        right_layout.addWidget(QLabel("Seasons"))
-        right_layout.addWidget(self.seasons_list)
+        # Removed Seasons List and Label from here
         right_layout.addWidget(QLabel("Episodes"))
         right_layout.addWidget(self.episodes_list)
 
@@ -125,15 +129,29 @@ class SeriesDetailsWidget(QWidget):
         pix = QPixmap()
         series_cover_url = self.series_data.get('cover')
         poster_loaded_successfully = False
+        
         if series_cover_url:
+            # Attempt to load from the provided cover URL first
             image_data = self.api_client.get_image_data(series_cover_url)
             if image_data:
                 pix.loadFromData(image_data)
                 if not pix.isNull():
                     poster_loaded_successfully = True
+            else:
+                print(f"Failed to load image data from existing cover URL: {series_cover_url} for {self.series_data.get('name')}. This might be a temporary issue or broken URL.")
+        
+        # Only attempt TMDB fallback if the initial cover URL was missing or if loading from it failed AND it's considered okay to fallback
+        # The original logic would fallback even if a cover URL was present but failed to load.
+        # We adjust this to primarily fallback if series_cover_url was initially empty.
+        if not series_cover_url or not poster_loaded_successfully: # Adjusted condition
+            if not series_cover_url:
+                print(f"Initial cover URL missing for {self.series_data.get('name')}. Attempting TMDB fallback.")
+            elif not poster_loaded_successfully:
+                 # This case means a cover URL was present but failed to load. 
+                 # Depending on desired behavior, one might choose *not* to fallback immediately
+                 # or to have a more nuanced check. For now, we proceed with TMDB fallback as per original intent if load failed.
+                print(f"Initial poster load from {series_cover_url} failed for {self.series_data.get('name')}. Attempting TMDB fallback.")
 
-        if not poster_loaded_successfully:
-            print(f"Initial poster load failed for {self.series_data.get('name')}. Attempting TMDB fallback.")
             tmdb_poster_url = None
             tmdb_id = self.series_data.get('tmdb_id')
             new_tmdb_id_found = None
@@ -163,8 +181,11 @@ class SeriesDetailsWidget(QWidget):
                 print(f"Found TMDB poster: {tmdb_poster_url}")
                 tmdb_image_data = self.api_client.get_image_data(tmdb_poster_url)
                 if tmdb_image_data:
-                    pix.loadFromData(tmdb_image_data)
-                    if not pix.isNull():
+                    # Create a new QPixmap for TMDB image to avoid issues if original pix was somehow corrupted
+                    tmdb_pix = QPixmap()
+                    tmdb_pix.loadFromData(tmdb_image_data)
+                    if not tmdb_pix.isNull():
+                        pix = tmdb_pix # Use the new TMDB pixmap
                         poster_loaded_successfully = True
                         # Update series_data and cache
                         self.series_data['cover'] = tmdb_poster_url
@@ -174,15 +195,8 @@ class SeriesDetailsWidget(QWidget):
                             self.series_data['tmdb_id'] = tmdb_id
                         
                         if hasattr(self.api_client, 'update_series_cache'):
-                            # Prepare data for cache update, ensuring category_id is present if needed by update_series_cache
-                            # SeriesDetailsWidget doesn't inherently know the category_id. 
-                            # This might be a limitation if update_series_cache strictly requires it.
-                            # For now, we pass self.series_data which should have series_id.
-                            # The update_series_cache in xtream.py seems to find category by iterating if not directly given.
-                            # Let's assume series_data contains enough info (series_id, potentially category_id if added by SeriesTab)
                             series_data_to_cache = self.series_data.copy()
                             if 'category_id' not in series_data_to_cache and hasattr(self, 'main_window') and hasattr(self.main_window, 'current_category_id_for_details'):
-                                # A potential way to get category_id if main_window tracks it, but this is speculative
                                 series_data_to_cache['category_id'] = self.main_window.current_category_id_for_details
 
                             self.api_client.update_series_cache(series_data_to_cache)
@@ -191,7 +205,9 @@ class SeriesDetailsWidget(QWidget):
                             print("api_client does not have update_series_cache method.")
             
         if not poster_loaded_successfully:
-            pix = QPixmap('assets/series.png') # Default placeholder
+            # Fallback to local placeholder if all attempts fail
+            print(f"All poster loading attempts failed for {self.series_data.get('name')}. Using default placeholder.")
+            pix = QPixmap('assets/series.png') 
         
         if not pix.isNull():
             self.poster_label.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -240,36 +256,64 @@ class SeriesDetailsWidget(QWidget):
              QMessageBox.warning(self, "Error", "Series ID is missing, cannot load details.")
 
     def _load_seasons_from_info(self):
-        self.seasons_list.clear()
+        self.seasons_combo.clear()
         self.episodes_list.clear()
-        if 'episodes' in self.series_info:
-            # Sort season numbers numerically if they are strings
+        self.seasons_label.setVisible(False)
+        self.seasons_combo.setVisible(False)
+
+        if 'episodes' in self.series_info and self.series_info['episodes']:
             try:
                 sorted_season_numbers = sorted(self.series_info['episodes'].keys(), key=int)
             except ValueError:
-                 # Handle cases where season numbers might not be purely numeric (e.g., 'Special')
                 sorted_season_numbers = sorted(self.series_info['episodes'].keys())
 
-            for season_number in sorted_season_numbers:
-                self.seasons_list.addItem(f"Season {season_number}")
+            if not sorted_season_numbers:
+                return
+
+            # Disconnect signal before populating to avoid premature triggers
+            try:
+                self.seasons_combo.currentIndexChanged.disconnect(self._on_season_selected)
+            except TypeError: # Signal not connected yet
+                pass
+
+            for season_number_str in sorted_season_numbers:
+                self.seasons_combo.addItem(f"Season {season_number_str}", userData=season_number_str)
+            
+            self.seasons_combo.setVisible(True)
+            if len(sorted_season_numbers) > 1:
+                self.seasons_label.setText(f"{len(sorted_season_numbers)} seasons")
+                self.seasons_label.setVisible(True)
+            else:
+                self.seasons_label.setVisible(False)
+
+            # Connect signal after populating
+            self.seasons_combo.currentIndexChanged.connect(self._on_season_selected)
+            
+            if self.seasons_combo.count() > 0:
+                self.seasons_combo.setCurrentIndex(0) # Select first season by default
+                self._on_season_selected(0) # Trigger episode load for the first season
         else:
             # Optionally, display a message if no seasons/episodes are found
-            # self.seasons_list.addItem("No seasons available")
-            pass 
+            # self.seasons_label.setText("No seasons available")
+            # self.seasons_label.setVisible(True)
+            self.export_season_btn.setVisible(False)
 
-    def _on_season_clicked(self, item):
-        season_text = item.text()
-        season_number_str = season_text.replace("Season ", "")
+    def _on_season_selected(self, index):
+        if index < 0: # No item selected or combo is empty
+            self.episodes_list.clear()
+            self.export_season_btn.setVisible(False)
+            self._update_play_and_download_buttons_state()
+            return
+
+        season_number_str = self.seasons_combo.itemData(index)
         
         if hasattr(self, 'series_info') and 'episodes' in self.series_info and season_number_str in self.series_info['episodes']:
             self.export_season_btn.setVisible(True)
-            # self.download_season_btn.setVisible(True) # Removed
             episodes_data = self.series_info['episodes'][season_number_str]
             self.episodes_list.clear()
             self.current_episodes = episodes_data
             self.current_season = season_number_str
             
-            # Sort episodes by episode_num before adding
             try:
                 sorted_episodes = sorted(episodes_data, key=lambda x: int(x.get('episode_num', 0)))
             except ValueError:
@@ -280,7 +324,14 @@ class SeriesDetailsWidget(QWidget):
                 list_item = QListWidgetItem(f"E{episode.get('episode_num', '?')} - {episode_title}")
                 list_item.setData(Qt.UserRole, episode) # Store full episode dict
                 self.episodes_list.addItem(list_item)
+        else:
+            self.episodes_list.clear()
+            self.export_season_btn.setVisible(False)
+
         self._update_play_and_download_buttons_state() # Update button states after loading episodes
+
+    # Remove old _on_season_clicked method if it exists, or ensure it's not used
+    # def _on_season_clicked(self, item): ... (This method is now replaced by _on_season_selected)
 
     def _update_play_and_download_buttons_state(self):
         selected_episode_item = self.episodes_list.currentItem()
@@ -357,11 +408,10 @@ class SeriesDetailsWidget(QWidget):
         pass
 
     def _on_export_season(self):
-        if not self.seasons_list.currentItem():
+        if self.seasons_combo.currentIndex() < 0:
             QMessageBox.warning(self, "Error", "No season selected to export.")
             return
-        season_text = self.seasons_list.currentItem().text()
-        season_number = season_text.replace("Season ", "")
+        season_number = self.seasons_combo.itemData(self.seasons_combo.currentIndex())
         self.export_season_requested.emit(season_number)
 
     # Public method to be called by SeriesTab after favorite status changes
