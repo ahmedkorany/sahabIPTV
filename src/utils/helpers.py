@@ -355,13 +355,8 @@ def load_image_async(image_url, label, default_pixmap, update_size=(100, 140), m
                 if main_window and hasattr(main_window, 'loading_icon_controller'):
                     main_window.loading_icon_controller.hide_icon.emit()
             #print(f"[DEBUG] Finished loading image: {image_url}")
-    # Set cached or placeholder immediately
-    if os.path.exists(cache_path):
-        pix = QPixmap()
-        pix.load(cache_path)
-        set_pixmap(pix)
-    else:
-        set_pixmap(default_pixmap)
-        if loading_counter is not None:
-            loading_counter['count'] += 1
-        threading.Thread(target=worker, daemon=True).start()
+    # Set placeholder immediately
+    set_pixmap(default_pixmap)
+    if loading_counter is not None:
+        loading_counter['count'] += 1
+    threading.Thread(target=worker, daemon=True).start()
