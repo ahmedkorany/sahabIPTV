@@ -5,7 +5,8 @@ import os
 import time
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, 
-    QListWidget, QMessageBox, QFileDialog, QListWidgetItem, QComboBox, QScrollArea
+    QListWidget, QMessageBox, QFileDialog, QListWidgetItem, QComboBox, QScrollArea,
+    QGridLayout, QFrame
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
@@ -97,7 +98,9 @@ class SeriesDetailsWidget(QWidget):
         self.cast_scroll_area.setWidgetResizable(True)
         self.cast_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.cast_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.cast_scroll_area.setMinimumHeight(450)
+        # Set cast widget height to 1.25 times poster height (260 * 1.25 = 325)
+        self.cast_scroll_area.setMinimumHeight(325)
+        self.cast_scroll_area.setMaximumHeight(325)
 
         self.cast_widget = CastWidget(main_window=self.main_window)
         self.cast_scroll_area.setWidget(self.cast_widget)
@@ -112,14 +115,30 @@ class SeriesDetailsWidget(QWidget):
         print(f"[SeriesDetailsWidget] Cast widget visible: {self.cast_widget.isVisible()}")
         # --- End Cast Section ---
 
-        self.episodes_list = QListWidget()
-        # self.seasons_list.itemClicked.connect(self._on_season_clicked) # Removed
-        self.episodes_list.itemDoubleClicked.connect(self._on_episode_double_clicked)
-        self.episodes_list.currentItemChanged.connect(self._update_play_and_download_buttons_state)
-
-        # Removed Seasons List and Label from here
-        right_layout.addWidget(QLabel("Episodes"))
-        right_layout.addWidget(self.episodes_list)
+        # Episodes section with two-column layout
+        episodes_header = QLabel("Episodes")
+        episodes_header.setFont(QFont('Arial', 14, QFont.Bold))
+        right_layout.addWidget(episodes_header)
+        
+        # Create scroll area for episodes with increased height
+        self.episodes_scroll_area = QScrollArea()
+        self.episodes_scroll_area.setWidgetResizable(True)
+        self.episodes_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.episodes_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.episodes_scroll_area.setMinimumHeight(250)  # Reduced height to show play button
+        
+        # Create episodes widget with grid layout for two columns
+        self.episodes_widget = QWidget()
+        self.episodes_grid_layout = QGridLayout(self.episodes_widget)
+        self.episodes_grid_layout.setAlignment(Qt.AlignTop)
+        self.episodes_grid_layout.setSpacing(5)
+        
+        self.episodes_scroll_area.setWidget(self.episodes_widget)
+        right_layout.addWidget(self.episodes_scroll_area)
+        
+        # Keep track of episode buttons for interaction
+        self.episode_buttons = []
+        self.selected_episode_button = None
 
         # Action buttons for episodes
         episode_actions_layout = QHBoxLayout()
@@ -292,7 +311,11 @@ class SeriesDetailsWidget(QWidget):
                                 self.poster_label.setPixmap(detailed_pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
                     trailer_url = info_dict.get('youtube_trailer') or info_dict.get('trailer_url') # Prioritize youtube_trailer
-                    if trailer_url:
+                    if trailer_url and trailer_url.strip():  # Check for non-empty and non-whitespace
+                        # Check if it's a full URL or just a YouTube video ID
+                        if not trailer_url.startswith('http'):
+                            # Assume it's a YouTube video ID and construct the full URL
+                            trailer_url = f"https://www.youtube.com/watch?v={trailer_url}"
                         self.trailer_url = trailer_url # Store for the button
                         self.trailer_btn.setVisible(True)
                     else:
@@ -318,7 +341,7 @@ class SeriesDetailsWidget(QWidget):
 
     def _load_seasons_from_info(self):
         self.seasons_combo.clear()
-        self.episodes_list.clear()
+        self._clear_episodes()
         self.seasons_label.setVisible(False)
         self.seasons_combo.setVisible(False)
 
@@ -361,7 +384,7 @@ class SeriesDetailsWidget(QWidget):
 
     def _on_season_selected(self, index):
         if index < 0: # No item selected or combo is empty
-            self.episodes_list.clear()
+            self._clear_episodes()
             self.export_season_btn.setVisible(False)
             self._update_play_and_download_buttons_state()
             return
@@ -371,7 +394,7 @@ class SeriesDetailsWidget(QWidget):
         if hasattr(self, 'series_info') and 'episodes' in self.series_info and season_number_str in self.series_info['episodes']:
             self.export_season_btn.setVisible(True)
             episodes_data = self.series_info['episodes'][season_number_str]
-            self.episodes_list.clear()
+            self._clear_episodes()
             self.current_episodes = episodes_data
             self.current_season = season_number_str
             
@@ -380,13 +403,9 @@ class SeriesDetailsWidget(QWidget):
             except ValueError:
                 sorted_episodes = episodes_data # Fallback if episode_num is not int
 
-            for episode in sorted_episodes:
-                episode_title = episode.get('title', 'Unnamed Episode')
-                list_item = QListWidgetItem(f"E{episode.get('episode_num', '?')} - {episode_title}")
-                list_item.setData(Qt.UserRole, episode) # Store full episode dict
-                self.episodes_list.addItem(list_item)
+            self._populate_episodes_grid(sorted_episodes)
         else:
-            self.episodes_list.clear()
+            self._clear_episodes()
             self.export_season_btn.setVisible(False)
 
         self._update_play_and_download_buttons_state() # Update button states after loading episodes
@@ -394,24 +413,98 @@ class SeriesDetailsWidget(QWidget):
     # Remove old _on_season_clicked method if it exists, or ensure it's not used
     # def _on_season_clicked(self, item): ... (This method is now replaced by _on_season_selected)
 
+    def _clear_episodes(self):
+        """Clear all episode buttons from the grid layout."""
+        for button in self.episode_buttons:
+            button.setParent(None)
+            button.deleteLater()
+        self.episode_buttons.clear()
+        self.selected_episode_button = None
+        
+        # Clear the grid layout
+        while self.episodes_grid_layout.count():
+            child = self.episodes_grid_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+    
+    def _populate_episodes_grid(self, episodes):
+        """Populate episodes in a two-column grid layout."""
+        for i, episode in enumerate(episodes):
+            episode_title = episode.get('title', 'Unnamed Episode')
+            episode_text = f"E{episode.get('episode_num', '?')} - {episode_title}"
+            
+            episode_button = QPushButton(episode_text)
+            episode_button.setStyleSheet("""
+                QPushButton {
+                    text-align: left;
+                    padding: 8px;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    background-color: transparent;
+                    color: white;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 255, 255, 0.1);
+                }
+                QPushButton:pressed {
+                    background-color: rgba(255, 255, 255, 0.2);
+                }
+                QPushButton[selected="true"] {
+                    background-color: #007acc;
+                    color: white;
+                }
+            """)
+            episode_button.setProperty('episode_data', episode)
+            episode_button.clicked.connect(lambda checked, btn=episode_button: self._on_episode_button_clicked(btn))
+            
+            # Add double-click functionality
+            def make_double_click_handler(btn):
+                def handler(event):
+                    if event.type() == event.MouseButtonDblClick:
+                        self._on_episode_double_clicked(btn)
+                return handler
+            
+            episode_button.mouseDoubleClickEvent = make_double_click_handler(episode_button)
+            
+            # Add to grid: row = i // 2, column = i % 2
+            row = i // 2
+            col = i % 2
+            self.episodes_grid_layout.addWidget(episode_button, row, col)
+            self.episode_buttons.append(episode_button)
+    
+    def _on_episode_button_clicked(self, button):
+        """Handle episode button click for selection."""
+        # Deselect previous button
+        if self.selected_episode_button:
+            self.selected_episode_button.setProperty('selected', 'false')
+            self.selected_episode_button.setStyle(self.selected_episode_button.style())
+        
+        # Select new button
+        self.selected_episode_button = button
+        button.setProperty('selected', 'true')
+        button.setStyle(button.style())
+        
+        self._update_play_and_download_buttons_state()
+    
     def _update_play_and_download_buttons_state(self):
-        selected_episode_item = self.episodes_list.currentItem()
-        is_episode_selected = selected_episode_item is not None
+        is_episode_selected = self.selected_episode_button is not None
         self.play_episode_btn.setEnabled(is_episode_selected)
         # self.download_episode_btn.setEnabled(is_episode_selected) # Removed
         self.play_episode_btn.setVisible(is_episode_selected)
         # self.download_episode_btn.setVisible(is_episode_selected) # Removed
 
-    def _on_episode_double_clicked(self, item):
-        self._play_episode_from_item(item)
+    def _on_episode_double_clicked(self, button):
+        """Handle double-click on episode button to play immediately."""
+        self._play_episode_from_button(button)
 
     def _on_play_selected_episode(self):
-        item = self.episodes_list.currentItem()
-        if item:
-            self._play_episode_from_item(item)
+        """Play the currently selected episode."""
+        if self.selected_episode_button:
+            self._play_episode_from_button(self.selected_episode_button)
 
-    def _play_episode_from_item(self, item):
-        episode_data = item.data(Qt.UserRole)
+    def _play_episode_from_button(self, button):
+        """Play episode from button data."""
+        episode_data = button.property('episode_data')
         if episode_data:
             self.play_episode_requested.emit(episode_data)
         else:
@@ -497,18 +590,11 @@ class SeriesDetailsWidget(QWidget):
         return self.current_season
 
     def _fetch_tmdb_credits(self, tmdb_id):
-        """Fetch TMDB credits for the series and populate the cast widget."""
+        """Fetch TMDB credits for the series and populate the cast widget asynchronously."""
         if not self.tmdb_client:
             print("[SeriesDetailsWidget] TMDB client is missing, cannot fetch credits.")
             return
-        print(f"[SeriesDetailsWidget] Fetching TMDB credits for TMDB ID: {tmdb_id}")
-        try:
-            credits_data = self.tmdb_client.get_series_credits(tmdb_id)
-            print(f"[SeriesDetailsWidget] TMDB credits data received: {str(credits_data)[:200]}...")
-            if 'cast' in credits_data and credits_data['cast']:
-                print(f"[SeriesDetailsWidget] Found {len(credits_data['cast'])} cast members.")
-                self.cast_widget.set_cast(credits_data['cast'])
-            else:
-                print("[SeriesDetailsWidget] 'cast' key not found or empty in TMDB credits response.")
-        except Exception as e:
-            print(f"[SeriesDetailsWidget] Error fetching TMDB credits: {e}")
+        print(f"[SeriesDetailsWidget] Starting async TMDB credits fetch for TMDB ID: {tmdb_id}")
+        
+        # Use the new async cast loading method
+        self.cast_widget.load_cast_async(self.tmdb_client, tmdb_id)

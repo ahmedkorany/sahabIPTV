@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent
 from src.ui.widgets.controls import PlayerControls
 from src.config import DEFAULT_VOLUME
 from PyQt5.QtWidgets import QMainWindow
+from src.utils.youtube_resolver import youtube_resolver
 
 class MediaPlayer(QWidget):
     """Media player widget using VLC"""
@@ -102,8 +103,13 @@ class MediaPlayer(QWidget):
                 self.is_favorite = False
                 self.controls.set_favorite(False)
             
+            # Resolve YouTube URLs to direct stream URLs
+            resolved_url = youtube_resolver.resolve_url(url)
+            print(f"[DEBUG] Original URL: {url}")
+            print(f"[DEBUG] Resolved URL: {resolved_url}")
+            
             # Create media
-            media = self.instance.media_new(url)
+            media = self.instance.media_new(resolved_url)
             
             # Set media to player
             self.player.set_media(media)

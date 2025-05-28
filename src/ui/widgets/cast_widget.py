@@ -1,7 +1,35 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QSizePolicy
 from PyQt5.QtGui import QPixmap, QFont
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from src.utils.helpers import load_image_async
+import requests
+
+class CastDataWorker(QObject):
+    """Worker thread for fetching cast data asynchronously."""
+    cast_data_ready = pyqtSignal(list)  # Signal emitted when cast data is ready
+    error_occurred = pyqtSignal(str)    # Signal emitted when an error occurs
+    
+    def __init__(self, tmdb_client, tmdb_id):
+        super().__init__()
+        self.tmdb_client = tmdb_client
+        self.tmdb_id = tmdb_id
+    
+    def fetch_cast_data(self):
+        """Fetch cast data from TMDB API."""
+        try:
+            print(f"[CastDataWorker] Fetching cast data for TMDB ID: {self.tmdb_id}")
+            credits_data = self.tmdb_client.get_series_credits(self.tmdb_id)
+            if credits_data and 'cast' in credits_data:
+                cast_list = credits_data['cast']
+                print(f"[CastDataWorker] Successfully fetched {len(cast_list)} cast members")
+                self.cast_data_ready.emit(cast_list)
+            else:
+                print("[CastDataWorker] No cast data found in TMDB response")
+                self.cast_data_ready.emit([])
+        except Exception as e:
+            error_msg = f"Error fetching cast data: {str(e)}"
+            print(f"[CastDataWorker] {error_msg}")
+            self.error_occurred.emit(error_msg)
 
 class CastWidget(QWidget):
     def __init__(self, main_window=None, parent=None):
@@ -11,6 +39,66 @@ class CastWidget(QWidget):
         self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.grid_layout.setHorizontalSpacing(10)
         self.grid_layout.setVerticalSpacing(10)
+        
+        # Async loading components
+        self.cast_worker = None
+        self.cast_thread = None
+        self.loading_label = None
+        
+        # Show loading indicator initially
+        self._show_loading_indicator()
+
+    def _show_loading_indicator(self):
+        """Show a loading indicator while cast data is being fetched."""
+        self.clear()
+        self.loading_label = QLabel("Loading cast...")
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setStyleSheet("color: gray; font-size: 14px;")
+        self.grid_layout.addWidget(self.loading_label, 0, 0, 1, 7)  # Span across columns
+
+    def load_cast_async(self, tmdb_client, tmdb_id):
+        """Load cast data asynchronously."""
+        print(f"[CastWidget] Starting async cast loading for TMDB ID: {tmdb_id}")
+        
+        # Clean up any existing worker/thread
+        if self.cast_thread and self.cast_thread.isRunning():
+            self.cast_thread.quit()
+            self.cast_thread.wait()
+        
+        # Show loading indicator
+        self._show_loading_indicator()
+        
+        # Create worker and thread
+        self.cast_worker = CastDataWorker(tmdb_client, tmdb_id)
+        self.cast_thread = QThread()
+        
+        # Move worker to thread
+        self.cast_worker.moveToThread(self.cast_thread)
+        
+        # Connect signals
+        self.cast_thread.started.connect(self.cast_worker.fetch_cast_data)
+        self.cast_worker.cast_data_ready.connect(self._on_cast_data_ready)
+        self.cast_worker.error_occurred.connect(self._on_cast_error)
+        self.cast_worker.cast_data_ready.connect(self.cast_thread.quit)
+        self.cast_worker.error_occurred.connect(self.cast_thread.quit)
+        self.cast_thread.finished.connect(self.cast_worker.deleteLater)
+        
+        # Start the thread
+        self.cast_thread.start()
+
+    def _on_cast_data_ready(self, cast_data):
+        """Handle when cast data is ready."""
+        print(f"[CastWidget] Cast data ready with {len(cast_data)} members")
+        self.set_cast(cast_data)
+
+    def _on_cast_error(self, error_message):
+        """Handle cast data loading errors."""
+        print(f"[CastWidget] Cast loading error: {error_message}")
+        self.clear()
+        error_label = QLabel(f"Failed to load cast: {error_message}")
+        error_label.setAlignment(Qt.AlignCenter)
+        error_label.setStyleSheet("color: red; font-size: 12px;")
+        self.grid_layout.addWidget(error_label, 0, 0, 1, 7)
 
     def clear(self):
         while self.grid_layout.count():
@@ -26,28 +114,21 @@ class CastWidget(QWidget):
     def set_cast(self, cast_data):
         """Set the cast data and populate the widget."""
         print(f"[CastWidget] set_cast called with {len(cast_data) if cast_data else 0} cast members")
-        print(f"[CastWidget] Widget visible: {self.isVisible()}, parent visible: {self.parent().isVisible() if self.parent() else 'No parent'}")
+        
+        # Clear any loading indicators
+        self.clear()
+        
+        if not cast_data:
+            no_cast_label = QLabel("No cast information available")
+            no_cast_label.setAlignment(Qt.AlignCenter)
+            no_cast_label.setStyleSheet("color: gray; font-size: 12px;")
+            self.grid_layout.addWidget(no_cast_label, 0, 0, 1, 7)
+            return
         
         # Ensure widget is visible
         self.setVisible(True)
         if self.parent():
             self.parent().setVisible(True)
-            print(f"[CastWidget] Parent type: {type(self.parent()).__name__}")
-            
-        # Force update and repaint
-        self.update()
-        self.repaint()
-        if self.parent():
-            self.parent().update()
-            self.parent().repaint()
-            
-        print(f"[CastWidget] After visibility fix - Widget visible: {self.isVisible()}, parent visible: {self.parent().isVisible() if self.parent() else 'No parent'}")
-        print(f"[CastWidget] Widget size: {self.size()}, parent size: {self.parent().size() if self.parent() else 'No parent'}")
-        print(f"[CastWidget] Widget geometry: {self.geometry()}")
-        
-        # Check if widget is actually shown
-        print(f"[CastWidget] Widget isHidden: {self.isHidden()}, isVisible: {self.isVisible()}, isVisibleTo parent: {self.isVisibleTo(self.parent()) if self.parent() else 'No parent'}")
-        self.clear()
         MAX_CAST_MEMBERS = 24
         MAX_CAST_COLUMNS = 7
         row, col = 0, 0

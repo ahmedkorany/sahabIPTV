@@ -117,11 +117,21 @@ class MovieDetailsWidget(QWidget):
         self.play_btn.clicked.connect(lambda: self.play_clicked.emit(self.movie))
         btn_layout.addWidget(self.play_btn)
         self.trailer_url = self.movie.get('trailer_url') # This might be from the initial movie object
+        self.current_trailer_url = self.trailer_url  # Store the resolved URL for playback
         self.stream_id = self.movie.get('stream_id')
-        if self.trailer_url:
+        
+        # Handle YouTube video ID or full URL
+        if self.trailer_url and self.trailer_url.strip():
+            if not self.trailer_url.startswith('http'):
+                self.current_trailer_url = f"https://www.youtube.com/watch?v={self.trailer_url}"
+            else:
+                self.current_trailer_url = self.trailer_url
+            
             self.trailer_btn = QPushButton("WATCH TRAILER")
-            self.trailer_btn.clicked.connect(lambda: self.trailer_clicked.emit(self.trailer_url))
+            self.trailer_btn.clicked.connect(lambda: self.trailer_clicked.emit(self.current_trailer_url))
             btn_layout.addWidget(self.trailer_btn)
+        else:
+            self.trailer_btn = None
         right_layout.addLayout(btn_layout)
         # self.director_label = None # Now part of meta_layout
         # self.cast_label = None # Removed as we now have a dedicated cast poster section
@@ -231,17 +241,20 @@ class MovieDetailsWidget(QWidget):
                 self.releasedate_label.setText(info_data.get('releasedate', 'N/A'))
                 
                 new_trailer_url = info_data.get('youtube_trailer')
-                if new_trailer_url:
+                if new_trailer_url and new_trailer_url.strip():
+                    self.trailer_url = new_trailer_url
+                    # Handle YouTube video ID or full URL
                     if not new_trailer_url.startswith('http'):
-                        self.trailer_url = f"https://www.youtube.com/watch?v={new_trailer_url}"
+                        self.current_trailer_url = f"https://www.youtube.com/watch?v={new_trailer_url}"
                     else:
-                        self.trailer_url = new_trailer_url
+                        self.current_trailer_url = new_trailer_url
+                    
                     # Update trailer button if it exists, or create if it doesn't
                     if hasattr(self, 'trailer_btn') and self.trailer_btn:
                         self.trailer_btn.setEnabled(True)
-                        # Ensure the lambda captures the new URL
+                        # Ensure the lambda captures the new resolved URL
                         self.trailer_btn.clicked.disconnect()
-                        self.trailer_btn.clicked.connect(lambda: self.trailer_clicked.emit(self.trailer_url))
+                        self.trailer_btn.clicked.connect(lambda: self.trailer_clicked.emit(self.current_trailer_url))
                     elif not hasattr(self, 'trailer_btn') or not self.trailer_btn:
                         # This assumes btn_layout is accessible or re-created. 
                         # For simplicity, we'll assume it's fine if the button was initially created.
