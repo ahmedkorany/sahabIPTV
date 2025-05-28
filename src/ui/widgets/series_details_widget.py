@@ -4,10 +4,7 @@ Series Details Widget for the application
 import os
 import time
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, 
-    QListWidget, QMessageBox, QFileDialog, QListWidgetItem, QComboBox, QScrollArea,
-    QGridLayout, QFrame
-)
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QMessageBox, QComboBox, QScrollArea, QGridLayout)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.api.tmdb import TMDBClient # Added import
@@ -298,8 +295,14 @@ class SeriesDetailsWidget(QWidget):
                     info_dict = series_info_full.get('info', {})
                     
                     # Update metadata from detailed info if available
-                    self.meta_label.setText(f"Year: {info_dict.get('releaseDate', self.series_data.get('year', '--'))} | Genre: {info_dict.get('genre', self.series_data.get('genre', '--'))}")
-                    self.desc_text.setPlainText(info_dict.get('plot', self.series_data.get('plot', '')))
+                    # Update metadata from detailed info if available, but preserve TMDB data if it exists
+                    year_to_display = self.series_data.get('year', info_dict.get('releaseDate', '--'))
+                    genre_to_display = self.series_data.get('genre', info_dict.get('genre', '--'))
+                    self.meta_label.setText(f"Year: {year_to_display} | Genre: {genre_to_display}")
+                    
+                    # Update description, but preserve TMDB plot data if it exists
+                    plot_to_display = self.series_data.get('plot', info_dict.get('plot', ''))
+                    self.desc_text.setPlainText(plot_to_display)
                     
                     # Update poster if a better one is in detailed info
                     if 'cover' in info_dict and info_dict['cover']:
@@ -590,11 +593,80 @@ class SeriesDetailsWidget(QWidget):
         return self.current_season
 
     def _fetch_tmdb_credits(self, tmdb_id):
-        """Fetch TMDB credits for the series and populate the cast widget asynchronously."""
+        """Fetch TMDB credits for the series and populate the cast widget asynchronously.
+        Also fetch missing metadata (year, genre) and update the series cache."""
         if not self.tmdb_client:
             print("[SeriesDetailsWidget] TMDB client is missing, cannot fetch credits.")
             return
         print(f"[SeriesDetailsWidget] Starting async TMDB credits fetch for TMDB ID: {tmdb_id}")
+        
+        # Check if we need to fetch additional metadata
+        needs_metadata_update = False
+        current_year = self.series_data.get('year')
+        current_genre = self.series_data.get('genre')
+        
+        # Check if year or genre is missing or empty
+        if not current_year or current_year == '--' or not current_genre or current_genre == '--':
+            needs_metadata_update = True
+            print(f"[SeriesDetailsWidget] Missing metadata detected. Year: '{current_year}', Genre: '{current_genre}'")
+        
+        # Fetch series details if we need additional metadata
+        if needs_metadata_update:
+            try:
+                series_details = self.tmdb_client.get_series_details(tmdb_id)
+                if series_details:
+                    updated_data = False
+                    
+                    # Update year if missing
+                    if (not current_year or current_year == '--') and series_details.get('first_air_date'):
+                        try:
+                            year = series_details['first_air_date'][:4]  # Extract year from date
+                            self.series_data['year'] = year
+                            self.meta_label.setText(f"Year: {year} | Genre: {self.series_data.get('genre', '--')}")
+                            updated_data = True
+                            print(f"[SeriesDetailsWidget] Updated year to: {year}")
+                        except (ValueError, IndexError):
+                            print(f"[SeriesDetailsWidget] Could not parse year from: {series_details.get('first_air_date')}")
+                    
+                    # Update genre if missing
+                    if (not current_genre or current_genre == '--') and series_details.get('genres'):
+                        try:
+                            genres = [genre['name'] for genre in series_details['genres'][:3]]  # Take first 3 genres
+                            genre_string = ', '.join(genres)
+                            self.series_data['genre'] = genre_string
+                            self.meta_label.setText(f"Year: {self.series_data.get('year', '--')} | Genre: {genre_string}")
+                            updated_data = True
+                            print(f"[SeriesDetailsWidget] Updated genre to: {genre_string}")
+                        except (KeyError, TypeError):
+                            print(f"[SeriesDetailsWidget] Could not parse genres from TMDB response")
+                    
+                    # Update plot/overview if missing or empty
+                    current_plot = self.series_data.get('plot', '').strip()
+                    if not current_plot and series_details.get('overview'):
+                        try:
+                            overview = series_details['overview'].strip()
+                            if overview:
+                                self.series_data['plot'] = overview
+                                self.desc_text.setPlainText(overview)
+                                updated_data = True
+                                print(f"[SeriesDetailsWidget] Updated plot from TMDB overview")
+                        except (KeyError, TypeError):
+                            print(f"[SeriesDetailsWidget] Could not parse overview from TMDB response")
+                    
+                    # Cache the updated series data if we made changes
+                    if updated_data and hasattr(self.api_client, 'update_series_cache'):
+                        try:
+                            # Ensure we have the necessary data for caching
+                            series_data_to_cache = self.series_data.copy()
+                            if self.api_client.update_series_cache(series_data_to_cache):
+                                print(f"[SeriesDetailsWidget] Successfully cached updated metadata for series: {self.series_data.get('name')}")
+                            else:
+                                print(f"[SeriesDetailsWidget] Failed to cache updated metadata for series: {self.series_data.get('name')}")
+                        except Exception as cache_error:
+                            print(f"[SeriesDetailsWidget] Error caching updated series data: {cache_error}")
+                            
+            except Exception as e:
+                print(f"[SeriesDetailsWidget] Error fetching series details from TMDB: {e}")
         
         # Use the new async cast loading method
         self.cast_widget.load_cast_async(self.tmdb_client, tmdb_id)

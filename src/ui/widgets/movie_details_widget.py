@@ -290,3 +290,46 @@ class MovieDetailsWidget(QWidget):
                 print("[MovieDetailsWidget] 'cast' key not found or empty in TMDB credits response.")
         except Exception as e:
             print(f"[MovieDetailsWidget] Error fetching TMDB credits: {e}")
+        
+        # Check if we need to fetch additional metadata (plot/overview)
+        current_plot = self.movie.get('plot', '').strip()
+        needs_metadata_update = not current_plot
+        
+        if needs_metadata_update:
+            print(f"[MovieDetailsWidget] Missing plot detected. Fetching movie details from TMDB.")
+        
+        # Fetch movie details if we need additional metadata
+        if needs_metadata_update:
+            try:
+                movie_details = self.tmdb_client.get_movie_details(tmdb_id)
+                if movie_details:
+                    updated_data = False
+                    
+                    # Update plot/overview if missing or empty
+                    if not current_plot and movie_details.get('overview'):
+                        try:
+                            overview = movie_details['overview'].strip()
+                            if overview:
+                                self.movie['plot'] = overview
+                                if hasattr(self, 'desc_text'):
+                                    self.desc_text.setPlainText(overview)
+                                updated_data = True
+                                print(f"[MovieDetailsWidget] Updated plot from TMDB overview")
+                        except (KeyError, TypeError):
+                            print(f"[MovieDetailsWidget] Could not parse overview from TMDB response")
+                    
+                    # Cache the updated movie data if we made changes
+                    if updated_data and hasattr(self.api_client, 'update_movie_cache'):
+                        try:
+                            # Ensure we have the necessary data for caching
+                            movie_data_to_cache = self.movie.copy()
+                            if self.api_client.update_movie_cache(movie_data_to_cache):
+                                print(f"[MovieDetailsWidget] Successfully cached updated metadata for movie: {self.movie.get('name')}")
+                            else:
+                                print(f"[MovieDetailsWidget] Failed to cache updated metadata for movie: {self.movie.get('name')}")
+                        except Exception as cache_error:
+                            print(f"[MovieDetailsWidget] Error caching updated metadata: {cache_error}")
+                else:
+                    print(f"[MovieDetailsWidget] No movie details returned from TMDB for ID: {tmdb_id}")
+            except Exception as e:
+                print(f"[MovieDetailsWidget] Error fetching movie details from TMDB: {e}")
