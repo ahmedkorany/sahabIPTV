@@ -613,7 +613,48 @@ class SeriesDetailsWidget(QWidget):
         # Fetch series details if we need additional metadata
         if needs_metadata_update:
             try:
-                series_details = self.tmdb_client.get_series_details(tmdb_id)
+                # Try to detect series language for localized content
+                series_language = None
+                
+                # Check for language indicators in series data
+                series_name = self.series_data.get('name', '').lower()
+                
+                # Simple language detection based on common patterns
+                # You can extend this logic based on your data structure
+                if any(keyword in series_name for keyword in ['arabic', 'عربي', 'عرب']):
+                    series_language = 'ar'  # Arabic
+                elif any(keyword in series_name for keyword in ['french', 'français', 'francais']):
+                    series_language = 'fr'  # French
+                elif any(keyword in series_name for keyword in ['spanish', 'español', 'espanol']):
+                    series_language = 'es'  # Spanish
+                elif any(keyword in series_name for keyword in ['german', 'deutsch']):
+                    series_language = 'de'  # German
+                elif any(keyword in series_name for keyword in ['italian', 'italiano']):
+                    series_language = 'it'  # Italian
+                elif any(keyword in series_name for keyword in ['turkish', 'türkçe', 'turkce']):
+                    series_language = 'tr'  # Turkish
+                # Add more language detection logic as needed
+                
+                # Also check if there's a language field in series_data
+                if 'language' in self.series_data:
+                    detected_lang = self.series_data['language'].lower()
+                    if detected_lang in ['ar', 'arabic', 'عربي']:
+                        series_language = 'ar'
+                    elif detected_lang in ['fr', 'french', 'français']:
+                        series_language = 'fr'
+                    elif detected_lang in ['es', 'spanish', 'español']:
+                        series_language = 'es'
+                    elif detected_lang in ['de', 'german', 'deutsch']:
+                        series_language = 'de'
+                    elif detected_lang in ['it', 'italian', 'italiano']:
+                        series_language = 'it'
+                    elif detected_lang in ['tr', 'turkish', 'türkçe']:
+                        series_language = 'tr'
+                
+                if series_language:
+                    print(f"[SeriesDetailsWidget] Detected series language: {series_language}")
+                
+                series_details = self.tmdb_client.get_series_details(tmdb_id, language=series_language)
                 if series_details:
                     updated_data = False
                     

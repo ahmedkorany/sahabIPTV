@@ -301,7 +301,48 @@ class MovieDetailsWidget(QWidget):
         # Fetch movie details if we need additional metadata
         if needs_metadata_update:
             try:
-                movie_details = self.tmdb_client.get_movie_details(tmdb_id)
+                # Try to detect movie language for localized content
+                movie_language = None
+                
+                # Check for language indicators in movie data
+                movie_name = self.movie.get('name', '').lower()
+                
+                # Simple language detection based on common patterns
+                # You can extend this logic based on your data structure
+                if any(keyword in movie_name for keyword in ['arabic', 'عربي', 'عرب']):
+                    movie_language = 'ar'  # Arabic
+                elif any(keyword in movie_name for keyword in ['french', 'français', 'francais']):
+                    movie_language = 'fr'  # French
+                elif any(keyword in movie_name for keyword in ['spanish', 'español', 'espanol']):
+                    movie_language = 'es'  # Spanish
+                elif any(keyword in movie_name for keyword in ['german', 'deutsch']):
+                    movie_language = 'de'  # German
+                elif any(keyword in movie_name for keyword in ['italian', 'italiano']):
+                    movie_language = 'it'  # Italian
+                elif any(keyword in movie_name for keyword in ['turkish', 'türkçe', 'turkce']):
+                    movie_language = 'tr'  # Turkish
+                # Add more language detection logic as needed
+                
+                # Also check if there's a language field in movie data
+                if 'language' in self.movie:
+                    detected_lang = self.movie['language'].lower()
+                    if detected_lang in ['ar', 'arabic', 'عربي']:
+                        movie_language = 'ar'
+                    elif detected_lang in ['fr', 'french', 'français']:
+                        movie_language = 'fr'
+                    elif detected_lang in ['es', 'spanish', 'español']:
+                        movie_language = 'es'
+                    elif detected_lang in ['de', 'german', 'deutsch']:
+                        movie_language = 'de'
+                    elif detected_lang in ['it', 'italian', 'italiano']:
+                        movie_language = 'it'
+                    elif detected_lang in ['tr', 'turkish', 'türkçe']:
+                        movie_language = 'tr'
+                
+                if movie_language:
+                    print(f"[MovieDetailsWidget] Detected movie language: {movie_language}")
+                
+                movie_details = self.tmdb_client.get_movie_details(tmdb_id, language=movie_language)
                 if movie_details:
                     updated_data = False
                     

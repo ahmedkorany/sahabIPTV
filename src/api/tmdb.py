@@ -151,19 +151,18 @@ class TMDBClient:
             poster_path = poster_path[1:]
         return f"{self.IMAGE_BASE_URL}{size}/{poster_path}"
 
-    def get_movie_details(self, tmdb_id):
+    def get_movie_details(self, tmdb_id, language=None):
         """Fetch movie details from TMDB by tmdb_id with retry logic and caching."""
-        # Check cache first
-        cache_key = f"movie_details_{tmdb_id}"
+        # Include language in cache key if specified
+        cache_key = f"movie_details_{tmdb_id}_{language}" if language else f"movie_details_{tmdb_id}"
         cache_file_path = self._get_cache_file_path(cache_key)
         
         if self._is_cache_valid(cache_file_path):
             cached_data = self._load_from_cache(cache_file_path)
             if cached_data is not None:
-                print(f"[TMDB Cache] Using cached movie details for ID: {tmdb_id}")
+                print(f"[TMDB Cache] Using cached movie details for ID: {tmdb_id} (language: {language or 'default'})")
                 return cached_data
         
-        # Fetch from API with retry logic
         url = f"{self.BASE_URL}/movie/{tmdb_id}"
         headers = {}
         params = {}
@@ -172,31 +171,34 @@ class TMDBClient:
         elif self.read_access_token:
             headers["Authorization"] = f"Bearer {self.read_access_token}"
         
+        # Add language parameter if specified
+        if language:
+            params["language"] = language
+            print(f"[TMDB] Fetching movie details with language: {language}")
+        
         max_retries = 2
-        base_delay = 0.5  # Shorter delay for API calls
+        base_delay = 0.5
         
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    delay = base_delay * (2 ** (attempt - 1))  # 0.5s, 1s
-                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} after {delay}s delay")
-                    import time
+                    delay = base_delay * (2 ** (attempt - 1))
+                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} for movie details after {delay}s delay")
                     time.sleep(delay)
                 
                 response = requests.get(url, params=params, headers=headers, timeout=10)
                 response.raise_for_status()
                 data = response.json()
-                
-                # Save to cache
                 self._save_to_cache(cache_file_path, data)
-                print(f"[TMDB Cache] Cached movie details for ID: {tmdb_id}")
-                
+                print(f"[TMDB Cache] Cached movie details for ID: {tmdb_id} (language: {language or 'default'})")
                 return data
-                
             except requests.RequestException as e:
-                print(f"[TMDB] Request error on attempt {attempt + 1}/{max_retries}: {e}")
-                if attempt == max_retries - 1:  # Last attempt
+                print(f"[TMDB] Request error on movie details attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt == max_retries - 1:
                     raise e
+            except Exception as e:
+                print(f"[TMDB] Unexpected error during movie details: {e}")
+                raise e
 
     def search_series(self, query, year=None):
         """Search for series on TMDB by query and optional year."""
@@ -245,15 +247,16 @@ class TMDBClient:
                 raise e
         return None # Should not be reached if retries exhausted and exception raised
 
-    def get_series_details(self, tmdb_id):
+    def get_series_details(self, tmdb_id, language=None):
         """Fetch series details from TMDB by tmdb_id with retry logic and caching."""
-        cache_key = f"series_details_{tmdb_id}"
+        # Include language in cache key if specified
+        cache_key = f"series_details_{tmdb_id}_{language}" if language else f"series_details_{tmdb_id}"
         cache_file_path = self._get_cache_file_path(cache_key)
         
         if self._is_cache_valid(cache_file_path):
             cached_data = self._load_from_cache(cache_file_path)
             if cached_data is not None:
-                print(f"[TMDB Cache] Using cached series details for ID: {tmdb_id}")
+                print(f"[TMDB Cache] Using cached series details for ID: {tmdb_id} (language: {language or 'default'})")
                 return cached_data
         
         url = f"{self.BASE_URL}/tv/{tmdb_id}"
@@ -263,6 +266,11 @@ class TMDBClient:
             params["api_key"] = self.api_key
         elif self.read_access_token:
             headers["Authorization"] = f"Bearer {self.read_access_token}"
+        
+        # Add language parameter if specified
+        if language:
+            params["language"] = language
+            print(f"[TMDB] Fetching series details with language: {language}")
         
         max_retries = 2
         base_delay = 0.5
@@ -278,7 +286,7 @@ class TMDBClient:
                 response.raise_for_status()
                 data = response.json()
                 self._save_to_cache(cache_file_path, data)
-                print(f"[TMDB Cache] Cached series details for ID: {tmdb_id}")
+                print(f"[TMDB Cache] Cached series details for ID: {tmdb_id} (language: {language or 'default'})")
                 return data
             except requests.RequestException as e:
                 print(f"[TMDB] Request error on series details attempt {attempt + 1}/{max_retries}: {e}")
@@ -336,47 +344,3 @@ class TMDBClient:
                 print(f"[TMDB] Unexpected error during series search: {e}")
                 raise e
         return None # Should not be reached if retries exhausted and exception raised
-
-    def get_series_details(self, tmdb_id):
-        """Fetch series details from TMDB by tmdb_id with retry logic and caching."""
-        cache_key = f"series_details_{tmdb_id}"
-        cache_file_path = self._get_cache_file_path(cache_key)
-        
-        if self._is_cache_valid(cache_file_path):
-            cached_data = self._load_from_cache(cache_file_path)
-            if cached_data is not None:
-                print(f"[TMDB Cache] Using cached series details for ID: {tmdb_id}")
-                return cached_data
-        
-        url = f"{self.BASE_URL}/tv/{tmdb_id}"
-        headers = {}
-        params = {}
-        if self.api_key:
-            params["api_key"] = self.api_key
-        elif self.read_access_token:
-            headers["Authorization"] = f"Bearer {self.read_access_token}"
-        
-        max_retries = 2
-        base_delay = 0.5
-        
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    delay = base_delay * (2 ** (attempt - 1))
-                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} for series details after {delay}s delay")
-                    time.sleep(delay)
-                
-                response = requests.get(url, params=params, headers=headers, timeout=10)
-                response.raise_for_status()
-                data = response.json()
-                self._save_to_cache(cache_file_path, data)
-                print(f"[TMDB Cache] Cached series details for ID: {tmdb_id}")
-                return data
-            except requests.RequestException as e:
-                print(f"[TMDB] Request error on series details attempt {attempt + 1}/{max_retries}: {e}")
-                if attempt == max_retries - 1:
-                    raise e
-            except Exception as e:
-                print(f"[TMDB] Unexpected error during series details: {e}")
-                raise e
-        return None # Should not be reached
