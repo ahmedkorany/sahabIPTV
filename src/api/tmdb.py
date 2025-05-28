@@ -145,7 +145,186 @@ class TMDBClient:
                 print(f"[TMDB] Request error on attempt {attempt + 1}/{max_retries}: {e}")
                 if attempt == max_retries - 1:  # Last attempt
                     raise e
-                # Continue to next retry attempt
+
+    def search_series(self, query, year=None):
+        """Search for series on TMDB by query and optional year."""
+        cache_key = f"series_search_{query.replace(' ', '_').lower()}_{year or 'anyyear'}"
+        cache_file_path = self._get_cache_file_path(cache_key)
+
+        if self._is_cache_valid(cache_file_path):
+            cached_data = self._load_from_cache(cache_file_path)
+            if cached_data is not None:
+                print(f"[TMDB Cache] Using cached series search results for query: {query}")
+                return cached_data
+        
+        url = f"{self.BASE_URL}/search/tv"
+        headers = {}
+        params = {"query": query}
+        if self.api_key:
+            params["api_key"] = self.api_key
+        elif self.read_access_token:
+            headers["Authorization"] = f"Bearer {self.read_access_token}"
+        
+        if year:
+            params["first_air_date_year"] = year
+
+        max_retries = 2
+        base_delay = 0.5
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} for series search after {delay}s delay")
+                    time.sleep(delay)
+                
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                self._save_to_cache(cache_file_path, data)
+                print(f"[TMDB Cache] Cached series search results for query: {query}")
+                return data
+            except requests.RequestException as e:
+                print(f"[TMDB] Request error on series search attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt == max_retries - 1:
+                    raise e
             except Exception as e:
-                print(f"[TMDB] Unexpected error: {e}")
+                print(f"[TMDB] Unexpected error during series search: {e}")
                 raise e
+        return None # Should not be reached if retries exhausted and exception raised
+
+    def get_series_details(self, tmdb_id):
+        """Fetch series details from TMDB by tmdb_id with retry logic and caching."""
+        cache_key = f"series_details_{tmdb_id}"
+        cache_file_path = self._get_cache_file_path(cache_key)
+        
+        if self._is_cache_valid(cache_file_path):
+            cached_data = self._load_from_cache(cache_file_path)
+            if cached_data is not None:
+                print(f"[TMDB Cache] Using cached series details for ID: {tmdb_id}")
+                return cached_data
+        
+        url = f"{self.BASE_URL}/tv/{tmdb_id}"
+        headers = {}
+        params = {}
+        if self.api_key:
+            params["api_key"] = self.api_key
+        elif self.read_access_token:
+            headers["Authorization"] = f"Bearer {self.read_access_token}"
+        
+        max_retries = 2
+        base_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} for series details after {delay}s delay")
+                    time.sleep(delay)
+                
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                self._save_to_cache(cache_file_path, data)
+                print(f"[TMDB Cache] Cached series details for ID: {tmdb_id}")
+                return data
+            except requests.RequestException as e:
+                print(f"[TMDB] Request error on series details attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt == max_retries - 1:
+                    raise e
+            except Exception as e:
+                print(f"[TMDB] Unexpected error during series details: {e}")
+                raise e
+        return None # Should not be reached
+
+
+    def search_series(self, query, year=None):
+        """Search for series on TMDB by query and optional year."""
+        cache_key = f"series_search_{query.replace(' ', '_').lower()}_{year or 'anyyear'}"
+        cache_file_path = self._get_cache_file_path(cache_key)
+
+        if self._is_cache_valid(cache_file_path):
+            cached_data = self._load_from_cache(cache_file_path)
+            if cached_data is not None:
+                print(f"[TMDB Cache] Using cached series search results for query: {query}")
+                return cached_data
+        
+        url = f"{self.BASE_URL}/search/tv"
+        headers = {}
+        params = {"query": query}
+        if self.api_key:
+            params["api_key"] = self.api_key
+        elif self.read_access_token:
+            headers["Authorization"] = f"Bearer {self.read_access_token}"
+        
+        if year:
+            params["first_air_date_year"] = year
+
+        max_retries = 2
+        base_delay = 0.5
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} for series search after {delay}s delay")
+                    time.sleep(delay)
+                
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                self._save_to_cache(cache_file_path, data)
+                print(f"[TMDB Cache] Cached series search results for query: {query}")
+                return data
+            except requests.RequestException as e:
+                print(f"[TMDB] Request error on series search attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt == max_retries - 1:
+                    raise e
+            except Exception as e:
+                print(f"[TMDB] Unexpected error during series search: {e}")
+                raise e
+        return None # Should not be reached if retries exhausted and exception raised
+
+    def get_series_details(self, tmdb_id):
+        """Fetch series details from TMDB by tmdb_id with retry logic and caching."""
+        cache_key = f"series_details_{tmdb_id}"
+        cache_file_path = self._get_cache_file_path(cache_key)
+        
+        if self._is_cache_valid(cache_file_path):
+            cached_data = self._load_from_cache(cache_file_path)
+            if cached_data is not None:
+                print(f"[TMDB Cache] Using cached series details for ID: {tmdb_id}")
+                return cached_data
+        
+        url = f"{self.BASE_URL}/tv/{tmdb_id}"
+        headers = {}
+        params = {}
+        if self.api_key:
+            params["api_key"] = self.api_key
+        elif self.read_access_token:
+            headers["Authorization"] = f"Bearer {self.read_access_token}"
+        
+        max_retries = 2
+        base_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    print(f"[TMDB] Retry attempt {attempt + 1}/{max_retries} for series details after {delay}s delay")
+                    time.sleep(delay)
+                
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                self._save_to_cache(cache_file_path, data)
+                print(f"[TMDB Cache] Cached series details for ID: {tmdb_id}")
+                return data
+            except requests.RequestException as e:
+                print(f"[TMDB] Request error on series details attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt == max_retries - 1:
+                    raise e
+            except Exception as e:
+                print(f"[TMDB] Unexpected error during series details: {e}")
+                raise e
+        return None # Should not be reached

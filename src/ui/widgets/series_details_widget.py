@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
+from src.api.tmdb import TMDBClient # Added import
 
 class SeriesDetailsWidget(QWidget):
     back_clicked = pyqtSignal()
@@ -27,6 +28,7 @@ class SeriesDetailsWidget(QWidget):
         self.current_episodes = []
         self.current_season = None
         self.series_info = {} # To store detailed series info including episodes
+        self.tmdb_client = TMDBClient() # Initialize TMDBClient
 
         self._setup_ui()
         self._load_initial_data()
@@ -122,12 +124,75 @@ class SeriesDetailsWidget(QWidget):
         # Load poster
         pix = QPixmap()
         series_cover_url = self.series_data.get('cover')
+        poster_loaded_successfully = False
         if series_cover_url:
             image_data = self.api_client.get_image_data(series_cover_url)
             if image_data:
                 pix.loadFromData(image_data)
-        if not pix or pix.isNull():
-            pix = QPixmap('assets/series.png') # Assuming assets path is correct relative to main app
+                if not pix.isNull():
+                    poster_loaded_successfully = True
+
+        if not poster_loaded_successfully:
+            print(f"Initial poster load failed for {self.series_data.get('name')}. Attempting TMDB fallback.")
+            tmdb_poster_url = None
+            tmdb_id = self.series_data.get('tmdb_id')
+            new_tmdb_id_found = None
+
+            if tmdb_id:
+                try:
+                    details = self.tmdb_client.get_series_details(tmdb_id)
+                    if details and details.get('poster_path'):
+                        tmdb_poster_url = self.tmdb_client.get_full_poster_url(details['poster_path'])
+                except Exception as e:
+                    print(f"Error fetching series details from TMDB by ID {tmdb_id}: {e}")
+            
+            if not tmdb_poster_url:
+                series_name = self.series_data.get('name')
+                series_year = self.series_data.get('year')
+                try:
+                    results = self.tmdb_client.search_series(series_name, year=series_year)
+                    if results and results.get('results'):
+                        first_result = results['results'][0]
+                        if first_result.get('poster_path'):
+                            tmdb_poster_url = self.tmdb_client.get_full_poster_url(first_result['poster_path'])
+                            new_tmdb_id_found = first_result.get('id')
+                except Exception as e:
+                    print(f"Error searching series '{series_name}' on TMDB: {e}")
+
+            if tmdb_poster_url:
+                print(f"Found TMDB poster: {tmdb_poster_url}")
+                tmdb_image_data = self.api_client.get_image_data(tmdb_poster_url)
+                if tmdb_image_data:
+                    pix.loadFromData(tmdb_image_data)
+                    if not pix.isNull():
+                        poster_loaded_successfully = True
+                        # Update series_data and cache
+                        self.series_data['cover'] = tmdb_poster_url
+                        if new_tmdb_id_found:
+                             self.series_data['tmdb_id'] = new_tmdb_id_found
+                        elif tmdb_id: # Ensure existing tmdb_id is preserved if used
+                            self.series_data['tmdb_id'] = tmdb_id
+                        
+                        if hasattr(self.api_client, 'update_series_cache'):
+                            # Prepare data for cache update, ensuring category_id is present if needed by update_series_cache
+                            # SeriesDetailsWidget doesn't inherently know the category_id. 
+                            # This might be a limitation if update_series_cache strictly requires it.
+                            # For now, we pass self.series_data which should have series_id.
+                            # The update_series_cache in xtream.py seems to find category by iterating if not directly given.
+                            # Let's assume series_data contains enough info (series_id, potentially category_id if added by SeriesTab)
+                            series_data_to_cache = self.series_data.copy()
+                            if 'category_id' not in series_data_to_cache and hasattr(self, 'main_window') and hasattr(self.main_window, 'current_category_id_for_details'):
+                                # A potential way to get category_id if main_window tracks it, but this is speculative
+                                series_data_to_cache['category_id'] = self.main_window.current_category_id_for_details
+
+                            self.api_client.update_series_cache(series_data_to_cache)
+                            print(f"Updated cache for {self.series_data.get('name')} with new TMDB poster.")
+                        else:
+                            print("api_client does not have update_series_cache method.")
+            
+        if not poster_loaded_successfully:
+            pix = QPixmap('assets/series.png') # Default placeholder
+        
         if not pix.isNull():
             self.poster_label.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         

@@ -89,6 +89,50 @@ class XtreamClient:
             # print(f"[XtreamClient.update_movie_cache] No cached data or invalid format for category '{category_id}'. Key: {cache_key}")
             return False
 
+    def update_series_cache(self, series_to_update):
+        """Updates a specific series' details within its cached category list."""
+        category_id = series_to_update.get('category_id')
+        # Series are identified by 'series_id' in Xtream Codes, not 'stream_id'
+        series_id_to_update = series_to_update.get('series_id') 
+        new_cover_url = series_to_update.get('cover') # 'cover' is used for series posters
+
+        if not (category_id and series_id_to_update and self.server_url and self.username):
+            # print(f"[XtreamClient.update_series_cache] Missing necessary data: category_id='{category_id}', series_id='{series_id_to_update}', server_url, or username.")
+            return False
+
+        # Cache key for series lists within a category
+        cache_key = f'series_{self.server_url}_{self.username}_{category_id}'
+        # print(f"[XtreamClient.update_series_cache] Attempting to update series in category cache. Key: {cache_key}")
+        
+        cached_category_series = _load_cache(cache_key)
+        
+        if isinstance(cached_category_series, list):
+            updated = False
+            for i, series_in_cache in enumerate(cached_category_series):
+                if isinstance(series_in_cache, dict) and series_in_cache.get('series_id') == series_id_to_update:
+                    # Update the specific series' details
+                    if new_cover_url is not None: # Only update if a new cover is provided
+                        series_in_cache['cover'] = new_cover_url
+                    # Update tmdb_id if it's part of series_to_update and potentially new
+                    if 'tmdb_id' in series_to_update:
+                        series_in_cache['tmdb_id'] = series_to_update['tmdb_id']
+                    
+                    cached_category_series[i] = series_in_cache # Ensure the list is updated
+                    updated = True
+                    break
+            
+            if updated:
+                _save_cache(cache_key, cached_category_series)
+                # print(f"[XtreamClient.update_series_cache] Updated series (ID: {series_id_to_update}) in cached category '{category_id}'.")
+                return True
+            else:
+                # print(f"[XtreamClient.update_series_cache] Series (ID: {series_id_to_update}) not found in cached category '{category_id}'.")
+                return False
+        else:
+            # print(f"[XtreamClient.update_series_cache] No cached data or invalid format for series category '{category_id}'. Key: {cache_key}")
+            return False
+
+
     """Client for Xtream Codes API"""
     
     def __init__(self):

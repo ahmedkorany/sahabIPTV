@@ -18,6 +18,7 @@ from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ImageCache  # Correct import for ImageCache
 from src.utils.helpers import load_image_async
 from src.ui.widgets.series_details_widget import SeriesDetailsWidget
+from src.api.tmdb import TMDBClient # Added TMDBClient import
 
 def get_api_client_from_label(label, main_window):
     if main_window and hasattr(main_window, 'api_client'):
@@ -139,6 +140,7 @@ class SeriesTab(QWidget):
         self.setup_ui()
         self.api_client = api_client
         self.main_window = main_window
+        self.tmdb_client = TMDBClient() # Initialize TMDBClient
         self._series_sort_cache = {}  # (sort_field, reverse) -> sorted list
 
     def setup_ui(self):
@@ -630,9 +632,13 @@ class SeriesTab(QWidget):
 
             default_pix = QPixmap('assets/series.png')
             if series.get('cover'):
-                load_image_async(series['cover'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, loading_counter=loading_counter)
+                # Pass a lambda that calls onPosterDownloadFailed with series data and the label
+                on_failure_callback = lambda s=series, lbl=poster_label_widget: self.onPosterDownloadFailed(s, lbl)
+                load_image_async(series['cover'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, loading_counter=loading_counter, on_failure=on_failure_callback)
             else:
                 poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                # Call fallback directly if no cover URL is provided initially
+                self.onPosterDownloadFailed(series, poster_label_widget)
 
             # Title overlay
             title_text_label = QLabel(series['name'], poster_container) 
@@ -692,6 +698,71 @@ class SeriesTab(QWidget):
         self._opened_from_search = False
         self.current_series = series
         self.show_series_details(series)
+
+    def onPosterDownloadFailed(self, series_data, poster_label_widget):
+        """Callback function for when a poster download fails."""
+        print(f"Poster download failed for series: {series_data.get('name')}. Attempting TMDB fallback.")
+        # Implementation will follow: search TMDB, get poster, reload image
+        # For now, just a placeholder
+        series_name = series_data.get('name')
+        tmdb_id = series_data.get('tmdb_id') # Assuming tmdb_id might exist
+        series_year = None
+        if series_data.get('releaseDate'):
+            try:
+                series_year = series_data.get('releaseDate').split('-')[0]
+            except:
+                pass # Ignore if year cannot be parsed
+
+        tmdb_poster_path = None
+
+        try:
+            if tmdb_id:
+                print(f"Attempting to fetch series details from TMDB with id: {tmdb_id}")
+                series_details_tmdb = self.tmdb_client.get_series_details(tmdb_id)
+                if series_details_tmdb and series_details_tmdb.get('poster_path'):
+                    tmdb_poster_path = series_details_tmdb['poster_path']
+                    print(f"Found poster via TMDB ID: {tmdb_poster_path}")
+
+            if not tmdb_poster_path and series_name:
+                print(f"Attempting to search series on TMDB with name: {series_name}, year: {series_year}")
+                search_results = self.tmdb_client.search_series(series_name, year=series_year)
+                if search_results and search_results.get('results'):
+                    # Try to find a match, potentially based on name and year if available
+                    # For simplicity, taking the first result for now
+                    first_result = search_results['results'][0]
+                    if first_result.get('poster_path'):
+                        tmdb_poster_path = first_result['poster_path']
+                        print(f"Found poster via TMDB search: {tmdb_poster_path}")
+            
+            if tmdb_poster_path:
+                full_poster_url = self.tmdb_client.get_full_poster_url(tmdb_poster_path)
+                print(f"Loading new poster from TMDB: {full_poster_url}")
+
+                # Prepare data for cache update
+                series_data_to_cache = series_data.copy() # Avoid modifying the original dict directly if it's a reference
+                series_data_to_cache['cover'] = full_poster_url
+                # If tmdb_id was found and used, or found via search, ensure it's in the data for caching
+                if tmdb_id: # This would be the one from series_data initially
+                    series_data_to_cache['tmdb_id'] = tmdb_id
+                elif search_results and search_results.get('results') and search_results['results'][0].get('id'): # from name search
+                    series_data_to_cache['tmdb_id'] = search_results['results'][0]['id']
+                
+                # Update the cache
+                if hasattr(self.api_client, 'update_series_cache'):
+                    print(f"Updating series cache for: {series_data_to_cache.get('name')} with new poster and TMDB ID.")
+                    self.api_client.update_series_cache(series_data_to_cache)
+                else:
+                    print("api_client does not have update_series_cache method.")
+
+                # Load the image
+                poster_width = poster_label_widget.width() if poster_label_widget.width() > 0 else 125
+                poster_height = poster_label_widget.height() if poster_label_widget.height() > 0 else 188
+                default_pix = QPixmap('assets/series.png')
+                load_image_async(full_poster_url, poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=self.main_window)
+            else:
+                print(f"No poster found on TMDB for series: {series_name}")
+        except Exception as e:
+            print(f"Error during TMDB fallback for series {series_name}: {e}")
 
 
 
