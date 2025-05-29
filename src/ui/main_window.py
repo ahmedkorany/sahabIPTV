@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
 
         # Create menu bar
         self.create_menu_bar()
+        
+        # Apply language settings including RTL layout
+        self.apply_language()
 
         # Create status bar
         self.statusBar = QStatusBar()

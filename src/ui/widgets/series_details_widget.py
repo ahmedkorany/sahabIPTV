@@ -34,7 +34,16 @@ class SeriesDetailsWidget(QWidget):
         self.translations = get_translations(language)
 
         self._setup_ui()
+        self._set_initial_layout_direction()
         self._load_initial_data()
+    
+    def _set_initial_layout_direction(self):
+        """Set initial layout direction - always LTR for SeriesDetailsWidget"""
+        from PyQt5.QtCore import Qt
+        
+        # Always set LTR layout for SeriesDetailsWidget regardless of app language
+        self.setLayoutDirection(Qt.LeftToRight)
+        print(f"[SeriesDetailsWidget] Set LTR layout (override RTL app setting)")
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)

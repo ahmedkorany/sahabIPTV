@@ -25,7 +25,16 @@ class MovieDetailsWidget(QWidget):
         language = getattr(main_window, 'language', 'en') if main_window else 'en'
         self.translations = get_translations(language)
         self.setup_ui()
+        self._set_initial_layout_direction()
         self.update_metadata_from_api()
+    
+    def _set_initial_layout_direction(self):
+        """Set initial layout direction - always LTR for MovieDetailsWidget"""
+        from PyQt5.QtCore import Qt
+        
+        # Always set LTR layout for MovieDetailsWidget regardless of app language
+        self.setLayoutDirection(Qt.LeftToRight)
+        print(f"[MovieDetailsWidget] Set LTR layout (override RTL app setting)")
     def _clear_layout(self, layout):
         if layout is not None:
             while layout.count():
@@ -676,8 +685,11 @@ class MovieDetailsWidget(QWidget):
                     elif detected_lang in ['tr', 'turkish', 'türkçe']:
                         movie_language = 'tr'
                 
+                # Always set LTR layout for MovieDetailsWidget regardless of movie or app language
+                from PyQt5.QtCore import Qt
+                self.setLayoutDirection(Qt.LeftToRight)
                 if movie_language:
-                    print(f"[MovieDetailsWidget] Detected movie language: {movie_language}")
+                    print(f"[MovieDetailsWidget] Detected movie language: {movie_language}, but keeping LTR layout")
                 
                 movie_details = self.tmdb_client.get_movie_details(tmdb_id, language=movie_language)
                 if movie_details:
