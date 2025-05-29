@@ -10,6 +10,7 @@ class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
     play_clicked = pyqtSignal(object)
     trailer_clicked = pyqtSignal(str)
+    toggle_favorite_movie_requested = pyqtSignal(object)  # movie data
 
     def __init__(self, movie, api_client=None, main_window=None, tmdb_client=None, parent=None):
         super().__init__(parent)
@@ -340,10 +341,23 @@ class MovieDetailsWidget(QWidget):
                 print("[MovieDetailsWidget] No tmdb_id available for poster fallback.")
 
     def update_favorite_state(self):
-        main_window = self.main_window
-        favs = getattr(main_window, 'favorites', []) if main_window else []
-        self._is_favorite = any(fav.get('stream_id') == self.movie.get('stream_id') for fav in favs)
+        """Update favorite state by checking with main window"""
+        if not self.main_window or not hasattr(self.main_window, 'is_favorite'):
+            self._is_favorite = False
+            self.update_favorite_btn()
+            return
+
+        favorite_item_check = {
+            'stream_id': self.movie.get('stream_id'),
+            'stream_type': 'movie'
+        }
+
+        self._is_favorite = self.main_window.is_favorite(favorite_item_check)
         self.update_favorite_btn()
+
+    def refresh_favorite_button(self):
+        """Refresh the favorite button state - called by main window after favorites change"""
+        self.update_favorite_state()
 
     # Removed backdrop loading functionality
     
@@ -461,16 +475,10 @@ class MovieDetailsWidget(QWidget):
             self.favorite_btn.setToolTip("Add to favorites")
 
     def _on_favorite_clicked(self):
-        main_window = self.main_window
-        if main_window and hasattr(main_window, 'toggle_favorite'):
-            main_window.toggle_favorite(self.movie)
-            # Force update the favorite state after toggling
-            self.update_favorite_state()
-        else:
-            self.favorite_toggled.emit(self.movie)
-            # Toggle the state manually if no main window handler
-            self._is_favorite = not self._is_favorite
-            self.update_favorite_btn()
+        """Handle favorite button click - emit signal for main window to handle"""
+        self.toggle_favorite_movie_requested.emit(self.movie)
+        # The button text/icon update should be handled by the main window
+        # or by re-checking favorite status after the signal is processed.
 
     def update_metadata_from_api(self):
         print(f"[MovieDetailsWidget] update_metadata_from_api for movie {self.movie}")

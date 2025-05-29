@@ -593,7 +593,7 @@ class MainWindow(QMainWindow):
 
         # Determine the ID from item_to_remove based on its stream_type
         if item_type_to_remove == 'movie':
-            id_to_remove = item_to_remove.get('movie_id') or item_to_remove.get('id') # Common keys for movie ID
+            id_to_remove = item_to_remove.get('stream_id') or item_to_remove.get('movie_id') or item_to_remove.get('id') # Movies use stream_id
         elif item_type_to_remove == 'series':
             id_to_remove = item_to_remove.get('series_id')
         elif item_type_to_remove == 'live':
@@ -628,7 +628,7 @@ class MainWindow(QMainWindow):
                 fav_item_id = None
 
                 if fav_item_type == 'movie':
-                    fav_item_id = fav_item.get('movie_id') or fav_item.get('id')
+                    fav_item_id = fav_item.get('stream_id') or fav_item.get('movie_id') or fav_item.get('id') # Movies use stream_id
                 elif fav_item_type == 'series':
                     fav_item_id = fav_item.get('series_id')
                 elif fav_item_type == 'live':

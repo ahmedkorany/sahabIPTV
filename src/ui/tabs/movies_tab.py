@@ -450,7 +450,10 @@ class MoviesTab(QWidget):
         self.details_widget.back_btn.clicked.connect(self._handle_back_from_details)
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
-        self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
+        self.details_widget.toggle_favorite_movie_requested.connect(self._handle_toggle_favorite_request)
+        # Connect to main window's favorites_changed signal to refresh button state
+        if hasattr(self.main_window, 'favorites_changed'):
+            self.main_window.favorites_changed.connect(self._on_favorites_changed)
         self.stacked_widget.addWidget(self.details_widget)
         self.stacked_widget.setCurrentWidget(self.details_widget)
 
@@ -488,7 +491,10 @@ class MoviesTab(QWidget):
         self.details_widget.back_btn.clicked.connect(self._handle_back_from_details)
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
-        self.details_widget.favorite_toggled.connect(self.add_to_favorites.emit)
+        self.details_widget.toggle_favorite_movie_requested.connect(self._handle_toggle_favorite_request)
+        # Connect to main window's favorites_changed signal to refresh button state
+        if hasattr(self.main_window, 'favorites_changed'):
+            self.main_window.favorites_changed.connect(self._on_favorites_changed)
         self.stacked_widget.addWidget(self.details_widget)
         self.stacked_widget.setCurrentWidget(self.details_widget)
 
@@ -519,6 +525,50 @@ class MoviesTab(QWidget):
             player_window.show()
         else:
             QMessageBox.warning(self, "Error", "Player window not available.")
+
+    def _handle_toggle_favorite_request(self, movie_data):
+        """Handle toggle favorite request from details widget"""
+        main_window = self.main_window
+        if not main_window or not hasattr(main_window, 'add_to_favorites') or not hasattr(main_window, 'remove_from_favorites'):
+            # Fallback to signal emission if main window methods are not available
+            self.add_to_favorites.emit(movie_data)
+            return
+
+        # Ensure 'stream_type' is present in movie_data
+        if 'stream_type' not in movie_data:
+            movie_data['stream_type'] = 'movie'
+
+        # Create favorite item with required fields
+        favorite_item = {
+            'stream_id': movie_data.get('stream_id'),
+            'stream_type': 'movie',
+            'name': movie_data.get('name', ''),
+            'cover': movie_data.get('stream_icon', ''),
+            'category_id': movie_data.get('category_id', ''),
+            'added': movie_data.get('added', ''),
+            'rating': movie_data.get('rating', ''),
+            'rating_5based': movie_data.get('rating_5based', ''),
+            'container_extension': movie_data.get('container_extension', '')
+        }
+
+        # Add other fields as expected by main_window.add_to_favorites/remove_from_favorites
+        for key, value in movie_data.items():
+            if key not in favorite_item:
+                favorite_item[key] = value
+
+        if main_window.is_favorite(favorite_item):
+            main_window.remove_from_favorites(favorite_item)
+        else:
+            main_window.add_to_favorites(favorite_item)
+
+        # Refresh the favorite button in the details widget
+        if hasattr(self.details_widget, 'refresh_favorite_button'):
+            self.details_widget.refresh_favorite_button()
+
+    def _on_favorites_changed(self):
+        """Handle favorites changed signal from main window"""
+        if hasattr(self.details_widget, 'refresh_favorite_button'):
+            self.details_widget.refresh_favorite_button()
 
     def paginate_items(self, items_to_paginate, page):
         """Paginate a list of items."""
@@ -642,10 +692,21 @@ class MoviesTab(QWidget):
         if not self.current_movie:
             QMessageBox.warning(self, "Error", "No movie is playing")
             return
+        
         movie = dict(self.current_movie)
         if 'name' not in movie:
             movie['name'] = movie.get('title', 'Movie')
-        self.add_to_favorites.emit(movie)
+        
+        # Ensure stream_type is set
+        if 'stream_type' not in movie:
+            movie['stream_type'] = 'movie'
+        
+        # Use the main window's add_to_favorites method directly if available
+        if self.main_window and hasattr(self.main_window, 'add_to_favorites'):
+            self.main_window.add_to_favorites(movie)
+        else:
+            # Fallback to signal emission
+            self.add_to_favorites.emit(movie)
 
     @pyqtSlot(dict)
     def onPosterDownloadFailed(self, movie=None):
