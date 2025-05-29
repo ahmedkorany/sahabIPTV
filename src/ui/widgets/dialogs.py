@@ -255,6 +255,14 @@ class MovieDetailsDialog(QDialog):
 
     def __init__(self, movie, api_client, parent=None, main_window=None):
         super().__init__(parent)
+        # Get translations from main_window or parent or default to English
+        language = 'en'
+        if main_window and hasattr(main_window, 'language'):
+            language = main_window.language
+        elif parent and hasattr(parent, 'language'):
+            language = parent.language
+        self.translations = get_translations(language)
+        
         self.setWindowTitle(movie.get('name', 'Movie Details'))
         self.setMinimumWidth(900)
         self.movie = movie
