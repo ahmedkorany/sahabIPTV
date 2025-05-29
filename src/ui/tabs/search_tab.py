@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect # Added QRect
 from PyQt5.QtGui import QFont, QPixmap
 from src.utils.text_search import search_all_data
 from src.utils.image_cache import ImageCache
-from src.utils.helpers import load_image_async
+from src.utils.helpers import load_image_async, get_translations
 # Import other necessary widgets or details views if items are clickable
 # from src.ui.widgets.movie_details_widget import MovieDetailsWidget
 # from src.ui.widgets.series_details_widget import SeriesDetailsWidget
@@ -27,6 +27,8 @@ class SearchTab(QWidget):
         self.total_pages = 1
         self.current_filter = "All"
         self.image_cache = ImageCache() # Or get from main_window if it's shared
+        # Get translations from main window
+        self.translations = getattr(main_window, 'translations', {}) if main_window else {}
 
         # Timer for debouncing search input
         self.search_timer = QTimer(self)
@@ -45,13 +47,13 @@ class SearchTab(QWidget):
         search_layout.setContentsMargins(0,0,0,0)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search Live, Movies, and Series...")
+        self.search_input.setPlaceholderText(self.translations.get("Search Live, Movies, and Series...", "Search Live, Movies, and Series..."))
         self.search_input.setFixedHeight(35)
         self.search_input.textChanged.connect(self.on_search_text_changed)
         search_layout.addWidget(self.search_input, 1) # Stretch input
 
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["All", "Live", "Movies", "Series"])
+        self.filter_combo.addItems([self.translations.get("All", "All"), self.translations.get("Live", "Live"), self.translations.get("Movies", "Movies"), self.translations.get("Series", "Series")])
         self.filter_combo.setFixedWidth(100)
         self.filter_combo.currentIndexChanged.connect(self.on_filter_changed)
         search_layout.addWidget(self.filter_combo)
@@ -77,10 +79,10 @@ class SearchTab(QWidget):
         pagination_layout.setContentsMargins(0, 5, 0, 0)
         pagination_layout.setAlignment(Qt.AlignCenter)
 
-        self.prev_page_button = QPushButton("Previous")
+        self.prev_page_button = QPushButton(self.translations.get("Previous", "Previous"))
         self.prev_page_button.clicked.connect(self.go_to_previous_page)
-        self.page_label = QLabel("Page 1 of 1")
-        self.next_page_button = QPushButton("Next")
+        self.page_label = QLabel(self.translations.get("Page 1 of 1", "Page 1 of 1"))
+        self.next_page_button = QPushButton(self.translations.get("Next", "Next"))
         self.next_page_button.clicked.connect(self.go_to_next_page)
 
         pagination_layout.addWidget(self.prev_page_button)

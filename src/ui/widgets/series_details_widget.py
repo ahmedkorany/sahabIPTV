@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.api.tmdb import TMDBClient # Added import
 from src.ui.widgets.cast_widget import CastWidget
+from src.utils.helpers import get_translations
 
 class SeriesDetailsWidget(QWidget):
     back_clicked = pyqtSignal()
@@ -28,6 +29,9 @@ class SeriesDetailsWidget(QWidget):
         self.current_season = None
         self.series_info = {} # To store detailed series info including episodes
         self.tmdb_client = TMDBClient() # Initialize TMDBClient
+        # Get translations from main window or default to English
+        language = getattr(main_window, 'language', 'en') if main_window else 'en'
+        self.translations = get_translations(language)
 
         self._setup_ui()
         self._load_initial_data()
@@ -38,7 +42,7 @@ class SeriesDetailsWidget(QWidget):
         # --- Left: Poster, Back button, Favorite button, SEASONS DROPDOWN --- 
         left_layout = QVBoxLayout()
         
-        self.back_btn = QPushButton("← Back")
+        self.back_btn = QPushButton(f"← {self.translations.get('Back', 'Back')}")
         self.back_btn.setFixedWidth(80)
         self.back_btn.clicked.connect(self.back_clicked.emit)
         left_layout.addWidget(self.back_btn, alignment=Qt.AlignLeft)
@@ -64,7 +68,7 @@ class SeriesDetailsWidget(QWidget):
         self.favorite_series_btn.clicked.connect(self._on_toggle_favorite_series)
         left_layout.addWidget(self.favorite_series_btn)
         
-        self.export_season_btn = QPushButton("Export Season URLs")
+        self.export_season_btn = QPushButton(self.translations.get("Export Season URLs", "Export Season URLs"))
         self.export_season_btn.setVisible(False)
         self.export_season_btn.clicked.connect(self._on_export_season)
         left_layout.addWidget(self.export_season_btn)
@@ -87,7 +91,7 @@ class SeriesDetailsWidget(QWidget):
         right_layout.addWidget(self.desc_text)
 
         # --- Cast Section --- 
-        cast_header = QLabel("Cast")
+        cast_header = QLabel(self.translations.get("Cast", "Cast"))
         cast_header.setFont(QFont('Arial', 14, QFont.Bold))
         right_layout.addWidget(cast_header)
 
@@ -113,7 +117,7 @@ class SeriesDetailsWidget(QWidget):
         # --- End Cast Section ---
 
         # Episodes section with two-column layout
-        episodes_header = QLabel("Episodes")
+        episodes_header = QLabel(self.translations.get("Episodes", "Episodes"))
         episodes_header.setFont(QFont('Arial', 14, QFont.Bold))
         right_layout.addWidget(episodes_header)
         
@@ -139,7 +143,7 @@ class SeriesDetailsWidget(QWidget):
 
         # Action buttons for episodes
         episode_actions_layout = QHBoxLayout()
-        self.play_episode_btn = QPushButton("Play")
+        self.play_episode_btn = QPushButton(self.translations.get("Play", "Play"))
         self.play_episode_btn.setEnabled(False)
         self.play_episode_btn.setVisible(False)
         self.play_episode_btn.clicked.connect(self._on_play_selected_episode)
@@ -152,7 +156,7 @@ class SeriesDetailsWidget(QWidget):
         # episode_actions_layout.addWidget(self.download_episode_btn) # Removed
         right_layout.addLayout(episode_actions_layout)
 
-        self.trailer_btn = QPushButton("WATCH TRAILER")
+        self.trailer_btn = QPushButton(self.translations.get("WATCH TRAILER", "WATCH TRAILER"))
         self.trailer_btn.setVisible(False) # Initially hidden
         self.trailer_btn.clicked.connect(self._on_play_trailer)
         right_layout.addWidget(self.trailer_btn)
@@ -524,7 +528,7 @@ class SeriesDetailsWidget(QWidget):
     def _update_favorite_series_button_text(self):
         # This method now relies on main_window to check favorite status
         if not self.main_window or not hasattr(self.main_window, 'favorites_manager'):
-            self.favorite_series_btn.setText("Favorite N/A")
+            self.favorite_series_btn.setText(self.translations.get("Favorite N/A", "Favorite N/A"))
             return
 
         favorite_item_check = {
@@ -535,11 +539,11 @@ class SeriesDetailsWidget(QWidget):
         if self.main_window.favorites_manager.is_favorite(favorite_item_check):
             self.favorite_series_btn.setText("★") # Or use an icon
             self.favorite_series_btn.setStyleSheet("QPushButton { color: gold; background: transparent; font-size: 16px; }")
-            self.favorite_series_btn.setToolTip("Remove from favorites")
+            self.favorite_series_btn.setToolTip(self.translations.get("Remove from favorites", "Remove from favorites"))
         else:
             self.favorite_series_btn.setText("☆") # Or use an icon
             self.favorite_series_btn.setStyleSheet("QPushButton { color: white; background: transparent; font-size: 16px; }")
-            self.favorite_series_btn.setToolTip("Add to favorites")
+            self.favorite_series_btn.setToolTip(self.translations.get("Add to favorites", "Add to favorites"))
 
     def _on_play_trailer(self):
         if hasattr(self, 'trailer_url') and self.trailer_url:

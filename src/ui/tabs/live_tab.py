@@ -12,7 +12,7 @@ from src.ui.player import MediaPlayer
 from src.utils.recorder import RecordingThread
 from src.ui.widgets.dialogs import ProgressDialog
 from src.utils.image_cache import ImageCache
-from src.utils.helpers import get_api_client_from_label
+from src.utils.helpers import get_api_client_from_label, get_translations
 import threading
 
 class DebouncedLineEdit(QLineEdit):
@@ -120,12 +120,16 @@ class LiveTab(QWidget):
         self.page_size = 32
         self.current_page = 1
         self.total_pages = 1
+        # Get translations from main window
+        self.translations = {}
         self.setup_ui()
         self.main_window = None  # Will be set by the main window
         
     def set_main_window(self, main_window):
         """Set the main window reference and connect signals"""
         self.main_window = main_window
+        # Get translations from main window
+        self.translations = getattr(main_window, 'translations', {}) if main_window else {}
         # Connect to main window's favorites_changed signal to refresh grid
         if hasattr(self.main_window, 'favorites_changed'):
             self.main_window.favorites_changed.connect(self._on_favorites_changed)
@@ -143,7 +147,7 @@ class LiveTab(QWidget):
         self.categories_list.setStyleSheet("QListWidget::item:selected { background: #444; color: #fff; font-weight: bold; }")
 
         left_panel = QVBoxLayout()
-        left_panel.addWidget(QLabel("Categories"))
+        left_panel.addWidget(QLabel(self.translations.get("Categories", "Categories")))
         left_panel.addWidget(self.categories_list)
         left_widget = QWidget()
         left_widget.setLayout(left_panel)
@@ -160,9 +164,9 @@ class LiveTab(QWidget):
         self.channel_grid_scroll.setWidget(self.channel_grid_widget)
 
         right_panel = QVBoxLayout()
-        right_panel.addWidget(QLabel("Channels"))
+        right_panel.addWidget(QLabel(self.translations.get("Channels", "Channels")))
         right_panel.addWidget(self.channel_grid_scroll)
-        self.loading_label = QLabel("Loading...")
+        self.loading_label = QLabel(self.translations.get("Loading...", "Loading..."))
         self.loading_label.setAlignment(Qt.AlignCenter)
         self.loading_label.setStyleSheet("color: #fff; font-size: 18px; background: #222;")
         self.loading_label.hide()
@@ -196,12 +200,12 @@ class LiveTab(QWidget):
         if success:
             self.categories_api_data = data
             # Add "ALL" category at the top
-            all_item = QListWidgetItem("ALL")
+            all_item = QListWidgetItem(self.translations.get("ALL", "ALL"))
             all_item.setData(Qt.UserRole, None) # None for ALL category_id
             self.categories_list.addItem(all_item)
 
             # Add "Favorites" category
-            favorites_item = QListWidgetItem("Favorites")
+            favorites_item = QListWidgetItem(self.translations.get("Favorites", "Favorites"))
             favorites_item.setData(Qt.UserRole, "favorites") # Special ID for favorites
             self.categories_list.addItem(favorites_item)
 
@@ -466,7 +470,7 @@ class LiveTab(QWidget):
 
     def update_pagination_controls(self):
         if self.total_pages > 1:
-            self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+            self.page_label.setText(f"{self.translations.get('Page', 'Page')} {self.current_page} {self.translations.get('of', 'of')} {self.total_pages}")
             self.prev_page_button.setEnabled(self.current_page > 1)
             self.next_page_button.setEnabled(self.current_page < self.total_pages)
             self.pagination_panel.setVisible(True)
@@ -519,7 +523,7 @@ class LiveTab(QWidget):
             if query:
                 self.empty_state_label.setText(f"No results found for '{query}'.")
             else:
-                self.empty_state_label.setText("No channels to display.")
+                self.empty_state_label.setText(self.translations.get("No channels to display.", "No channels to display."))
             self.channel_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
             self.pagination_panel.setVisible(False)
             return
@@ -583,8 +587,8 @@ class LiveTab(QWidget):
         nav_layout = QHBoxLayout(self.pagination_panel)
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setAlignment(Qt.AlignCenter)
-        self.prev_page_button = QPushButton("Previous")
-        self.next_page_button = QPushButton("Next")
+        self.prev_page_button = QPushButton(self.translations.get("Previous", "Previous"))
+        self.next_page_button = QPushButton(self.translations.get("Next", "Next"))
         self.page_label = QLabel()
         self.prev_page_button.clicked.connect(self.go_to_previous_page)
         self.next_page_button.clicked.connect(self.go_to_next_page)

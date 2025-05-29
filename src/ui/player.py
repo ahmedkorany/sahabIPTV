@@ -5,11 +5,12 @@ import sys
 import vlc
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame
 from PyQt5.QtWidgets import QLabel
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from src.ui.widgets.controls import PlayerControls
 from src.config import DEFAULT_VOLUME
 from PyQt5.QtWidgets import QMainWindow
 from src.utils.youtube_resolver import youtube_resolver
+from src.utils.helpers import get_translations
 
 class MediaPlayer(QWidget):
     """Media player widget using VLC"""
@@ -20,6 +21,9 @@ class MediaPlayer(QWidget):
     
     def __init__(self, parent=None, favorites_manager=None):
         super().__init__(parent)
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if parent else 'en'
+        self.translations = get_translations(language)
         self.setup_ui()
         self.setup_player()
         
@@ -245,7 +249,7 @@ class MediaPlayer(QWidget):
             self._esc_message_label.deleteLater()
             self._esc_message_label = None
         self._esc_message_label = QLabel(self.video_frame)
-        self._esc_message_label.setText("<b>Press ESC to return to normal view</b>")
+        self._esc_message_label.setText(f"<b>{self.translations.get('Press ESC to return to normal view', 'Press ESC to return to normal view')}</b>")
         self._esc_message_label.setStyleSheet(
             "background: rgba(0,0,0,0.7); color: white; padding: 16px 32px; border-radius: 8px; font-size: 20px;"
         )
@@ -282,7 +286,7 @@ class MediaPlayer(QWidget):
         play_icon = "\u25B6"  # Unicode black right-pointing triangle
         pause_icon = "||"  # Unicode double vertical bar
         play_pause_btn = QPushButton(play_icon if not is_playing else pause_icon)
-        play_pause_btn.setToolTip("Pause" if is_playing else "Play")
+        play_pause_btn.setToolTip(self.translations.get("Pause", "Pause") if is_playing else self.translations.get("Play", "Play"))
         play_pause_btn.setFixedSize(48, 48)
         play_pause_btn.setStyleSheet("font-size: 36px; background: #222; color: #fff; border-radius: 24px;")
         def toggle_play_pause():
@@ -296,7 +300,7 @@ class MediaPlayer(QWidget):
         layout.addWidget(play_pause_btn)
         # Stop
         stop_btn = QPushButton("⏹")
-        stop_btn.setToolTip("Stop")
+        stop_btn.setToolTip(self.translations.get("Stop", "Stop"))
         stop_btn.setFixedSize(48, 48)
         stop_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
         def stop_and_exit():
@@ -306,14 +310,14 @@ class MediaPlayer(QWidget):
         layout.addWidget(stop_btn)
         # Fast backward
         back_btn = QPushButton("⏪")
-        back_btn.setToolTip("Fast Backward")
+        back_btn.setToolTip(self.translations.get("Fast Backward", "Fast Backward"))
         back_btn.setFixedSize(48, 48)
         back_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
         back_btn.clicked.connect(lambda: self.seek(max(0, self.player.get_time()//1000 - 10)))
         layout.addWidget(back_btn)
         # Fast forward
         forward_btn = QPushButton("⏩")
-        forward_btn.setToolTip("Fast Forward")
+        forward_btn.setToolTip(self.translations.get("Fast Forward", "Fast Forward"))
         forward_btn.setFixedSize(48, 48)
         forward_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
         forward_btn.clicked.connect(lambda: self.seek(self.player.get_time()//1000 + 10))
@@ -411,7 +415,10 @@ class PlayerWindow(QMainWindow):
     
     def __init__(self, parent=None, favorites_manager=None):
         super().__init__(parent)
-        self.setWindowTitle("Player")
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if parent else 'en'
+        self.translations = get_translations(language)
+        self.setWindowTitle(self.translations.get("Player", "Player"))
         self.setMinimumSize(800, 450)
         self.favorites_manager = favorites_manager
         self.player = MediaPlayer(self, favorites_manager)

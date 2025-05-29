@@ -1,5 +1,6 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem, QLineEdit, QMessageBox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem, QMessageBox
 from PyQt5.QtCore import Qt
+from src.utils.helpers import get_translations
 
 class AccountManagementScreen(QWidget):
     def __init__(self, main_window, accounts, current_account):
@@ -7,16 +8,19 @@ class AccountManagementScreen(QWidget):
         self.main_window = main_window
         self.accounts = accounts
         self.current_account = current_account
+        # Get translations from main_window or default to English
+        language = getattr(main_window, 'language', 'en') if hasattr(main_window, 'language') else 'en'
+        self.translations = get_translations(language)
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        title = QLabel("Account Management")
+        title = QLabel(self.translations.get("Account Management", "Account Management"))
         title.setStyleSheet("font-size: 22px; font-weight: bold;")
         layout.addWidget(title, alignment=Qt.AlignCenter)
 
         # Back button
-        back_btn = QPushButton("← Back")
+        back_btn = QPushButton(self.translations.get("← Back", "← Back"))
         back_btn.setFixedWidth(80)
         back_btn.clicked.connect(self.go_back)
         layout.addWidget(back_btn, alignment=Qt.AlignLeft)
@@ -27,10 +31,10 @@ class AccountManagementScreen(QWidget):
         layout.addWidget(self.list_widget)
 
         btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("Add Account")
-        self.edit_btn = QPushButton("Edit Account")
-        self.delete_btn = QPushButton("Delete Account")
-        self.switch_btn = QPushButton("Switch Account")
+        self.add_btn = QPushButton(self.translations.get("Add Account", "Add Account"))
+        self.edit_btn = QPushButton(self.translations.get("Edit Account", "Edit Account"))
+        self.delete_btn = QPushButton(self.translations.get("Delete Account", "Delete Account"))
+        self.switch_btn = QPushButton(self.translations.get("Switch Account", "Switch Account"))
         btn_layout.addWidget(self.add_btn)
         btn_layout.addWidget(self.edit_btn)
         btn_layout.addWidget(self.delete_btn)

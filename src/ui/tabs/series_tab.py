@@ -2,23 +2,16 @@
 Series tab for the application
 """
 import time
-import os
-import threading
 from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
-                            QFileDialog, QLabel, QProgressBar, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QStackedLayout, QComboBox)
-from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, Q_ARG
-from PyQt5.QtGui import QPixmap, QIcon, QColor, QPainter, QFont, QFontMetrics
+                            QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QComboBox)
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QPixmap, QFont, QFontMetrics
 from PyQt5.QtCore import QRect
-from PyQt5.QtSvg import QSvgWidget
-from src.ui.player import MediaPlayer
-# from src.utils.download import DownloadThread, BatchDownloadThread # Removed
-from src.ui.widgets.dialogs import ProgressDialog
-from src.utils.image_cache import ImageCache  # Correct import for ImageCache
 from src.utils.helpers import load_image_async
 from src.ui.widgets.series_details_widget import SeriesDetailsWidget
-from src.api.tmdb import TMDBClient # Added TMDBClient import
+from src.api.tmdb import TMDBClient
 
 def get_api_client_from_label(label, main_window):
     if main_window and hasattr(main_window, 'api_client'):
@@ -125,6 +118,8 @@ class DownloadItem:
             minutes = seconds // 60
             return f"{hours}h {minutes}m"
 
+from src.utils.helpers import load_image_async, get_translations
+
 class SeriesTab(QWidget):
     add_to_favorites = pyqtSignal(dict)
     # add_to_downloads = pyqtSignal(object) # Removed
@@ -138,6 +133,8 @@ class SeriesTab(QWidget):
         self.all_series = []  # Store all series across categories
         self.current_series = None
         self._opened_from_search = False
+        # Get translations from main window
+        self.translations = getattr(main_window, 'translations', {}) if main_window else {}
         self.setup_ui()
         self.api_client = api_client
         self.main_window = main_window
@@ -150,7 +147,7 @@ class SeriesTab(QWidget):
         # Search bar
         search_layout = QHBoxLayout()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search series...")
+        self.search_input.setPlaceholderText(self.translations.get("Search series...", "Search series..."))
         self.search_input.textChanged.connect(self.on_search_text_changed)
         search_layout.addWidget(self.search_input)
         layout.addLayout(search_layout)
@@ -164,7 +161,7 @@ class SeriesTab(QWidget):
         self.categories_list.itemClicked.connect(self.category_clicked)
         self.categories_list.setStyleSheet("QListWidget::item:selected { background: #444; color: #fff; font-weight: bold; }")
         left_panel = QVBoxLayout()
-        left_panel.addWidget(QLabel("Categories"))
+        left_panel.addWidget(QLabel(self.translations.get("Categories", "Categories")))
         left_panel.addWidget(self.categories_list)
         left_widget = QWidget()
         left_widget.setLayout(left_panel)
@@ -180,7 +177,7 @@ class SeriesTab(QWidget):
         self.series_grid_scroll.setWidgetResizable(True)
         self.series_grid_scroll.setWidget(self.series_grid_widget)
         grid_panel = QVBoxLayout()
-        grid_panel.addWidget(QLabel("Series"))
+        grid_panel.addWidget(QLabel(self.translations.get("Series", "Series")))
         grid_panel.addWidget(self.series_grid_scroll)
         self.setup_pagination_controls()
         grid_panel.addWidget(self.pagination_panel)
@@ -210,12 +207,12 @@ class SeriesTab(QWidget):
         # Sorting panel (initially hidden)
         self.order_panel = QWidget()
         order_layout = QHBoxLayout(self.order_panel)
-        order_label = QLabel("Order by:")
+        order_label = QLabel(self.translations.get("Order by", "Order by:"))
         self.order_combo = QComboBox()
-        self.order_combo.addItems(["Default", "Date", "Rating", "Name"])
+        self.order_combo.addItems([self.translations.get("Default", "Default"), self.translations.get("Date", "Date"), self.translations.get("Rating", "Rating"), self.translations.get("Name", "Name")])
         self.order_combo.setCurrentIndex(0)
         self.order_combo.currentIndexChanged.connect(self.on_order_changed)
-        self.sort_toggle = QPushButton("Desc")
+        self.sort_toggle = QPushButton(self.translations.get("Desc", "Desc"))
         self.sort_toggle.setCheckable(True)
         self.sort_toggle.setChecked(True)
         self.sort_toggle.clicked.connect(self.on_sort_toggle)
@@ -567,7 +564,7 @@ class SeriesTab(QWidget):
         # Reset sorting controls to default
         self.order_combo.setCurrentIndex(0)  # Default
         self.sort_toggle.setChecked(True)    # Desc
-        self.sort_toggle.setText("Desc")
+        self.sort_toggle.setText(self.translations.get("Desc", "Desc"))
         if category_id == "favorites":
             self.load_favorite_series()
         else:
@@ -698,7 +695,7 @@ class SeriesTab(QWidget):
             if widget:
                 widget.setParent(None)
         if not series_list:
-            empty_label = QLabel("This category doesn't contain any Series")
+            empty_label = QLabel(self.translations.get("This category doesn't contain any Series", "This category doesn't contain any Series"))
             empty_label.setAlignment(Qt.AlignCenter)
             empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
             self.series_grid_layout.addWidget(empty_label, 0, 0, 1, 4)
@@ -1000,8 +997,8 @@ class SeriesTab(QWidget):
         nav_layout = QHBoxLayout(self.pagination_panel)
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setAlignment(Qt.AlignCenter)
-        self.prev_page_button = QPushButton("Previous")
-        self.next_page_button = QPushButton("Next")
+        self.prev_page_button = QPushButton(self.translations.get("Previous", "Previous"))
+        self.next_page_button = QPushButton(self.translations.get("Next", "Next"))
         self.page_label = QLabel()
         self.prev_page_button.clicked.connect(self.go_to_previous_page)
         self.next_page_button.clicked.connect(self.go_to_next_page)
@@ -1012,7 +1009,7 @@ class SeriesTab(QWidget):
 
     def update_pagination_controls(self):
         if self.total_pages > 1:
-            self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+            self.page_label.setText(f"{self.translations.get('Page', 'Page')} {self.current_page} {self.translations.get('of', 'of')} {self.total_pages}")
             self.prev_page_button.setEnabled(self.current_page > 1)
             self.next_page_button.setEnabled(self.current_page < self.total_pages)
             self.pagination_panel.setVisible(True)
@@ -1075,7 +1072,7 @@ class SeriesTab(QWidget):
                 query = self.search_input.text().strip()
                 self.empty_state_label.setText(f"No results found for '{query}'.")
             else:
-                self.empty_state_label.setText("No items to display.")
+                self.empty_state_label.setText(self.translations.get("No items to display.", "No items to display."))
             self.series_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
             self.update_pagination_controls()
             return
@@ -1089,9 +1086,9 @@ class SeriesTab(QWidget):
 
     def on_sort_toggle(self):
         if self.sort_toggle.isChecked():
-            self.sort_toggle.setText("Desc")
+            self.sort_toggle.setText(self.translations.get("Desc", "Desc"))
         else:
-            self.sort_toggle.setText("Asc")
+            self.sort_toggle.setText(self.translations.get("Asc", "Asc"))
         self.apply_sort_and_refresh()
 
     def apply_sort_and_refresh(self):

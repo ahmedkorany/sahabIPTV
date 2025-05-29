@@ -4,18 +4,20 @@ Custom dialog widgets for the application
 import os
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                             QLineEdit, QPushButton, QProgressBar, QMessageBox,
-                            QCheckBox, QFileDialog, QComboBox, QTextEdit, QListWidget, QListWidgetItem, QTabWidget)
+                            QCheckBox, QComboBox, QTextEdit, QListWidget, QListWidgetItem)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
-from src.ui.player import MediaPlayer, PlayerWindow
-from src.utils.image_cache import ImageCache
+from src.utils.helpers import apply_dark_theme, get_translations
 
 class LoginDialog(QDialog):
     """Dialog for entering IPTV server credentials"""
     
     def __init__(self, parent=None, account_name="", server="", username="", password="", remember=True, is_add_mode=True):
         super().__init__(parent)
-        self.setWindowTitle("Add/Edit Account") # Changed title to be more generic
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if hasattr(parent, 'language') else 'en'
+        self.translations = get_translations(language)
+        self.setWindowTitle(self.translations.get("Add/Edit Account", "Add/Edit Account")) # Changed title to be more generic
         self.setMinimumWidth(400)
         self.is_add_mode = is_add_mode # Store mode
         
@@ -27,44 +29,44 @@ class LoginDialog(QDialog):
 
         # Account Name
         account_name_layout = QHBoxLayout()
-        account_name_label = QLabel("Account Name:")
+        account_name_label = QLabel(self.translations.get("Account Name", "Account Name:"))
         self.account_name_input = QLineEdit(account_name)
-        self.account_name_input.setPlaceholderText("My IPTV Account")
+        self.account_name_input.setPlaceholderText(self.translations.get("e.g. My IPTV Account", "e.g. My IPTV Account"))
         account_name_layout.addWidget(account_name_label)
         account_name_layout.addWidget(self.account_name_input)
         
         # Server URL
         server_layout = QHBoxLayout()
-        server_label = QLabel("Server URL:")
+        server_label = QLabel(self.translations.get("Server URL", "Server URL:"))
         self.server_input = QLineEdit(server)
-        self.server_input.setPlaceholderText("http://example.com")
+        self.server_input.setPlaceholderText(self.translations.get("http://example.com", "http://example.com"))
         server_layout.addWidget(server_label)
         server_layout.addWidget(self.server_input)
         
         # Username
         username_layout = QHBoxLayout()
-        username_label = QLabel("Username:")
+        username_label = QLabel(self.translations.get("Username", "Username:"))
         self.username_input = QLineEdit(username)
         username_layout.addWidget(username_label)
         username_layout.addWidget(self.username_input)
         
         # Password
         password_layout = QHBoxLayout()
-        password_label = QLabel("Password:")
+        password_label = QLabel(self.translations.get("Password", "Password:"))
         self.password_input = QLineEdit(password)
         self.password_input.setEchoMode(QLineEdit.Password)
         password_layout.addWidget(password_label)
         password_layout.addWidget(self.password_input)
         
         # Remember checkbox
-        self.remember_checkbox = QCheckBox("Remember credentials")
+        self.remember_checkbox = QCheckBox(self.translations.get("Remember credentials", "Remember credentials"))
         self.remember_checkbox.setChecked(remember)
         
         # Buttons
         buttons_layout = QHBoxLayout()
-        self.save_button = QPushButton("Save") # Changed from "Connect"
+        self.save_button = QPushButton(self.translations.get("Save", "Save")) # Changed from "Connect"
         self.save_button.clicked.connect(self.accept)
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton(self.translations.get("Cancel", "Cancel"))
         self.cancel_button.clicked.connect(self.reject)
         buttons_layout.addWidget(self.save_button) # Changed from self.connect_button
         buttons_layout.addWidget(self.cancel_button)
@@ -109,7 +111,7 @@ class ProgressDialog(QDialog):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton(self.translations.get("Cancel", "Cancel"))
         self.cancel_button.clicked.connect(self.cancel)
         
         layout.addWidget(self.text_label)
@@ -317,11 +319,11 @@ class MovieDetailsDialog(QDialog):
             if is_favorite:
                 favorite_btn.setText("★")
                 favorite_btn.setStyleSheet("QPushButton { color: gold; background: transparent; }")
-                favorite_btn.setToolTip("Remove from favorites")
+                favorite_btn.setToolTip(self.translations.get("Remove from favorites", "Remove from favorites"))
             else:
                 favorite_btn.setText("☆")
                 favorite_btn.setStyleSheet("QPushButton { color: white; background: transparent; }")
-                favorite_btn.setToolTip("Add to favorites")
+                favorite_btn.setToolTip(self.translations.get("Add to favorites", "Add to favorites"))
         update_favorite_btn()
         def on_favorite_clicked():
             nonlocal is_favorite
@@ -385,9 +387,9 @@ class MovieDetailsDialog(QDialog):
             right_layout.addWidget(QLabel(f"Cast: {cast}"))
         # Action buttons
         btn_layout = QHBoxLayout()
-        play_btn = QPushButton("PLAY")
+        play_btn = QPushButton(self.translations.get("PLAY", "PLAY"))
         play_btn.clicked.connect(self.play_movie)
-        trailer_btn = QPushButton("WATCH TRAILER")
+        trailer_btn = QPushButton(self.translations.get("WATCH TRAILER", "WATCH TRAILER"))
         trailer_btn.clicked.connect(self.watch_trailer)
         btn_layout.addWidget(play_btn)
         btn_layout.addWidget(trailer_btn)

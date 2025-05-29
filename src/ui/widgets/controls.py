@@ -1,10 +1,10 @@
 """Media player controls widget"""
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
-                            QSlider, QLabel, QComboBox, QStyle, QSizePolicy)
+                            QSlider, QLabel, QComboBox, QStyle)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QIcon, QColor, QPainter, QFont
-from src.config import SEEK_STEP, VOLUME_STEP, DEFAULT_VOLUME, ICON_SIZE
-from src.utils.helpers import format_duration
+from PyQt5.QtGui import QIcon, QFont
+from src.config import SEEK_STEP, DEFAULT_VOLUME, ICON_SIZE
+from src.utils.helpers import format_duration, get_translations
 
 class PlayerControls(QWidget):
     """Media player controls widget"""
@@ -25,6 +25,9 @@ class PlayerControls(QWidget):
         self.is_favorite = False
         self.duration = 0
         self.current_time = 0
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if hasattr(parent, 'language') else 'en'
+        self.translations = get_translations(language)
         self.setup_ui()
         
         # Timer for updating the seek slider
@@ -101,7 +104,7 @@ class PlayerControls(QWidget):
         self.favorite_button.setText("☆")
         self.favorite_button.setFont(QFont('Arial', 16))
         self.favorite_button.setStyleSheet("QPushButton { color: white; background: transparent; }")
-        self.favorite_button.setToolTip("Add to favorites")
+        self.favorite_button.setToolTip(self.translations.get("Add to favorites", "Add to favorites"))
         self.favorite_button.clicked.connect(self.favorite_clicked_handler)
         
         controls_layout.addWidget(self.play_pause_button)
@@ -109,7 +112,7 @@ class PlayerControls(QWidget):
         controls_layout.addWidget(self.rewind_button)
         controls_layout.addWidget(self.forward_button)
         controls_layout.addStretch()
-        controls_layout.addWidget(QLabel("Speed:"))
+        controls_layout.addWidget(QLabel(self.translations.get("Speed", "Speed:")))
         controls_layout.addWidget(self.speed_combo)
         controls_layout.addStretch()
         controls_layout.addWidget(self.mute_button)
@@ -200,13 +203,13 @@ class PlayerControls(QWidget):
             self.favorite_button.setStyleSheet("QPushButton { color: gold; background: transparent; }")
             self.favorite_button.setText("★")
             self.favorite_button.setFont(QFont('Arial', 16))
-            self.favorite_button.setToolTip("Remove from favorites")
+            self.favorite_button.setToolTip(self.translations.get("Remove from favorites", "Remove from favorites"))
         else:
             # Use an outline star with white color
             self.favorite_button.setStyleSheet("QPushButton { color: white; background: transparent; }")
             self.favorite_button.setText("☆")
             self.favorite_button.setFont(QFont('Arial', 16))
-            self.favorite_button.setToolTip("Add to favorites")
+            self.favorite_button.setToolTip(self.translations.get("Add to favorites", "Add to favorites"))
     
     def set_favorite(self, is_favorite):
         """Set favorite state"""

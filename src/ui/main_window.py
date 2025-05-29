@@ -1,22 +1,20 @@
 """
 Main application window
 """
-import os
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QMessageBox, 
-                            QAction, QMenu, QMenuBar, QToolBar, QStatusBar, QLabel,
-                            QProgressDialog) # Added QProgressDialog
-from PyQt5.QtCore import Qt, QSettings, QSize, pyqtSignal, QObject, QThread # Added QThread
-from PyQt5.QtGui import QIcon
+                            QAction, QMenu, QStatusBar, QLabel,
+                            QProgressDialog)
+from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QObject, QThread
 from PyQt5.QtSvg import QSvgWidget
 from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
-from src.ui.tabs.search_tab import SearchTab # Added SearchTab
+from src.ui.tabs.search_tab import SearchTab
 
-from src.utils.helpers import load_json_file, save_json_file, get_translations
+from src.utils.helpers import get_translations
 from src.utils.favorites_manager import FavoritesManager
-from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
+from src.config import DEFAULT_LANGUAGE, WINDOW_SIZE
 from src.ui.widgets.home_screen import HomeScreenWidget
 from src.ui.player import PlayerWindow
 
@@ -100,7 +98,7 @@ class MainWindow(QMainWindow):
 
     def setup_ui(self):
         """Set up the UI components"""
-        self.setWindowTitle("Sahab Xtream IPTV")
+        self.setWindowTitle(self.translations.get("Sahab Xtream IPTV", "Sahab Xtream IPTV"))
         self.resize(*WINDOW_SIZE)
 
         # --- HOME SCREEN ---
@@ -154,7 +152,7 @@ class MainWindow(QMainWindow):
         # Create status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Ready")
+        self.statusBar.showMessage(self.translations.get("Ready", "Ready"))
         self.account_label = QLabel()
         self.expiry_label = QLabel()
         self.statusBar.addPermanentWidget(self.account_label)
@@ -285,7 +283,7 @@ class MainWindow(QMainWindow):
             print("[CACHE] Full cache invalidated due to forced reload.")
 
         self.progress_dialog = QProgressDialog("Populating cache...", "Cancel", 0, 100, self)
-        self.progress_dialog.setWindowTitle("Caching Data")
+        self.progress_dialog.setWindowTitle(self.translations.get("Caching Data", "Caching Data"))
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.setAutoClose(False) # We will close it manually
         self.progress_dialog.setAutoReset(False) # We will reset it manually
@@ -350,7 +348,7 @@ class MainWindow(QMainWindow):
         from src.ui.widgets.account_management import AccountManagementScreen
         from PyQt5.QtWidgets import QDialog, QVBoxLayout
         dialog = QDialog(self)
-        dialog.setWindowTitle("Account Management")
+        dialog.setWindowTitle(self.translations.get("Account Management", "Account Management"))
         dialog.setMinimumWidth(500)
         layout = QVBoxLayout(dialog)
         screen = AccountManagementScreen(self, self.accounts, self.current_account)
@@ -381,7 +379,7 @@ class MainWindow(QMainWindow):
         dialog = LoginDialog(self, account_name, server, username, password, remember, is_add_mode)
 
         if is_add_mode:
-            dialog.setWindowTitle("Add New Account")
+            dialog.setWindowTitle(self.translations.get("Add New Account", "Add New Account"))
             # Button text is already handled by LoginDialog's new __init__ and setup_ui
         else:
             dialog.setWindowTitle(f"Edit Account: {account_name}")
@@ -506,7 +504,7 @@ class MainWindow(QMainWindow):
                     pass
 
     def connect_to_server(self, server, username, password):
-        self.statusBar.showMessage("Connecting to server...")
+        self.statusBar.showMessage(self.translations.get("Connecting to server...", "Connecting to server..."))
         # Recreate all tabs and UI to avoid using deleted widgets
         # self.setup_ui()  # This will recreate tabs, home_screen, etc. - Let's see if this is still needed or if selective updates are better
         # self.load_favorites()  # Ensure favorites are loaded for the new tab instance
@@ -514,7 +512,7 @@ class MainWindow(QMainWindow):
         success, data = self.api_client.authenticate()
         expiry_str = ""
         if success:
-            self.statusBar.showMessage("Connected successfully. Populating cache...")
+            self.statusBar.showMessage(self.translations.get("Connected successfully. Populating cache...", "Connected successfully. Populating cache..."))
             self.start_full_cache_population() # This will also reload tab categories upon completion
             
             # Get expiry date from user_info if available
@@ -541,7 +539,7 @@ class MainWindow(QMainWindow):
             self.update_account_label()
             self._load_account_data()
         else:
-            self.statusBar.showMessage("Connection failed")
+            self.statusBar.showMessage(self.translations.get("Connection failed", "Connection failed"))
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Connection Error", f"Failed to connect: {data}")
             self.show_login_dialog(account_switch=True)
@@ -690,7 +688,7 @@ class MainWindow(QMainWindow):
                 self.setWindowTitle(f"Sahab Xtream IPTV - {self.current_account}")
             else:
                 self.account_label.setText("")
-                self.setWindowTitle("Sahab Xtream IPTV")
+                self.setWindowTitle(self.translations.get("Sahab Xtream IPTV", "Sahab Xtream IPTV"))
 
     def _account_data_key(self, suffix):
         # Use a unique key for each account's data

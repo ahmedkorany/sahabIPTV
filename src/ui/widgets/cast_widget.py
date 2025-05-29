@@ -1,7 +1,7 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QSizePolicy, QHBoxLayout, QScrollArea
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QSizePolicy
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
-from src.utils.helpers import load_image_async
+from src.utils.helpers import load_image_async, get_translations
 import requests
 
 class CastDataWorker(QObject):
@@ -35,6 +35,9 @@ class CastWidget(QWidget):
     def __init__(self, main_window=None, parent=None):
         super().__init__(parent)
         self.main_window = main_window
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if hasattr(parent, 'language') else 'en'
+        self.translations = get_translations(language)
         
         # Create main layout
         main_layout = QVBoxLayout(self)
@@ -69,7 +72,7 @@ class CastWidget(QWidget):
     def _show_loading_indicator(self):
         """Show a loading indicator while cast data is being fetched."""
         self.clear()
-        self.loading_label = QLabel("Loading cast...")
+        self.loading_label = QLabel(self.translations.get("Loading cast...", "Loading cast..."))
         self.loading_label.setAlignment(Qt.AlignCenter)
         self.loading_label.setStyleSheet("color: gray; font-size: 14px;")
         self.cast_layout.addWidget(self.loading_label)
@@ -137,7 +140,7 @@ class CastWidget(QWidget):
         self.clear()
         
         if not cast_data:
-            no_cast_label = QLabel("No cast information available")
+            no_cast_label = QLabel(self.translations.get("No cast information available", "No cast information available"))
             no_cast_label.setAlignment(Qt.AlignCenter)
             no_cast_label.setStyleSheet("color: gray; font-size: 12px;")
             self.cast_layout.addWidget(no_cast_label)

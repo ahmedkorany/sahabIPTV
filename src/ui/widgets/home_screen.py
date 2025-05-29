@@ -1,6 +1,7 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSizePolicy
 from PyQt5.QtGui import QIcon, QFont, QLinearGradient, QBrush, QPalette, QColor
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
+from PyQt5.QtCore import QSize, pyqtSignal
+from src.utils.helpers import get_translations
 import os
 
 class HomeScreenWidget(QWidget):
@@ -11,6 +12,8 @@ class HomeScreenWidget(QWidget):
         self.on_tile_clicked = on_tile_clicked
         self.user_info = user_info or {}
         self.expiry_date = expiry_date
+        # Get translations from parent or default to English
+        self.translations = get_translations(parent.language if parent and hasattr(parent, 'language') else 'en')
         self.setup_ui()
 
     def setup_ui(self):
@@ -33,7 +36,7 @@ class HomeScreenWidget(QWidget):
         reload_btn = QPushButton()
         reload_btn.setIcon(QIcon(os.path.join('assets', 'reload.svg')))
         reload_btn.setIconSize(QSize(48, 48))
-        reload_btn.setToolTip('Reload Data')
+        reload_btn.setToolTip(self.translations.get('Reload Data', 'Reload Data'))
         reload_btn.setFlat(True)
         reload_btn.clicked.connect(self.reload_requested.emit)
         nav_bar.addWidget(reload_btn)
@@ -41,20 +44,20 @@ class HomeScreenWidget(QWidget):
         search_btn.setObjectName("search_btn") # Added object name
         search_btn.setIcon(QIcon(os.path.join('assets', 'search.png')))
         search_btn.setIconSize(QSize(48, 48))
-        search_btn.setToolTip('Search')
+        search_btn.setToolTip(self.translations.get('Search', 'Search'))
         search_btn.setFlat(True)
         search_btn.clicked.connect(lambda: self.handle_tile_click('search')) # Connect to handle_tile_click
         nav_bar.addWidget(search_btn)
         settings_btn = QPushButton()
         settings_btn.setIcon(QIcon(os.path.join('assets', 'settings.png')))
         settings_btn.setIconSize(QSize(48, 48))
-        settings_btn.setToolTip('Settings')
+        settings_btn.setToolTip(self.translations.get('Settings', 'Settings'))
         settings_btn.setFlat(True)
         nav_bar.addWidget(settings_btn)
         account_btn = QPushButton()
         account_btn.setIcon(QIcon(os.path.join('assets', 'account.png')))
         account_btn.setIconSize(QSize(48, 48))
-        account_btn.setToolTip('Switch Account')
+        account_btn.setToolTip(self.translations.get('Switch Account', 'Switch Account'))
         account_btn.setFlat(True)
         account_btn.clicked.connect(self.handle_switch_account)
         nav_bar.addWidget(account_btn)
@@ -64,9 +67,9 @@ class HomeScreenWidget(QWidget):
         tile_layout = QHBoxLayout()
         tile_layout.setSpacing(40)
         for name, icon, key in [
-            ("Live", 'live.png', 'live'),
-            ("Movies", 'movies.png', 'movies'),
-            ("Series", 'series.png', 'series')
+            (self.translations.get("Live", "Live"), 'live.png', 'live'),
+            (self.translations.get("Movies", "Movies"), 'movies.png', 'movies'),
+            (self.translations.get("Series", "Series"), 'series.png', 'series')
         ]:
             btn = QPushButton()
             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -84,17 +87,17 @@ class HomeScreenWidget(QWidget):
 
         # Bottom info bar
         info_bar = QHBoxLayout()
-        self.user_label = QLabel(f"User: {self.user_info.get('username', 'N/A')}")
+        self.user_label = QLabel(f"{self.translations.get('User', 'User:')}: {self.user_info.get('username', self.translations.get('N/A', 'N/A'))}")
         self.user_label.setStyleSheet("color: #aaa; font-size: 16px;")
         info_bar.addWidget(self.user_label)
         info_bar.addStretch()
-        self.expiry_label = QLabel(f"Subscription expires: {self.expiry_date or 'N/A'}")
+        self.expiry_label = QLabel(f"{self.translations.get('Subscription expires', 'Subscription expires:')}: {self.expiry_date or self.translations.get('N/A', 'N/A')}")
         self.expiry_label.setStyleSheet("color: #aaa; font-size: 16px;")
         info_bar.addWidget(self.expiry_label)
         main_layout.addLayout(info_bar)
     def update_user_info(self, user_name):
         self.user_info.update({'username': user_name})
-        self.user_label.setText(f"User: {self.user_info.get('username', 'N/A')}")
+        self.user_label.setText(f"{self.translations.get('User', 'User')}: {self.user_info.get('username', self.translations.get('N/A', 'N/A'))}")
     def handle_tile_click(self, key):
         if self.on_tile_clicked:
             self.on_tile_clicked(key)
@@ -103,7 +106,7 @@ class HomeScreenWidget(QWidget):
             print("Warning: expiry_label is not available or has been deleted.")
             return
         self.expiry_date = expiry_date
-        self.expiry_label.setText(f"Subscription expires: {self.expiry_date or 'N/A'}")
+        self.expiry_label.setText(f"{self.translations.get('Subscription expires', 'Subscription expires')}: {self.expiry_date or self.translations.get('N/A', 'N/A')}")
 
     def handle_switch_account(self):
         # Show the account management screen via parent MainWindow

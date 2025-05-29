@@ -2,7 +2,6 @@
 Movies tab for the application
 """
 from operator import contains
-import time
 from functools import partial
 from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (
@@ -11,12 +10,10 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QFont, QFontMetrics
 from PyQt5.QtCore import QRect
-from src.ui.player import MediaPlayer
 from src.ui.widgets.movie_details_widget import MovieDetailsWidget
-from src.utils.helpers import load_image_async
+from src.utils.helpers import load_image_async, get_translations
 from src.api.tmdb import TMDBClient
 from src.ui.widgets.dialogs import MovieDetailsDialog
-import re
 
 class MoviesTab(QWidget):
     """Movies tab widget"""
@@ -46,6 +43,9 @@ class MoviesTab(QWidget):
         
         # Initialize TMDB client once for all details widgets
         self.tmdb_client = TMDBClient()  # Loads keys from .env automatically
+        
+        # Get translations from main window
+        self.translations = get_translations(parent.language if parent and hasattr(parent, 'language') else 'en')
 
         self.setup_ui() # self.main_window is already set from parent
 
@@ -69,7 +69,7 @@ class MoviesTab(QWidget):
         self.categories_list.itemClicked.connect(self.category_clicked)
         self.categories_list.setStyleSheet("QListWidget::item:selected { background: #444; color: #fff; font-weight: bold; }")
         left_panel = QVBoxLayout()
-        left_panel.addWidget(QLabel("Categories"))
+        left_panel.addWidget(QLabel(self.translations.get("Categories", "Categories")))
         left_panel.addWidget(self.categories_list)
         left_widget = QWidget()
         left_widget.setLayout(left_panel)
@@ -85,7 +85,7 @@ class MoviesTab(QWidget):
         self.movie_grid_scroll.setWidgetResizable(True)
         self.movie_grid_scroll.setWidget(self.movie_grid_widget)
         grid_panel = QVBoxLayout()
-        grid_panel.addWidget(QLabel("Movies"))
+        grid_panel.addWidget(QLabel(self.translations.get("Movies", "Movies")))
         grid_panel.addWidget(self.movie_grid_scroll)
         grid_widget = QWidget()
         grid_widget.setLayout(grid_panel)
@@ -93,12 +93,12 @@ class MoviesTab(QWidget):
         # Sorting panel (initially hidden)
         self.order_panel = QWidget()
         order_layout = QHBoxLayout(self.order_panel)
-        order_label = QLabel("Order by:")
+        order_label = QLabel(self.translations.get("Order by", "Order by:"))
         self.order_combo = QComboBox()
-        self.order_combo.addItems(["Default", "Date", "Rating", "Name"])
+        self.order_combo.addItems([self.translations.get("Default", "Default"), self.translations.get("Date", "Date"), self.translations.get("Rating", "Rating"), self.translations.get("Name", "Name")])
         self.order_combo.setCurrentIndex(0)
         self.order_combo.currentIndexChanged.connect(self._handle_sort_criteria_changed)
-        self.sort_toggle = QPushButton("Desc")
+        self.sort_toggle = QPushButton(self.translations.get("Desc", "Desc"))
         self.sort_toggle.setCheckable(True)
         self.sort_toggle.setChecked(True)
         self.sort_toggle.clicked.connect(self._handle_sort_criteria_changed)
@@ -136,9 +136,9 @@ class MoviesTab(QWidget):
 
     def on_sort_toggle(self):
         if self.sort_toggle.isChecked():
-            self.sort_toggle.setText("Desc")
+            self.sort_toggle.setText(self.translations.get("Desc", "Desc"))
         else:
-            self.sort_toggle.setText("Asc")
+            self.sort_toggle.setText(self.translations.get("Asc", "Asc"))
         self.apply_sort_and_refresh()
 
     def _handle_sort_criteria_changed(self):
@@ -156,7 +156,7 @@ class MoviesTab(QWidget):
         sort_field = self.order_combo.currentText()
         reverse = self.sort_toggle.isChecked()
 
-        if sort_field == "Default":
+        if sort_field == self.translations.get("Default", "Default"):
             # For "Default" sort, just reset filtered_movies to movies
             self.filtered_movies = list(self.movies) if hasattr(self, 'movies') and self.movies else []
             self.current_page = 1
@@ -170,11 +170,11 @@ class MoviesTab(QWidget):
             return
 
         key_func = None
-        if sort_field == "Date":
+        if sort_field == self.translations.get("Date", "Date"):
             key_func = lambda x: x.get('_sort_date', 0)
-        elif sort_field == "Name":
+        elif sort_field == self.translations.get("Name", "Name"):
             key_func = lambda x: x.get('_sort_name', '')
-        elif sort_field == "Rating":
+        elif sort_field == self.translations.get("Rating", "Rating"):
             key_func = lambda x: x.get('_sort_rating', 0)
         
         if key_func:
@@ -191,8 +191,8 @@ class MoviesTab(QWidget):
         nav_layout = QHBoxLayout(self.pagination_panel)
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setAlignment(Qt.AlignCenter)
-        self.prev_page_button = QPushButton("Previous")
-        self.next_page_button = QPushButton("Next")
+        self.prev_page_button = QPushButton(self.translations.get("Previous", "Previous"))
+        self.next_page_button = QPushButton(self.translations.get("Next", "Next"))
         self.page_label = QLabel()
         self.prev_page_button.clicked.connect(self.go_to_previous_page)
         self.next_page_button.clicked.connect(self.go_to_next_page)
@@ -209,12 +209,12 @@ class MoviesTab(QWidget):
         if success:
             self.categories = data
             # Add "ALL" category at the top
-            all_item = QListWidgetItem("ALL")
+            all_item = QListWidgetItem(self.translations.get("All", "ALL"))
             all_item.setData(Qt.UserRole, None) # None for ALL category_id
             self.categories_list.addItem(all_item)
 
             # Add "Favorites" category
-            favorites_item = QListWidgetItem("Favorites")
+            favorites_item = QListWidgetItem(self.translations.get("Favorites", "Favorites"))
             favorites_item.setData(Qt.UserRole, "favorites") # Special ID for favorites
             self.categories_list.addItem(favorites_item)
 
@@ -227,14 +227,14 @@ class MoviesTab(QWidget):
                 item.setData(Qt.UserRole, category['category_id'])
                 self.categories_list.addItem(item)
         else:
-            QMessageBox.warning(self, "Error", f"Failed to load categories: {data}")
+            QMessageBox.warning(self, self.translations.get("Error", "Error"), f"{self.translations.get('Failed to load categories', 'Failed to load categories')}: {data}")
 
     def category_clicked(self, item):
         category_id = item.data(Qt.UserRole)
         # Reset sorting controls to default
         self.order_combo.setCurrentIndex(0)  # Default
         self.sort_toggle.setChecked(True)    # Desc
-        self.sort_toggle.setText("Desc")
+        self.sort_toggle.setText(self.translations.get("Desc", "Desc"))
         if category_id == "favorites":
             self.load_favorite_movies()
         else:
@@ -269,7 +269,7 @@ class MoviesTab(QWidget):
             if success:
                 self.movies = data
             else:
-                QMessageBox.warning(self, "Error", f"Failed to load movies: {data}")
+                QMessageBox.warning(self, self.translations.get("Error", "Error"), f"{self.translations.get('Failed to load movies', 'Failed to load movies')}: {data}")
         self.current_page = 1
         self.build_movie_search_index() # Still needed for sort fields
         self.filtered_movies = list(self.movies) # Reset filtered list to all current movies
@@ -278,7 +278,7 @@ class MoviesTab(QWidget):
     def load_favorite_movies(self):
         """Load and display favorite movies using the favorites_manager."""
         if not self.favorites_manager:
-            QMessageBox.warning(self, "Error", "Favorites manager not available.")
+            QMessageBox.warning(self, self.translations.get("Error", "Error"), self.translations.get("Favorites manager not available.", "Favorites manager not available."))
             self.movies = []
             self.current_page = 1
             self.display_current_page()
@@ -323,7 +323,7 @@ class MoviesTab(QWidget):
         """Display movies as a grid of tiles"""
         # Grid is cleared in display_current_page before this method is called
         if not movies:
-            message = "This category currently has no movies." # Default message
+            message = self.translations.get("This category currently has no movies.", "This category currently has no movies.") # Default message
             empty_label = QLabel(message)
             empty_label.setAlignment(Qt.AlignCenter)
             empty_label.setStyleSheet("color: #aaa; font-size: 18px; padding: 40px;")
@@ -536,7 +536,7 @@ class MoviesTab(QWidget):
             player_window.play(trailer_url, {'name': 'Trailer', 'stream_type': 'trailer'})
             player_window.show()
         else:
-            QMessageBox.warning(self, "Error", "Player window not available.")
+            QMessageBox.warning(self, self.translations.get("Error", "Error"), self.translations.get("Player window not available.", "Player window not available."))
 
     def _handle_toggle_favorite_request(self, movie_data):
         """Handle toggle favorite request from details widget"""
@@ -646,7 +646,7 @@ class MoviesTab(QWidget):
             self.empty_state_label.setAlignment(Qt.AlignCenter)
             self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
             self.empty_state_label.setWordWrap(True)
-            self.empty_state_label.setText("No movies to display.")
+            self.empty_state_label.setText(self.translations.get("No movies to display", "No movies to display."))
             self.movie_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
             if hasattr(self, 'order_panel'):
                 self.order_panel.setVisible(False)
@@ -673,7 +673,7 @@ class MoviesTab(QWidget):
         if(self.player.play_started == False):
             """Play the selected movie"""
             if not self.movies_list.currentItem():
-                QMessageBox.warning(self, "Error", "No movie selected")
+                QMessageBox.warning(self, self.translations.get("Error", "Error"), self.translations.get("No movie selected", "No movie selected"))
                 return
             
             movie_name = self.movies_list.currentItem().text()
@@ -711,7 +711,7 @@ class MoviesTab(QWidget):
     def add_to_favorites_clicked(self):
         """Add current movie to favorites"""
         if not self.current_movie:
-            QMessageBox.warning(self, "Error", "No movie is playing")
+            QMessageBox.warning(self, self.translations.get("Error", "Error"), self.translations.get("No movie is playing", "No movie is playing"))
             return
         
         movie = dict(self.current_movie)

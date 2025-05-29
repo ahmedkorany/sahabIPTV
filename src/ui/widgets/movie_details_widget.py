@@ -1,10 +1,8 @@
-from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QScrollArea, QGridLayout
-from PyQt5.QtGui import QPixmap, QFont, QPainter
-from src.utils.helpers import load_image_async
-from PyQt5.QtNetwork import QNetworkAccessManager
+from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea
+from PyQt5.QtGui import QPixmap, QFont
+from src.utils.helpers import load_image_async, get_translations
 from src.ui.widgets.cast_widget import CastWidget
-from src.api.xtream import _save_cache, _load_cache # Added _load_cache for future use
 
 class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
@@ -23,6 +21,9 @@ class MovieDetailsWidget(QWidget):
         self.poseter_load_failed = False
         self.tmdb_id = movie.get('tmdb_id')
         self.tmdb_id_for_poster_fallback = self.tmdb_id
+        # Get translations from main window or default to English
+        language = getattr(main_window, 'language', 'en') if main_window else 'en'
+        self.translations = get_translations(language)
         self.setup_ui()
         self.update_metadata_from_api()
     def _clear_layout(self, layout):
@@ -58,7 +59,7 @@ class MovieDetailsWidget(QWidget):
         """)
         
         # Back button positioned in top left of hero area
-        self.back_btn = QPushButton("\u2190 Back", self.hero_widget)
+        self.back_btn = QPushButton(f"\u2190 {self.translations.get('Back', 'Back')}", self.hero_widget)
         self.back_btn.setFixedSize(80, 40)
         self.back_btn.move(0, 0)  # Position at exact top left corner
         self.back_btn.setStyleSheet("""
@@ -167,7 +168,7 @@ class MovieDetailsWidget(QWidget):
         controls_layout.addWidget(self.rating_widget)
         
         # Play button
-        self.play_btn = QPushButton("▶ PLAY")
+        self.play_btn = QPushButton(f"▶ {self.translations.get('PLAY', 'PLAY')}")
         self.play_btn.setFont(QFont('Arial', 16, QFont.Bold))
         self.play_btn.setStyleSheet("""
             QPushButton {
@@ -202,7 +203,7 @@ class MovieDetailsWidget(QWidget):
             else:
                 self.current_trailer_url = self.trailer_url
                 
-            self.trailer_btn = QPushButton("🎬 TRAILER")
+            self.trailer_btn = QPushButton(self.translations.get("🎬 TRAILER", "🎬 TRAILER"))
             self.trailer_btn.setFont(QFont('Arial', 14))
             self.trailer_btn.setStyleSheet("""
                 QPushButton {
@@ -235,7 +236,7 @@ class MovieDetailsWidget(QWidget):
         
         # Add director to hero section
         director_layout = QHBoxLayout()
-        director_header = QLabel("Director: ")
+        director_header = QLabel(self.translations.get("Director", "Director: "))
         director_header.setFont(QFont('Arial', 14, QFont.Bold))
         director_header.setStyleSheet("color: #cccccc; background: transparent;")
         director_layout.addWidget(director_header)
@@ -458,7 +459,7 @@ class MovieDetailsWidget(QWidget):
                     background: rgba(255, 255, 255, 0.1);
                 }
             """)
-            self.favorite_btn.setToolTip("Remove from favorites")
+            self.favorite_btn.setToolTip(self.translations.get("Remove from favorites", "Remove from favorites"))
         else:
             self.favorite_btn.setText("☆")  # Empty star
             self.favorite_btn.setStyleSheet("""
@@ -472,7 +473,7 @@ class MovieDetailsWidget(QWidget):
                     background: rgba(255, 255, 255, 0.1);
                 }
             """)
-            self.favorite_btn.setToolTip("Add to favorites")
+            self.favorite_btn.setToolTip(self.translations.get("Add to favorites", "Add to favorites"))
 
     def _on_favorite_clicked(self):
         """Handle favorite button click - emit signal for main window to handle"""
@@ -502,11 +503,11 @@ class MovieDetailsWidget(QWidget):
                 info_data = vod_info.get('info', {})
                 
                 # Update genre
-                genre = info_data.get('genre', 'N/A')
+                genre = info_data.get('genre', self.translations.get('N/A', 'N/A'))
                 self.genre_label.setText(genre)
                 
                 # Update plot/overview
-                plot = info_data.get('plot', 'N/A')
+                plot = info_data.get('plot', self.translations.get('N/A', 'N/A'))
                 self.plot_label.setText(plot)
                 
                 # Update rating with percentage display
@@ -521,15 +522,15 @@ class MovieDetailsWidget(QWidget):
                         self.rating_widget.setText("N/A")
                         self.rating_label.setText(str(rating))
                 else:
-                    self.rating_widget.setText("N/A")
-                    self.rating_label.setText("N/A")
+                    self.rating_widget.setText(self.translations.get("N/A", "N/A"))
+                    self.rating_label.setText(self.translations.get("N/A", "N/A"))
                 
                 # Update director
-                director = info_data.get('director', 'N/A')
+                director = info_data.get('director', self.translations.get('N/A', 'N/A'))
                 self.director_label.setText(director)
                 
                 # Update release date and extract year
-                release_date = info_data.get('releasedate', 'N/A')
+                release_date = info_data.get('releasedate', self.translations.get('N/A', 'N/A'))
                 self.releasedate_label.setText(release_date)
                 
                 # Extract year from release date
