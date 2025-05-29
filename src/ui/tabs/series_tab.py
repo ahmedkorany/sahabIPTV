@@ -129,9 +129,10 @@ class SeriesTab(QWidget):
     add_to_favorites = pyqtSignal(dict)
     # add_to_downloads = pyqtSignal(object) # Removed
 
-    def __init__(self, api_client, main_window=None, parent=None):
+    def __init__(self, api_client, favorites_manager=None, main_window=None, parent=None):
         super().__init__(parent)
         self.api_client = api_client
+        self.favorites_manager = favorites_manager
         self.series = []
         self.filtered_series = []
         self.all_series = []  # Store all series across categories
@@ -379,9 +380,8 @@ class SeriesTab(QWidget):
     def _handle_toggle_favorite_request(self, series_data):
         # This will replace the logic of the old _toggle_favorite_series method
         print(f"SeriesTab: Toggle favorite requested for: {series_data.get('name')}")
-        main_window = self.window()
-        if not main_window or not hasattr(main_window, 'favorites_manager'):
-            QMessageBox.warning(self, "Error", "Favorite functionality not available in main window.")
+        if not self.favorites_manager:
+            QMessageBox.warning(self, "Error", "Favorite functionality not available.")
             return
 
         series_id = series_data.get('series_id')
@@ -407,7 +407,7 @@ class SeriesTab(QWidget):
                 favorite_item[key] = value
 
         # Use favorites manager to toggle favorite status
-        main_window.favorites_manager.toggle_favorite(favorite_item)
+        self.favorites_manager.toggle_favorite(favorite_item)
         
         # Refresh the button in SeriesDetailsWidget
         if self.details_widget and self.stacked_widget.currentWidget() == self.details_widget:
@@ -577,8 +577,7 @@ class SeriesTab(QWidget):
         self.display_current_page() # Refresh display after loading series
 
     def load_favorite_series(self):
-        main_window = self.window()
-        if not main_window or not hasattr(main_window, 'favorites_manager'):
+        if not self.favorites_manager:
             self.series = []
             self.current_page = 1
             self.total_pages = 1
@@ -588,7 +587,7 @@ class SeriesTab(QWidget):
             return
 
         # Get favorites from the favorites manager and filter for series
-        all_favorites = main_window.favorites_manager.get_favorites()
+        all_favorites = self.favorites_manager.get_favorites()
         self.series = [
             fav for fav in all_favorites
             if fav.get('stream_type') == 'series' and fav.get('series_id')

@@ -22,9 +22,10 @@ class MoviesTab(QWidget):
     """Movies tab widget"""
     add_to_favorites = pyqtSignal(dict)
     
-    def __init__(self, api_client, parent=None):
+    def __init__(self, api_client, favorites_manager=None, parent=None):
         super().__init__(parent)
         self.api_client = api_client
+        self.favorites_manager = favorites_manager
         self.main_window = parent
         self.details_widget = None
         self.movies = []
@@ -276,7 +277,7 @@ class MoviesTab(QWidget):
 
     def load_favorite_movies(self):
         """Load and display favorite movies using the favorites_manager."""
-        if not self.main_window or not hasattr(self.main_window, 'favorites_manager'):
+        if not self.favorites_manager:
             QMessageBox.warning(self, "Error", "Favorites manager not available.")
             self.movies = []
             self.current_page = 1
@@ -284,7 +285,7 @@ class MoviesTab(QWidget):
             return
 
         # Get favorites from the favorites manager and filter for movies
-        all_favorites = self.main_window.favorites_manager.get_favorites()
+        all_favorites = self.favorites_manager.get_favorites()
         self.movies = [
             fav for fav in all_favorites
             if fav.get('stream_type') == 'movie'

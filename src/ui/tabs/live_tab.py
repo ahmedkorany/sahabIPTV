@@ -108,9 +108,10 @@ class ChannelLoaderWorker(QObject):
 class LiveTab(QWidget):
     """Live TV tab widget"""
     add_to_favorites = pyqtSignal(dict)
-    def __init__(self, api_client, parent=None):
+    def __init__(self, api_client, favorites_manager=None, parent=None):
         super().__init__(parent)
         self.api_client = api_client
+        self.favorites_manager = favorites_manager
         self.live_channels = []
         self.all_channels = []  # Store all channels across categories
         self.categories_api_data = [] # Store raw API category data
@@ -247,7 +248,7 @@ class LiveTab(QWidget):
 
     def load_favorite_channels(self):
         """Load and display favorite live channels using the favorites_manager."""
-        if not self.main_window or not hasattr(self.main_window, 'favorites_manager'):
+        if not self.favorites_manager:
             QMessageBox.warning(self, "Error", "Favorites manager not available.")
             self.live_channels = []
             self.current_page = 1
@@ -255,7 +256,7 @@ class LiveTab(QWidget):
             return
 
         # Get favorites from the favorites manager and filter for live channels
-        all_favorites = self.main_window.favorites_manager.get_favorites()
+        all_favorites = self.favorites_manager.get_favorites()
         self.live_channels = [
             fav for fav in all_favorites
             if fav.get('stream_type') == 'live'

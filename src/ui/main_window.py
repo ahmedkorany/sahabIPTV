@@ -115,9 +115,9 @@ class MainWindow(QMainWindow):
         # --- Prepare tabs ---
         self.tabs = QTabWidget()
         self.tabs.addTab(self.home_screen, self.translations.get("Home", "Home"))
-        self.live_tab = LiveTab(self.api_client, parent=self)
-        self.movies_tab = MoviesTab(self.api_client, parent=self)
-        self.series_tab = SeriesTab(self.api_client, main_window=self)
+        self.live_tab = LiveTab(self.api_client, self.favorites_manager, parent=self)
+        self.movies_tab = MoviesTab(self.api_client, self.favorites_manager, parent=self)
+        self.series_tab = SeriesTab(self.api_client, self.favorites_manager, main_window=self)
         self.search_tab = SearchTab(self.api_client, main_window=self) # Added SearchTab instance
 
 
