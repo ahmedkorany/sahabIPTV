@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QSizePolicy, QHBoxLayout, QScrollArea
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from src.utils.helpers import load_image_async
@@ -35,10 +35,28 @@ class CastWidget(QWidget):
     def __init__(self, main_window=None, parent=None):
         super().__init__(parent)
         self.main_window = main_window
-        self.grid_layout = QGridLayout(self)
-        self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.grid_layout.setHorizontalSpacing(10)
-        self.grid_layout.setVerticalSpacing(10)
+        
+        # Create main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area for horizontal cast layout
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setFixedHeight(250)  # Fixed height for cast area
+        
+        # Create container widget for cast members
+        self.cast_container = QWidget()
+        self.cast_layout = QHBoxLayout(self.cast_container)
+        self.cast_layout.setAlignment(Qt.AlignLeft)
+        self.cast_layout.setSpacing(10)
+        self.cast_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Set the container as the scroll area's widget
+        self.scroll_area.setWidget(self.cast_container)
+        main_layout.addWidget(self.scroll_area)
         
         # Async loading components
         self.cast_worker = None
@@ -54,7 +72,7 @@ class CastWidget(QWidget):
         self.loading_label = QLabel("Loading cast...")
         self.loading_label.setAlignment(Qt.AlignCenter)
         self.loading_label.setStyleSheet("color: gray; font-size: 14px;")
-        self.grid_layout.addWidget(self.loading_label, 0, 0, 1, 7)  # Span across columns
+        self.cast_layout.addWidget(self.loading_label)
 
     def load_cast_async(self, tmdb_client, tmdb_id):
         """Load cast data asynchronously."""
@@ -98,11 +116,11 @@ class CastWidget(QWidget):
         error_label = QLabel(f"Failed to load cast: {error_message}")
         error_label.setAlignment(Qt.AlignCenter)
         error_label.setStyleSheet("color: red; font-size: 12px;")
-        self.grid_layout.addWidget(error_label, 0, 0, 1, 7)
+        self.cast_layout.addWidget(error_label)
 
     def clear(self):
-        while self.grid_layout.count():
-            item = self.grid_layout.takeAt(0)
+        while self.cast_layout.count():
+            item = self.cast_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
@@ -122,7 +140,7 @@ class CastWidget(QWidget):
             no_cast_label = QLabel("No cast information available")
             no_cast_label.setAlignment(Qt.AlignCenter)
             no_cast_label.setStyleSheet("color: gray; font-size: 12px;")
-            self.grid_layout.addWidget(no_cast_label, 0, 0, 1, 7)
+            self.cast_layout.addWidget(no_cast_label)
             return
         
         # Ensure widget is visible
@@ -130,8 +148,6 @@ class CastWidget(QWidget):
         if self.parent():
             self.parent().setVisible(True)
         MAX_CAST_MEMBERS = 24
-        MAX_CAST_COLUMNS = 7
-        row, col = 0, 0
         placeholder_pixmap = QPixmap('assets/person.png')
         if placeholder_pixmap.isNull():
             placeholder_pixmap = QPixmap(125, 188)
@@ -191,14 +207,9 @@ class CastWidget(QWidget):
                 character_label.setStyleSheet("color: lightgray;")
                 item_layout.addWidget(character_label)
             item_layout.addStretch(1)
-            item_widget.setMinimumWidth(135)
-            item_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-            self.grid_layout.addWidget(item_widget, row, col)
-            col += 1
-            if col >= MAX_CAST_COLUMNS:
-                col = 0
-                row += 1
-        if col > 0:
-            for c_idx in range(col, MAX_CAST_COLUMNS):
-                self.grid_layout.setColumnStretch(c_idx, 1)
-        self.grid_layout.setRowStretch(row + 1, 1)
+            item_widget.setFixedWidth(135)
+            item_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self.cast_layout.addWidget(item_widget)
+        
+        # Add stretch to push cast members to the left
+        self.cast_layout.addStretch()
