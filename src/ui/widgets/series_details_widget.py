@@ -523,7 +523,7 @@ class SeriesDetailsWidget(QWidget):
 
     def _update_favorite_series_button_text(self):
         # This method now relies on main_window to check favorite status
-        if not self.main_window or not hasattr(self.main_window, 'is_favorite'):
+        if not self.main_window or not hasattr(self.main_window, 'favorites_manager'):
             self.favorite_series_btn.setText("Favorite N/A")
             return
 
@@ -532,7 +532,7 @@ class SeriesDetailsWidget(QWidget):
             'stream_type': 'series'
         }
 
-        if self.main_window.is_favorite(favorite_item_check):
+        if self.main_window.favorites_manager.is_favorite(favorite_item_check):
             self.favorite_series_btn.setText("★") # Or use an icon
             self.favorite_series_btn.setStyleSheet("QPushButton { color: gold; background: transparent; font-size: 16px; }")
             self.favorite_series_btn.setToolTip("Remove from favorites")

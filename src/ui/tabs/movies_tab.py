@@ -275,17 +275,18 @@ class MoviesTab(QWidget):
         self.display_current_page() # Will use self.filtered_movies
 
     def load_favorite_movies(self):
-        """Load and display favorite movies using the SeriesTab approach."""
-        if not self.main_window or not hasattr(self.main_window, 'favorites'):
-            QMessageBox.warning(self, "Error", "Favorites list not available.")
+        """Load and display favorite movies using the favorites_manager."""
+        if not self.main_window or not hasattr(self.main_window, 'favorites_manager'):
+            QMessageBox.warning(self, "Error", "Favorites manager not available.")
             self.movies = []
             self.current_page = 1
             self.display_current_page()
             return
 
-        # Filter favorite items that are movies
+        # Get favorites from the favorites manager and filter for movies
+        all_favorites = self.main_window.favorites_manager.get_favorites()
         self.movies = [
-            fav for fav in self.main_window.favorites
+            fav for fav in all_favorites
             if fav.get('stream_type') == 'movie'
         ]
 
@@ -529,8 +530,8 @@ class MoviesTab(QWidget):
     def _handle_toggle_favorite_request(self, movie_data):
         """Handle toggle favorite request from details widget"""
         main_window = self.main_window
-        if not main_window or not hasattr(main_window, 'add_to_favorites') or not hasattr(main_window, 'remove_from_favorites'):
-            # Fallback to signal emission if main window methods are not available
+        if not main_window or not hasattr(main_window, 'favorites_manager'):
+            # Fallback to signal emission if main window favorites manager is not available
             self.add_to_favorites.emit(movie_data)
             return
 
@@ -551,15 +552,13 @@ class MoviesTab(QWidget):
             'container_extension': movie_data.get('container_extension', '')
         }
 
-        # Add other fields as expected by main_window.add_to_favorites/remove_from_favorites
+        # Add other fields as expected by favorites manager
         for key, value in movie_data.items():
             if key not in favorite_item:
                 favorite_item[key] = value
 
-        if main_window.is_favorite(favorite_item):
-            main_window.remove_from_favorites(favorite_item)
-        else:
-            main_window.add_to_favorites(favorite_item)
+        # Use favorites manager to toggle favorite status
+        main_window.favorites_manager.toggle_favorite(favorite_item)
 
         # Refresh the favorite button in the details widget
         if hasattr(self.details_widget, 'refresh_favorite_button'):
@@ -701,9 +700,9 @@ class MoviesTab(QWidget):
         if 'stream_type' not in movie:
             movie['stream_type'] = 'movie'
         
-        # Use the main window's add_to_favorites method directly if available
-        if self.main_window and hasattr(self.main_window, 'add_to_favorites'):
-            self.main_window.add_to_favorites(movie)
+        # Use the main window's favorites manager directly if available
+        if self.main_window and hasattr(self.main_window, 'favorites_manager'):
+            self.main_window.favorites_manager.add_to_favorites(movie)
         else:
             # Fallback to signal emission
             self.add_to_favorites.emit(movie)

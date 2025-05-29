@@ -380,13 +380,13 @@ class SeriesTab(QWidget):
         # This will replace the logic of the old _toggle_favorite_series method
         print(f"SeriesTab: Toggle favorite requested for: {series_data.get('name')}")
         main_window = self.window()
-        if not main_window or not hasattr(main_window, 'add_to_favorites') or not hasattr(main_window, 'remove_from_favorites'):
+        if not main_window or not hasattr(main_window, 'favorites_manager'):
             QMessageBox.warning(self, "Error", "Favorite functionality not available in main window.")
             return
 
         series_id = series_data.get('series_id')
         series_name = series_data.get('name')
-        # Ensure 'cover' is present in series_data if needed by add_to_favorites
+        # Ensure 'cover' is present in series_data if needed by favorites manager
         series_cover = series_data.get('cover') 
 
         if not series_id or not series_name:
@@ -398,16 +398,16 @@ class SeriesTab(QWidget):
             'series_id': series_id,
             'cover': series_cover, 
             'stream_type': 'series',
-            # Add other fields as expected by main_window.add_to_favorites/remove_from_favorites
-            # 'stream_url': '', 'stream_id': '' # Placeholder if needed
+            # Add other fields as expected by favorites manager
         }
         
-        favorite_item_check = {'series_id': series_id, 'stream_type': 'series'}
+        # Add any additional fields from series_data
+        for key, value in series_data.items():
+            if key not in favorite_item:
+                favorite_item[key] = value
 
-        if main_window.is_favorite(favorite_item_check):
-            main_window.remove_from_favorites(favorite_item) 
-        else:
-            main_window.add_to_favorites(favorite_item)
+        # Use favorites manager to toggle favorite status
+        main_window.favorites_manager.toggle_favorite(favorite_item)
         
         # Refresh the button in SeriesDetailsWidget
         if self.details_widget and self.stacked_widget.currentWidget() == self.details_widget:
@@ -578,19 +578,19 @@ class SeriesTab(QWidget):
 
     def load_favorite_series(self):
         main_window = self.window()
-        if not main_window or not hasattr(main_window, 'favorites'):
+        if not main_window or not hasattr(main_window, 'favorites_manager'):
             self.series = []
             self.current_page = 1
             self.total_pages = 1
             self.display_series_grid(self.series) # Pass the series list to display # Display empty page
             self.update_pagination_controls()
-            QMessageBox.information(self, "Favorites", "Could not load favorites from main window.")
+            QMessageBox.information(self, "Favorites", "Could not load favorites from favorites manager.")
             return
 
-        # Filter favorite items that are series and have a series_id
-        # These items should already have 'name', 'cover', 'series_id', 'stream_type'
+        # Get favorites from the favorites manager and filter for series
+        all_favorites = main_window.favorites_manager.get_favorites()
         self.series = [
-            fav for fav in main_window.favorites
+            fav for fav in all_favorites
             if fav.get('stream_type') == 'series' and fav.get('series_id')
         ]
 
@@ -951,7 +951,18 @@ class SeriesTab(QWidget):
                 episode['name'] = f"{series_name} - {title} S{season}E{episode_num}" if season and episode_num else f"{series_name} - {title}"
             else:
                 episode['name'] = f"{title} S{season}E{episode_num}" if season and episode_num else title
-        self.add_to_favorites.emit(episode)
+        
+        # Ensure stream_type is set for episodes
+        if 'stream_type' not in episode:
+            episode['stream_type'] = 'live'  # Episodes are typically treated as live streams
+        
+        # Use the main window's favorites manager directly if available
+        main_window = self.window()
+        if main_window and hasattr(main_window, 'favorites_manager'):
+            main_window.favorites_manager.add_to_favorites(episode)
+        else:
+            # Fallback to signal emission
+            self.add_to_favorites.emit(episode)
 
     # --- Pagination for series grid ---
     def setup_pagination_controls(self):

@@ -13,7 +13,9 @@ from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
 from src.ui.tabs.search_tab import SearchTab # Added SearchTab
+
 from src.utils.helpers import load_json_file, save_json_file, get_translations
+from src.utils.favorites_manager import FavoritesManager
 from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
 from src.ui.widgets.home_screen import HomeScreenWidget
 from src.ui.player import PlayerWindow
@@ -66,12 +68,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.api_client = XtreamClient()
-        self.favorites = []
         self.settings = QSettings()
         self.language = self.settings.value("language", DEFAULT_LANGUAGE)
         self.translations = get_translations(self.language)
         self.accounts = self.settings.value("accounts", {}, type=dict)
         self.current_account = self.settings.value("current_account", "", type=str)
+        
+        # Initialize favorites manager
+        self.favorites_manager = FavoritesManager(self.current_account)
+        self.favorites_manager.favorites_changed.connect(self.favorites_changed.emit)
+        
         self.player_window = PlayerWindow()  # Persistent player window
         self.player_window.add_to_favorites.connect(self.add_to_favorites)  # Connect player window favorites signal
         self.expiry_str = ""
@@ -114,6 +120,7 @@ class MainWindow(QMainWindow):
         self.series_tab = SeriesTab(self.api_client, main_window=self)
         self.search_tab = SearchTab(self.api_client, main_window=self) # Added SearchTab instance
 
+
         self.live_tab.add_to_favorites.connect(self.add_to_favorites)
         self.movies_tab.add_to_favorites.connect(self.add_to_favorites)
         self.series_tab.add_to_favorites.connect(self.add_to_favorites)
@@ -125,12 +132,17 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.live_tab, self.translations.get("Live TV", "Live TV"))
         self.tabs.addTab(self.movies_tab, self.translations.get("Movies", "Movies"))
         self.tabs.addTab(self.series_tab, self.translations.get("Series", "Series"))
+
         self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search")) # Added Search tab
 
         self.live_tab.main_window = self
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
         self.search_tab.main_window = self # Set main_window for search_tab
+
+        
+        # Connect favorites changed signal to update favorites tab
+
         self.setCentralWidget(self.tabs)
 
         # Connect tab change to handler
@@ -535,190 +547,57 @@ class MainWindow(QMainWindow):
             self.show_login_dialog(account_switch=True)
 
     def load_favorites(self):
-        """Load favorites from file with error handling"""
-        try:
-            data = load_json_file(FAVORITES_FILE, default={})
-            if isinstance(data, dict):
-                self.favorites_by_account = data
-                self.favorites = data.get(self.current_account, [])
-            elif isinstance(data, list):
-                # Legacy: if file is a list, treat as favorites for current account
-                self.favorites_by_account = {self.current_account: data}
-                self.favorites = data
-            else:
-                self.favorites_by_account = {}
-                self.favorites = []
-        except Exception as e:
-            QMessageBox.warning(self, "Favorites Error", f"Failed to load favorites: {e}\nFavorites will be reset.")
-            self.favorites_by_account = {}
-            self.favorites = []
-        #print(f"[DEBUG] Loaded favorites for account '{self.current_account}': {self.favorites}")
-        if hasattr(self, 'favorites_tab'):
-            self.favorites_tab.set_favorites(self.favorites)
+        """Load favorites from file for the current account"""
+        self.favorites_manager.load_favorites()
 
     def save_favorites(self):
         """Save favorites to file, keyed by account"""
-        if not hasattr(self, 'favorites_by_account'):
-            self.favorites_by_account = {}
-        self.favorites_by_account[self.current_account] = self.favorites
-        save_json_file(FAVORITES_FILE, self.favorites_by_account)
+        self.favorites_manager.save_favorites()
 
     def add_to_favorites(self, item):
         """Add an item to favorites for the current account"""
-        if not hasattr(self, 'favorites'):
-            self.favorites = []
-        # Use is_favorite for robust duplicate check
-        if self.is_favorite(item):
+        if self.favorites_manager.add_to_favorites(item):
+            item_name = item.get('name', 'Item')
+            self.statusBar.showMessage(f"'{item_name}' added to favorites.", 3000)
+        else:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.information(self, "Favorites", "Already in favorites.")
-            return
-        self.favorites.append(item)
-        if hasattr(self, 'favorites_tab'):
-            self.favorites_tab.set_favorites(self.favorites)
-        self.save_favorites()
-        item_name = item.get('name', 'Item')
-        self.statusBar.showMessage(f"'{item_name}' added to favorites.", 3000)
-        self.favorites_changed.emit()
 
     def remove_from_favorites(self, item_to_remove):
         """Remove an item from favorites for the current account.
-        The item is identified by its content (e.g., stream_type and ID).
-        """
-        if not hasattr(self, 'favorites') or not self.favorites:
-            return
-
-        found_index = -1
-        item_type_to_remove = item_to_remove.get('stream_type')
-        id_to_remove = None
-
-        # Determine the ID from item_to_remove based on its stream_type
-        if item_type_to_remove == 'movie':
-            id_to_remove = item_to_remove.get('stream_id') or item_to_remove.get('movie_id') or item_to_remove.get('id') # Movies use stream_id
-        elif item_type_to_remove == 'series':
-            id_to_remove = item_to_remove.get('series_id')
-        elif item_type_to_remove == 'live':
-            id_to_remove = item_to_remove.get('stream_id')
-        # Add other types if necessary, or a general 'id' fallback
-        # else:
-            # id_to_remove = item_to_remove.get('id') # General fallback
-
-        if id_to_remove is None and item_type_to_remove is not None:
-            # This case might happen if the ID key is unexpected for a known type
-            print(f"Warning: Could not determine a unique ID for removal for item type '{item_type_to_remove}': {item_to_remove}")
-            return
-        elif id_to_remove is None and item_type_to_remove is None:
-             # This case if item_to_remove is not structured as expected (e.g. not a dict or missing keys)
-             # This was the original problem path if 'index' (now item_to_remove) was an int.
-             # However, the TypeError implies item_to_remove is a dict here.
-             # For safety, if it's not a dict or doesn't have expected keys, we can't proceed.
-            if isinstance(item_to_remove, int):
-                 # Handle the original integer index case if it's still possible from other call sites
-                if 0 <= item_to_remove < len(self.favorites):
-                    found_index = item_to_remove
-                else:
-                    print(f"Warning: Index {item_to_remove} out of bounds for favorites list.")
-                    return # Index out of bounds
-            else:
-                print(f"Warning: item_to_remove is not an integer index and key identifiers (stream_type, id) are missing: {item_to_remove}")
-                return
-
-        if found_index == -1: # If not already found via integer index path
-            for i, fav_item in enumerate(self.favorites):
-                fav_item_type = fav_item.get('stream_type')
-                fav_item_id = None
-
-                if fav_item_type == 'movie':
-                    fav_item_id = fav_item.get('stream_id') or fav_item.get('movie_id') or fav_item.get('id') # Movies use stream_id
-                elif fav_item_type == 'series':
-                    fav_item_id = fav_item.get('series_id')
-                elif fav_item_type == 'live':
-                    fav_item_id = fav_item.get('stream_id')
-                # else:
-                    # fav_item_id = fav_item.get('id') # General fallback
-
-                if fav_item_type == item_type_to_remove and fav_item_id == id_to_remove and fav_item_id is not None:
-                    found_index = i
-                    break
         
-        if found_index != -1:
-            removed = self.favorites.pop(found_index)
-            if hasattr(self, 'favorites_tab'):
-                self.favorites_tab.set_favorites(self.favorites)
-            self.save_favorites()
-            item_name = removed.get('name', 'Item')
+        Args:
+            item_to_remove: Can be an integer (index) or a dictionary (item data)
+        """
+        removed_item = None
+        
+        if isinstance(item_to_remove, int):
+            # Remove by index
+            favorites_list = self.favorites_manager.get_favorites()
+            if 0 <= item_to_remove < len(favorites_list):
+                removed_item = favorites_list[item_to_remove]
+                self.favorites_manager.remove_from_favorites(removed_item)
+        else:
+            # Remove by matching item data
+            if self.favorites_manager.remove_from_favorites(item_to_remove):
+                removed_item = item_to_remove
+        
+        if removed_item:
+            item_name = removed_item.get('name', 'Item')
             self.statusBar.showMessage(f"'{item_name}' removed from favorites.", 3000)
             self.favorites_changed.emit()
         else:
             item_name_to_remove = item_to_remove.get('name', 'Unknown item') if isinstance(item_to_remove, dict) else 'Item at invalid index'
-            # print(f"Warning: Item '{item_name_to_remove}' (ID: {id_to_remove}, Type: {item_type_to_remove}) not found in favorites for removal.")
             self.statusBar.showMessage(f"Could not remove '{item_name_to_remove}'. Item not found in favorites.", 3000)
 
     def is_favorite(self, item_to_check):
-        """Check if an item is in favorites for the current account, considering item type."""
-        if not hasattr(self, 'favorites') or not self.favorites:
-            return False
-
-        item_id_to_check = None
-        # stream_type should ideally be present in item_to_check.
-        # It can be 'movie', 'series', or 'live'.
-        item_type_to_check = item_to_check.get('stream_type')
-
-        # Determine the primary ID for item_to_check
-        if item_to_check.get('series_id') is not None:
-            item_id_to_check = item_to_check.get('series_id')
-            # If series_id is present, the type must be 'series'.
-            # If item_type_to_check is different, it's a data inconsistency. Prioritize series_id.
-            if item_type_to_check != 'series':
-                # print(f"[WARN] is_favorite: Item has series_id {item_id_to_check} but stream_type is '{item_type_to_check}'. Assuming 'series'.")
-                item_type_to_check = 'series'
-        elif item_to_check.get('stream_id') is not None:
-            item_id_to_check = item_to_check.get('stream_id')
-            # If only stream_id is present, item_type_to_check should be 'movie' or 'live'.
-            # If item_type_to_check is None here, it's problematic for typed comparison.
-            # add_to_favorites should ensure stream_type is set.
-            if item_type_to_check is None:
-                # print(f"[WARN] is_favorite: Item with stream_id {item_id_to_check} has no stream_type. Type comparison might be unreliable.")
-                pass # Keep item_type_to_check as None for now.
-        else:
-            # No usable ID found in item_to_check
-            return False
-
-        if item_id_to_check is None: # Should be caught above, but as a safeguard.
-            return False
-
-        for favorite_item in self.favorites:
-            fav_item_id = None
-            # Favorites are expected to have 'stream_type' stored by add_to_favorites.
-            fav_item_type = favorite_item.get('stream_type')
-
-            if fav_item_type == 'series':
-                fav_item_id = favorite_item.get('series_id')
-            elif fav_item_type == 'movie' or fav_item_type == 'live': # Assuming 'live' is also a possible type
-                fav_item_id = favorite_item.get('stream_id')
-            else:
-                # This favorite_item might be from an older version or has an unknown/missing type.
-                # If both the item_to_check and the favorite_item lack a specific type,
-                # fall back to the original generic ID comparison.
-                if not item_type_to_check and not fav_item_type:
-                    # Original untyped comparison logic
-                    generic_id_to_check = item_to_check.get('stream_id') or item_to_check.get('series_id')
-                    generic_fav_id = favorite_item.get('stream_id') or favorite_item.get('series_id')
-                    if generic_fav_id is not None and generic_fav_id == generic_id_to_check:
-                        return True
-                continue # Skip if types are inconsistent or fav_item_type is unknown for typed comparison
-
-            # Now compare with type
-            if fav_item_id is not None and fav_item_id == item_id_to_check and fav_item_type == item_type_to_check:
-                return True
-        
-        return False
+        """Check if an item is in favorites for the current account"""
+        return self.favorites_manager.is_favorite(item_to_check)
     def switch_account(self, name):
         """Switch to a different account and reload all tab data without deleting/recreating widgets"""
         self.current_account = name
         self.settings.setValue("current_account", name)
-        self.load_favorites()
-        if hasattr(self, 'favorites_tab'):
-            self.favorites_tab.set_favorites(self.favorites)
+        self.favorites_manager.set_current_account(name)
         # Reload categories/data in all tabs to reflect new account
         if hasattr(self, 'live_tab') and self.live_tab:
             self.live_tab.load_categories()

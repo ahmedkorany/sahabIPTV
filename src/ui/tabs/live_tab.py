@@ -246,17 +246,18 @@ class LiveTab(QWidget):
         self.show_loading(False)
 
     def load_favorite_channels(self):
-        """Load and display favorite live channels using the SeriesTab approach."""
-        if not self.main_window or not hasattr(self.main_window, 'favorites'):
-            QMessageBox.warning(self, "Error", "Favorites list not available.")
+        """Load and display favorite live channels using the favorites_manager."""
+        if not self.main_window or not hasattr(self.main_window, 'favorites_manager'):
+            QMessageBox.warning(self, "Error", "Favorites manager not available.")
             self.live_channels = []
             self.current_page = 1
             self.display_current_page()
             return
 
-        # Filter favorite items that are live channels
+        # Get favorites from the favorites manager and filter for live channels
+        all_favorites = self.main_window.favorites_manager.get_favorites()
         self.live_channels = [
-            fav for fav in self.main_window.favorites
+            fav for fav in all_favorites
             if fav.get('stream_type') == 'live'
         ]
 
@@ -434,7 +435,17 @@ class LiveTab(QWidget):
         channel = dict(self.current_channel)
         if 'name' not in channel:
             channel['name'] = channel.get('title', channel.get('name', 'Channel'))
-        self.add_to_favorites.emit(channel)
+        
+        # Ensure stream_type is set for live channels
+        if 'stream_type' not in channel:
+            channel['stream_type'] = 'live'
+        
+        # Use the main window's favorites manager directly if available
+        if self.main_window and hasattr(self.main_window, 'favorites_manager'):
+            self.main_window.favorites_manager.add_to_favorites(channel)
+        else:
+            # Fallback to signal emission
+            self.add_to_favorites.emit(channel)
 
     def update_pagination_controls(self):
         if self.total_pages > 1:

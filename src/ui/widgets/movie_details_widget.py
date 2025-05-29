@@ -342,7 +342,7 @@ class MovieDetailsWidget(QWidget):
 
     def update_favorite_state(self):
         """Update favorite state by checking with main window"""
-        if not self.main_window or not hasattr(self.main_window, 'is_favorite'):
+        if not self.main_window or not hasattr(self.main_window, 'favorites_manager'):
             self._is_favorite = False
             self.update_favorite_btn()
             return
@@ -352,7 +352,7 @@ class MovieDetailsWidget(QWidget):
             'stream_type': 'movie'
         }
 
-        self._is_favorite = self.main_window.is_favorite(favorite_item_check)
+        self._is_favorite = self.main_window.favorites_manager.is_favorite(favorite_item_check)
         self.update_favorite_btn()
 
     def refresh_favorite_button(self):

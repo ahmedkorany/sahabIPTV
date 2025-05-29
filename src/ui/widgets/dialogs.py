@@ -333,8 +333,8 @@ class MovieDetailsDialog(QDialog):
                     if not is_favorite:
                         self.add_to_favorites.emit(self.movie)
                     else:
-                        if hasattr(main_window, 'remove_from_favorites'):
-                            main_window.remove_from_favorites(self.movie)
+                        if hasattr(main_window, 'favorites_manager'):
+                            main_window.favorites_manager.remove_from_favorites(self.movie)
             is_favorite = not is_favorite
             update_favorite_btn()
         favorite_btn.clicked.connect(on_favorite_clicked)
