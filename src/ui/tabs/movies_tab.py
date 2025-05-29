@@ -471,7 +471,17 @@ class MoviesTab(QWidget):
             self.show_movie_grid()
         else:
             self.show_movie_grid()
-            self.display_current_page()
+            # Check if favorites category is selected and refresh if needed
+            current_category_item = self.categories_list.currentItem()
+            if current_category_item:
+                category_id = current_category_item.data(Qt.UserRole)
+                if category_id == "favorites":
+                    # Refresh favorites grid in case favorite state changed
+                    self.load_favorite_movies()
+                else:
+                    self.display_current_page()
+            else:
+                self.display_current_page()
 
     def show_movie_details_by_data(self, movie_data):
         """Show movie details from search data"""
@@ -569,6 +579,13 @@ class MoviesTab(QWidget):
         """Handle favorites changed signal from main window"""
         if hasattr(self.details_widget, 'refresh_favorite_button'):
             self.details_widget.refresh_favorite_button()
+        
+        # Refresh favorites grid if favorites category is currently selected
+        current_category_item = self.categories_list.currentItem()
+        if current_category_item:
+            category_id = current_category_item.data(Qt.UserRole)
+            if category_id == "favorites":
+                self.load_favorite_movies()
 
     def paginate_items(self, items_to_paginate, page):
         """Paginate a list of items."""
@@ -617,14 +634,18 @@ class MoviesTab(QWidget):
                 if widget:
                     widget.setParent(None)
                     widget.deleteLater()
+        
+        # Reset empty_state_label reference since it may have been deleted
+        if hasattr(self, 'empty_state_label'):
+            delattr(self, 'empty_state_label')
+        
         page_items, self.total_pages = self.paginate_items(self.filtered_movies, self.current_page)
         # Show empty state label if no items
         if not page_items:
-            if not hasattr(self, 'empty_state_label'):
-                self.empty_state_label = QLabel()
-                self.empty_state_label.setAlignment(Qt.AlignCenter)
-                self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
-                self.empty_state_label.setWordWrap(True)
+            self.empty_state_label = QLabel()
+            self.empty_state_label.setAlignment(Qt.AlignCenter)
+            self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
+            self.empty_state_label.setWordWrap(True)
             self.empty_state_label.setText("No movies to display.")
             self.movie_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
             if hasattr(self, 'order_panel'):

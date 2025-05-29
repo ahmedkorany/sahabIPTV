@@ -252,6 +252,17 @@ class SeriesTab(QWidget):
             self._show_grid_view()
         else:
             self._show_grid_view()
+            # Check if favorites category is selected and refresh if needed
+            current_category_item = self.categories_list.currentItem()
+            if current_category_item:
+                category_id = current_category_item.data(Qt.UserRole)
+                if category_id == "favorites":
+                    # Refresh favorites grid in case favorite state changed
+                    self.load_favorite_series()
+                else:
+                    self.display_current_page()
+            else:
+                self.display_current_page()
 
     def show_series_details(self, series_data):
         if self.details_widget:
@@ -274,6 +285,10 @@ class SeriesTab(QWidget):
         # self.details_widget.download_episode_requested.connect(self._handle_download_episode_request) # Removed
         # self.details_widget.download_season_requested.connect(self._handle_download_season_request) # Removed
         self.details_widget.export_season_requested.connect(self._handle_export_season_request)
+        
+        # Connect to main window's favorites_changed signal to refresh button state
+        if hasattr(self.main_window, 'favorites_changed'):
+            self.main_window.favorites_changed.connect(self._on_favorites_changed)
 
         # Add the new details widget to the stacked_widget (if not already added as a placeholder)
         # It's common to add it once and then show/hide, or remove/add like here.
@@ -318,6 +333,10 @@ class SeriesTab(QWidget):
         self.details_widget.play_episode_requested.connect(self._handle_play_episode_request)
         self.details_widget.toggle_favorite_series_requested.connect(self._handle_toggle_favorite_request)
         self.details_widget.export_season_requested.connect(self._handle_export_season_request)
+        
+        # Connect to main window's favorites_changed signal to refresh button state
+        if hasattr(self.main_window, 'favorites_changed'):
+            self.main_window.favorites_changed.connect(self._on_favorites_changed)
 
         # Add and show the details widget
         if self.stacked_widget.indexOf(self.details_widget) == -1:
@@ -412,6 +431,18 @@ class SeriesTab(QWidget):
         # Refresh the button in SeriesDetailsWidget
         if self.details_widget and self.stacked_widget.currentWidget() == self.details_widget:
             self.details_widget.refresh_favorite_button()
+    
+    def _on_favorites_changed(self):
+        """Handle favorites changed signal from main window"""
+        if hasattr(self.details_widget, 'refresh_favorite_button'):
+            self.details_widget.refresh_favorite_button()
+        
+        # Refresh favorites grid if favorites category is currently selected
+        current_category_item = self.categories_list.currentItem()
+        if current_category_item:
+            category_id = current_category_item.data(Qt.UserRole)
+            if category_id == "favorites":
+                self.load_favorite_series()
 
     def _handle_download_episode_request(self, episode_data):
         if not episode_data or not self.current_series:
@@ -1019,12 +1050,15 @@ class SeriesTab(QWidget):
             if widget:
                 widget.setParent(None)
         
-        # Add or update empty_state_label for empty results
-        if not hasattr(self, 'empty_state_label'):
-            self.empty_state_label = QLabel()
-            self.empty_state_label.setAlignment(Qt.AlignCenter)
-            self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
-            self.empty_state_label.setWordWrap(True)
+        # Reset empty_state_label reference since it may have been cleared
+        if hasattr(self, 'empty_state_label'):
+            delattr(self, 'empty_state_label')
+        
+        # Create empty_state_label for empty results
+        self.empty_state_label = QLabel()
+        self.empty_state_label.setAlignment(Qt.AlignCenter)
+        self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
+        self.empty_state_label.setWordWrap(True)
         
         source_list = []
         search_active = hasattr(self, 'search_input') and self.search_input.text().strip()

@@ -122,6 +122,13 @@ class LiveTab(QWidget):
         self.total_pages = 1
         self.setup_ui()
         self.main_window = None  # Will be set by the main window
+        
+    def set_main_window(self, main_window):
+        """Set the main window reference and connect signals"""
+        self.main_window = main_window
+        # Connect to main window's favorites_changed signal to refresh grid
+        if hasattr(self.main_window, 'favorites_changed'):
+            self.main_window.favorites_changed.connect(self._on_favorites_changed)
     
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -329,7 +336,7 @@ class LiveTab(QWidget):
                 player_window.activateWindow()
             else:
                 if not hasattr(self, 'player'):
-                    self.player = MediaPlayer()
+                    self.player = MediaPlayer(favorites_manager=self.favorites_manager)
                 self.player.play(stream_url)
         except Exception as e:
             QMessageBox.critical(self, "Playback Error", f"Could not open the stream. The channel may be temporarily unavailable.\n\nError: {str(e)}")
@@ -371,7 +378,7 @@ class LiveTab(QWidget):
                 player_window.activateWindow()
             else:
                 if not hasattr(self, 'player'):
-                    self.player = MediaPlayer()
+                    self.player = MediaPlayer(favorites_manager=self.favorites_manager)
                 self.player.play(stream_url)
                 
         except Exception as e:
@@ -447,6 +454,15 @@ class LiveTab(QWidget):
         else:
             # Fallback to signal emission
             self.add_to_favorites.emit(channel)
+    
+    def _on_favorites_changed(self):
+        """Handle favorites changed signal from main window"""
+        # Refresh favorites grid if favorites category is currently selected
+        current_category_item = self.categories_list.currentItem()
+        if current_category_item:
+            category_id = current_category_item.data(Qt.UserRole)
+            if category_id == "favorites":
+                self.load_favorite_channels()
 
     def update_pagination_controls(self):
         if self.total_pages > 1:
@@ -487,14 +503,18 @@ class LiveTab(QWidget):
             widget = self.channel_grid_layout.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
+        
+        # Reset empty_state_label reference since it may have been cleared
+        if hasattr(self, 'empty_state_label'):
+            delattr(self, 'empty_state_label')
+        
         page_items, self.total_pages = self.paginate_items(self.live_channels, self.current_page)
         # Show empty state label if no items
         if not page_items:
-            if not hasattr(self, 'empty_state_label'):
-                self.empty_state_label = QLabel()
-                self.empty_state_label.setAlignment(Qt.AlignCenter)
-                self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
-                self.empty_state_label.setWordWrap(True)
+            self.empty_state_label = QLabel()
+            self.empty_state_label.setAlignment(Qt.AlignCenter)
+            self.empty_state_label.setStyleSheet("color: #888; font-size: 18px; padding: 40px;")
+            self.empty_state_label.setWordWrap(True)
             query = self.search_input.text().strip() if hasattr(self, 'search_input') else ''
             if query:
                 self.empty_state_label.setText(f"No results found for '{query}'.")

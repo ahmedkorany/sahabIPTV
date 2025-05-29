@@ -18,7 +18,7 @@ class MediaPlayer(QWidget):
     playback_error = pyqtSignal(str)
     add_to_favorites = pyqtSignal(dict)  # Signal to add current item to favorites
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, favorites_manager=None):
         super().__init__(parent)
         self.setup_ui()
         self.setup_player()
@@ -40,6 +40,9 @@ class MediaPlayer(QWidget):
         # Current media item being played
         self.current_item = None
         self.is_favorite = False
+        
+        # Favorites manager for direct dependency injection
+        self.favorites_manager = favorites_manager
 
     def setup_ui(self):
         """Set up the UI components"""
@@ -133,20 +136,8 @@ class MediaPlayer(QWidget):
             
     def check_if_favorite(self, item):
         """Check if the current item is in favorites"""
-        # Try to get main window to check favorites
-        main_window = None
-        parent = self.parent()
-        while parent is not None:
-            if hasattr(parent, 'favorites'):
-                main_window = parent
-                break
-            parent = parent.parent()
-        
-        if main_window and hasattr(main_window, 'favorites'):
-            # Check if this item is in favorites
-            for fav in main_window.favorites:
-                if 'stream_id' in item and 'stream_id' in fav and item['stream_id'] == fav['stream_id']:
-                    return True
+        if self.favorites_manager and item:
+            return self.favorites_manager.is_favorite(item)
         return False
         
     def toggle_favorite(self, add_to_favorites):
@@ -155,25 +146,18 @@ class MediaPlayer(QWidget):
             print("[DEBUG] toggle_favorite called but current_item is None")
             return
         print(f"[DEBUG] toggle_favorite: add_to_favorites={add_to_favorites}, current_item={self.current_item}")
-        if add_to_favorites:
-            # Add to favorites
-            self.add_to_favorites.emit(self.current_item)
+        
+        if self.favorites_manager:
+            if add_to_favorites:
+                # Add to favorites
+                self.favorites_manager.add_to_favorites(self.current_item)
+            else:
+                # Remove from favorites
+                self.favorites_manager.remove_from_favorites(self.current_item)
         else:
-            # Remove from favorites - find parent with remove_from_favorites method
-            main_window = None
-            parent = self.parent()
-            while parent is not None:
-                if hasattr(parent, 'remove_from_favorites'):
-                    main_window = parent
-                    break
-                parent = parent.parent()
-                
-            if main_window and hasattr(main_window, 'favorites'):
-                # Find the index of this item in favorites
-                for i, fav in enumerate(main_window.favorites):
-                    if 'stream_id' in self.current_item and 'stream_id' in fav and self.current_item['stream_id'] == fav['stream_id']:
-                        main_window.remove_from_favorites.emit(i)
-                        break
+            # Fallback: emit signal for backward compatibility
+            if add_to_favorites:
+                self.add_to_favorites.emit(self.current_item)
     
     def play_pause(self, play):
         """Play or pause playback"""
@@ -425,11 +409,12 @@ class PlayerWindow(QMainWindow):
     """Top-level window for video playback using MediaPlayer"""
     add_to_favorites = pyqtSignal(dict)  # Signal to add current item to favorites
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, favorites_manager=None):
         super().__init__(parent)
         self.setWindowTitle("Player")
         self.setMinimumSize(800, 450)
-        self.player = MediaPlayer(self)
+        self.favorites_manager = favorites_manager
+        self.player = MediaPlayer(self, favorites_manager)
         self.setCentralWidget(self.player)
         self.player.playback_stopped.connect(self.close)
         self.player.add_to_favorites.connect(self.handle_add_to_favorites)
@@ -440,7 +425,7 @@ class PlayerWindow(QMainWindow):
         # If the window was closed, re-create the player widget
         if self._was_closed:
             self.takeCentralWidget().deleteLater()
-            self.player = MediaPlayer(self)
+            self.player = MediaPlayer(self, self.favorites_manager)
             self.setCentralWidget(self.player)
             self.player.playback_stopped.connect(self.close)
             self.player.add_to_favorites.connect(self.handle_add_to_favorites)

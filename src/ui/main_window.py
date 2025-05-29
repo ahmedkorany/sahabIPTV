@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
         self.favorites_manager = FavoritesManager(self.current_account)
         self.favorites_manager.favorites_changed.connect(self.favorites_changed.emit)
         
-        self.player_window = PlayerWindow()  # Persistent player window
+        self.player_window = PlayerWindow(favorites_manager=self.favorites_manager)  # Persistent player window
         self.player_window.add_to_favorites.connect(self.add_to_favorites)  # Connect player window favorites signal
         self.expiry_str = ""
         self.cache_thread = None
@@ -135,7 +135,7 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search")) # Added Search tab
 
-        self.live_tab.main_window = self
+        self.live_tab.set_main_window(self)
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
         self.search_tab.main_window = self # Set main_window for search_tab
