@@ -638,6 +638,10 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(3, self.translations.get("Series", "Series"))
         self.tabs.setTabText(4, self.translations.get("Search", "Search")) # Added Search tab title
         
+        # Update home screen translations
+        if hasattr(self, 'home_screen') and self.home_screen:
+            self.home_screen.update_translations(self.translations)
+        
         # Set layout direction
         if self.language == "ar":
             self.setLayoutDirection(Qt.RightToLeft)

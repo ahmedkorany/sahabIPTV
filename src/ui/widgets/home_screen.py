@@ -108,6 +108,45 @@ class HomeScreenWidget(QWidget):
         self.expiry_date = expiry_date
         self.expiry_label.setText(f"{self.translations.get('Subscription expires', 'Subscription expires')}: {self.expiry_date or self.translations.get('N/A', 'N/A')}")
 
+    def update_translations(self, translations):
+        """Update translations and refresh text content without recreating UI"""
+        self.translations = translations
+        
+        # Update tooltips for navigation buttons
+        reload_btn = self.findChild(QPushButton)
+        if reload_btn:
+            reload_btn.setToolTip(self.translations.get('Reload Data', 'Reload Data'))
+        
+        search_btn = self.findChild(QPushButton, "search_btn")
+        if search_btn:
+            search_btn.setToolTip(self.translations.get('Search', 'Search'))
+        
+        # Update tile button texts
+        tile_buttons = self.findChildren(QPushButton)
+        tile_texts = [
+            self.translations.get("Live", "Live"),
+            self.translations.get("Movies", "Movies"),
+            self.translations.get("Series", "Series")
+        ]
+        
+        # Find and update the main tile buttons (they have larger icon sizes)
+        for btn in tile_buttons:
+            if btn.iconSize().width() == 120:  # Main tile buttons have 120x120 icons
+                current_text = btn.text()
+                if "Live" in current_text or "مباشر" in current_text:
+                    btn.setText(tile_texts[0])
+                elif "Movies" in current_text or "أفلام" in current_text:
+                    btn.setText(tile_texts[1])
+                elif "Series" in current_text or "مسلسلات" in current_text:
+                    btn.setText(tile_texts[2])
+        
+        # Update user and expiry labels
+        if hasattr(self, 'user_label') and self.user_label:
+            self.user_label.setText(f"{self.translations.get('User', 'User:')}: {self.user_info.get('username', self.translations.get('N/A', 'N/A'))}")
+        
+        if hasattr(self, 'expiry_label') and self.expiry_label:
+            self.expiry_label.setText(f"{self.translations.get('Subscription expires', 'Subscription expires:')}: {self.expiry_date or self.translations.get('N/A', 'N/A')}")
+
     def handle_switch_account(self):
         # Show the account management screen via parent MainWindow
         main_window = self.window()
