@@ -2,6 +2,7 @@ PyQt5
 opencv-python
 m3u8
 requests
+psutil
 python-vlc
 python-mpv
 yt-dlp
