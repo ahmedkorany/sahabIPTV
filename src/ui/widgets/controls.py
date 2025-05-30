@@ -1,12 +1,10 @@
-"""
-Media player controls widget
-"""
+"""Media player controls widget"""
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
-                            QSlider, QLabel, QComboBox, QStyle, QSizePolicy)
+                            QSlider, QLabel, QComboBox, QStyle)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QIcon
-from src.config import SEEK_STEP, VOLUME_STEP, DEFAULT_VOLUME, ICON_SIZE
-from src.utils.helpers import format_duration
+from PyQt5.QtGui import QIcon, QFont
+from src.config import SEEK_STEP, DEFAULT_VOLUME, ICON_SIZE
+from src.utils.helpers import format_duration, get_translations
 
 class PlayerControls(QWidget):
     """Media player controls widget"""
@@ -17,14 +15,19 @@ class PlayerControls(QWidget):
     mute_clicked = pyqtSignal(bool)  # True for mute, False for unmute
     fullscreen_clicked = pyqtSignal(bool)  # True for fullscreen, False for windowed
     speed_changed = pyqtSignal(float)
+    favorite_clicked = pyqtSignal(bool)  # True for add to favorites, False for remove from favorites
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.is_playing = False
         self.is_muted = False
         self.is_fullscreen = False
+        self.is_favorite = False
         self.duration = 0
         self.current_time = 0
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if hasattr(parent, 'language') else 'en'
+        self.translations = get_translations(language)
         self.setup_ui()
         
         # Timer for updating the seek slider
@@ -96,21 +99,44 @@ class PlayerControls(QWidget):
         self.fullscreen_button.setIconSize(ICON_SIZE)
         self.fullscreen_button.clicked.connect(self.fullscreen_clicked_handler)
         
+        # Favorite button
+        self.favorite_button = QPushButton()
+        self.favorite_button.setText("☆")
+        self.favorite_button.setFont(QFont('Arial', 16))
+        self.favorite_button.setStyleSheet("QPushButton { color: white; background: transparent; }")
+        self.favorite_button.setToolTip(self.translations.get("Add to favorites", "Add to favorites"))
+        self.favorite_button.clicked.connect(self.favorite_clicked_handler)
+        
         controls_layout.addWidget(self.play_pause_button)
         controls_layout.addWidget(self.stop_button)
         controls_layout.addWidget(self.rewind_button)
         controls_layout.addWidget(self.forward_button)
         controls_layout.addStretch()
-        controls_layout.addWidget(QLabel("Speed:"))
+        controls_layout.addWidget(QLabel(self.translations.get("Speed", "Speed:")))
         controls_layout.addWidget(self.speed_combo)
         controls_layout.addStretch()
         controls_layout.addWidget(self.mute_button)
         controls_layout.addWidget(self.volume_slider)
+        controls_layout.addWidget(self.favorite_button)
         controls_layout.addWidget(self.fullscreen_button)
         
         main_layout.addLayout(seek_layout)
         main_layout.addLayout(controls_layout)
-    
+        
+        # Set play control buttons (play, stop, fast forward, backward) to white (icon and text)
+        for btn in [self.play_pause_button, self.stop_button, self.rewind_button, self.forward_button, self.fullscreen_button, self.favorite_button]:
+            btn.setStyleSheet("color: white; background: transparent;")
+            icon = btn.icon()
+            if not icon.isNull():
+                pixmap = icon.pixmap(btn.iconSize())
+                from PyQt5.QtGui import QPainter, QColor
+                white_pixmap = pixmap.copy()
+                painter = QPainter(white_pixmap)
+                painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                painter.fillRect(white_pixmap.rect(), QColor('white'))
+                painter.end()
+                btn.setIcon(QIcon(white_pixmap))
+
     def play_pause_clicked_handler(self):
         """Handle play/pause button click"""
         self.is_playing = not self.is_playing
@@ -124,10 +150,18 @@ class PlayerControls(QWidget):
     
     def update_play_pause_button(self):
         """Update play/pause button icon based on state"""
+        from PyQt5.QtGui import QPainter, QColor
         if self.is_playing:
-            self.play_pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            icon = self.style().standardIcon(QStyle.SP_MediaPause)
         else:
-            self.play_pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            icon = self.style().standardIcon(QStyle.SP_MediaPlay)
+        pixmap = icon.pixmap(self.play_pause_button.iconSize())
+        white_pixmap = pixmap.copy()
+        painter = QPainter(white_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(white_pixmap.rect(), QColor('white'))
+        painter.end()
+        self.play_pause_button.setIcon(QIcon(white_pixmap))
     
     def mute_clicked_handler(self):
         """Handle mute button click"""
@@ -154,6 +188,34 @@ class PlayerControls(QWidget):
             self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarNormalButton))
         else:
             self.fullscreen_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+    
+    def favorite_clicked_handler(self):
+        """Handle favorite button click"""
+        self.is_favorite = not self.is_favorite
+        self.update_favorite_button()
+        self.favorite_clicked.emit(self.is_favorite)
+    
+    def update_favorite_button(self):
+        """Update favorite button icon based on state"""
+        # Create star icon (filled or outline)
+        if self.is_favorite:
+            # Use a filled star with yellow color
+            self.favorite_button.setStyleSheet("QPushButton { color: gold; background: transparent; }")
+            self.favorite_button.setText("★")
+            self.favorite_button.setFont(QFont('Arial', 16))
+            self.favorite_button.setToolTip(self.translations.get("Remove from favorites", "Remove from favorites"))
+        else:
+            # Use an outline star with white color
+            self.favorite_button.setStyleSheet("QPushButton { color: white; background: transparent; }")
+            self.favorite_button.setText("☆")
+            self.favorite_button.setFont(QFont('Arial', 16))
+            self.favorite_button.setToolTip(self.translations.get("Add to favorites", "Add to favorites"))
+    
+    def set_favorite(self, is_favorite):
+        """Set favorite state"""
+        if self.is_favorite != is_favorite:
+            self.is_favorite = is_favorite
+            self.update_favorite_button()
     
     def rewind_clicked(self):
         """Handle rewind button click"""

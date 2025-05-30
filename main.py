@@ -12,21 +12,12 @@ locale.setlocale(locale.LC_NUMERIC, 'C')
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
-    
-    # Set application icon
-    app.setWindowIcon(QIcon('assets/sahab_icon.jpeg'))
-    
-    # Set application name and organization
+    app.setWindowIcon(QIcon('assets/sahab_icon.png'))
     app.setApplicationName("Sahab IPTV")
-    app.setOrganizationName("SahabIPTV")
-    
-    # Apply dark theme if enabled
+    app.setOrganizationName("EFHAM Labs")
     if DARK_MODE:
         from src.utils.helpers import apply_dark_theme
         apply_dark_theme(app)
-    
-    # Create and show the main window
     window = MainWindow()
     window.show()
-    
     sys.exit(app.exec_())

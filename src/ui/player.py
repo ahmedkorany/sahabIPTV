@@ -5,18 +5,25 @@ import sys
 import vlc
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame
 from PyQt5.QtWidgets import QLabel
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from src.ui.widgets.controls import PlayerControls
 from src.config import DEFAULT_VOLUME
+from PyQt5.QtWidgets import QMainWindow
+from src.utils.youtube_resolver import youtube_resolver
+from src.utils.helpers import get_translations
 
 class MediaPlayer(QWidget):
     """Media player widget using VLC"""
     playback_started = pyqtSignal()
     playback_stopped = pyqtSignal()
     playback_error = pyqtSignal(str)
+    add_to_favorites = pyqtSignal(dict)  # Signal to add current item to favorites
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, favorites_manager=None):
         super().__init__(parent)
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if parent else 'en'
+        self.translations = get_translations(language)
         self.setup_ui()
         self.setup_player()
         
@@ -33,6 +40,13 @@ class MediaPlayer(QWidget):
         self.normal_geometry = None
         self.normal_layout_position = None
         self.fullscreen_window = None
+        
+        # Current media item being played
+        self.current_item = None
+        self.is_favorite = False
+        
+        # Favorites manager for direct dependency injection
+        self.favorites_manager = favorites_manager
 
     def setup_ui(self):
         """Set up the UI components"""
@@ -57,6 +71,7 @@ class MediaPlayer(QWidget):
         self.controls.mute_clicked.connect(self.set_mute)
         self.controls.fullscreen_clicked.connect(self.toggle_fullscreen)
         self.controls.speed_changed.connect(self.set_playback_rate)
+        self.controls.favorite_clicked.connect(self.toggle_favorite)
         
         layout.addWidget(self.video_frame, 1)
         layout.addWidget(self.controls)
@@ -80,11 +95,28 @@ class MediaPlayer(QWidget):
         # Set initial volume
         self.player.audio_set_volume(DEFAULT_VOLUME)
         self.controls.set_volume(DEFAULT_VOLUME)
-    def play(self, url):
+    def play(self, url, item=None):
         """Play media from URL"""
         try:
+            # Store the current item
+            self.current_item = item
+            
+            # Update favorite status if item is provided
+            if item is not None:
+                # Check if this item is in favorites
+                self.is_favorite = self.check_if_favorite(item)
+                self.controls.set_favorite(self.is_favorite)
+            else:
+                self.is_favorite = False
+                self.controls.set_favorite(False)
+            
+            # Resolve YouTube URLs to direct stream URLs
+            resolved_url = youtube_resolver.resolve_url(url)
+            print(f"[DEBUG] Original URL: {url}")
+            print(f"[DEBUG] Resolved URL: {resolved_url}")
+            
             # Create media
-            media = self.instance.media_new(url)
+            media = self.instance.media_new(resolved_url)
             
             # Set media to player
             self.player.set_media(media)
@@ -105,6 +137,31 @@ class MediaPlayer(QWidget):
         except Exception as e:
             self.playback_error.emit(str(e))
             return False
+            
+    def check_if_favorite(self, item):
+        """Check if the current item is in favorites"""
+        if self.favorites_manager and item:
+            return self.favorites_manager.is_favorite(item)
+        return False
+        
+    def toggle_favorite(self, add_to_favorites):
+        """Toggle favorite status for current item"""
+        if self.current_item is None:
+            print("[DEBUG] toggle_favorite called but current_item is None")
+            return
+        print(f"[DEBUG] toggle_favorite: add_to_favorites={add_to_favorites}, current_item={self.current_item}")
+        
+        if self.favorites_manager:
+            if add_to_favorites:
+                # Add to favorites
+                self.favorites_manager.add_to_favorites(self.current_item)
+            else:
+                # Remove from favorites
+                self.favorites_manager.remove_from_favorites(self.current_item)
+        else:
+            # Fallback: emit signal for backward compatibility
+            if add_to_favorites:
+                self.add_to_favorites.emit(self.current_item)
     
     def play_pause(self, play):
         """Play or pause playback"""
@@ -157,21 +214,20 @@ class MediaPlayer(QWidget):
         """Enter fullscreen mode"""
         if self.is_fullscreen:
             return
-            
         # Save current state
         self.normal_parent = self.video_frame.parentWidget()
         self.normal_geometry = self.video_frame.geometry()
-        
         # Detach the video frame from its parent
         self.video_frame.setParent(None)
-        
-        # Set window flags for proper fullscreen behavior
-        self.video_frame.setWindowFlags(Qt.Window)
-        
-        # Show fullscreen
-        self.video_frame.showFullScreen()
+        # Create a new top-level window for fullscreen
+        from PyQt5.QtWidgets import QMainWindow, QApplication
+        screen = QApplication.primaryScreen().geometry()
+        self.fullscreen_window = QMainWindow()
+        self.fullscreen_window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        self.fullscreen_window.setGeometry(screen)
+        self.fullscreen_window.setCentralWidget(self.video_frame)
+        self.fullscreen_window.showFullScreen()
         self.video_frame.setFocus()
-        
         # Update VLC player to use the new window
         if sys.platform == "linux" or sys.platform == "linux2":
             self.player.set_xwindow(self.video_frame.winId())
@@ -179,16 +235,10 @@ class MediaPlayer(QWidget):
             self.player.set_hwnd(self.video_frame.winId())
         elif sys.platform == "darwin":
             self.player.set_nsobject(int(self.video_frame.winId()))
-        
         self.is_fullscreen = True
         self.controls.set_fullscreen(True)
-        
-        # Install event filter to catch Escape key
         self.video_frame.installEventFilter(self)
-
-        # Show ESC message overlay
         self.show_esc_message()
-        # Show controls overlay initially
         self.show_controls_overlay()
 
     def show_esc_message(self):
@@ -199,7 +249,7 @@ class MediaPlayer(QWidget):
             self._esc_message_label.deleteLater()
             self._esc_message_label = None
         self._esc_message_label = QLabel(self.video_frame)
-        self._esc_message_label.setText("<b>Press ESC to return to normal view</b>")
+        self._esc_message_label.setText(f"<b>{self.translations.get('Press ESC to return to normal view', 'Press ESC to return to normal view')}</b>")
         self._esc_message_label.setStyleSheet(
             "background: rgba(0,0,0,0.7); color: white; padding: 16px 32px; border-radius: 8px; font-size: 20px;"
         )
@@ -236,7 +286,7 @@ class MediaPlayer(QWidget):
         play_icon = "\u25B6"  # Unicode black right-pointing triangle
         pause_icon = "||"  # Unicode double vertical bar
         play_pause_btn = QPushButton(play_icon if not is_playing else pause_icon)
-        play_pause_btn.setToolTip("Pause" if is_playing else "Play")
+        play_pause_btn.setToolTip(self.translations.get("Pause", "Pause") if is_playing else self.translations.get("Play", "Play"))
         play_pause_btn.setFixedSize(48, 48)
         play_pause_btn.setStyleSheet("font-size: 36px; background: #222; color: #fff; border-radius: 24px;")
         def toggle_play_pause():
@@ -250,7 +300,7 @@ class MediaPlayer(QWidget):
         layout.addWidget(play_pause_btn)
         # Stop
         stop_btn = QPushButton("⏹")
-        stop_btn.setToolTip("Stop")
+        stop_btn.setToolTip(self.translations.get("Stop", "Stop"))
         stop_btn.setFixedSize(48, 48)
         stop_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
         def stop_and_exit():
@@ -260,14 +310,14 @@ class MediaPlayer(QWidget):
         layout.addWidget(stop_btn)
         # Fast backward
         back_btn = QPushButton("⏪")
-        back_btn.setToolTip("Fast Backward")
+        back_btn.setToolTip(self.translations.get("Fast Backward", "Fast Backward"))
         back_btn.setFixedSize(48, 48)
         back_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
         back_btn.clicked.connect(lambda: self.seek(max(0, self.player.get_time()//1000 - 10)))
         layout.addWidget(back_btn)
         # Fast forward
         forward_btn = QPushButton("⏩")
-        forward_btn.setToolTip("Fast Forward")
+        forward_btn.setToolTip(self.translations.get("Fast Forward", "Fast Forward"))
         forward_btn.setFixedSize(48, 48)
         forward_btn.setStyleSheet("font-size: 28px; background: #222; color: #fff; border-radius: 24px;")
         forward_btn.clicked.connect(lambda: self.seek(self.player.get_time()//1000 + 10))
@@ -290,34 +340,26 @@ class MediaPlayer(QWidget):
         """Exit fullscreen mode"""
         if not self.is_fullscreen:
             return
-        
-        # Exit fullscreen mode
-        self.video_frame.setWindowFlags(Qt.Widget)
-        
+        # Remove event filter
+        self.video_frame.removeEventFilter(self)
         # Reparent video frame back to the original parent
         if self.normal_parent:
-            # Get the layout of the normal parent
             parent_layout = self.layout()
-            
-            # Add video frame back to the original layout
             parent_layout.insertWidget(0, self.video_frame, 1)
-            
-            # Make sure the video frame is visible
+            self.video_frame.setGeometry(self.normal_geometry)
             self.video_frame.show()
-            
-            # Update VLC player
             if sys.platform == "linux" or sys.platform == "linux2":
                 self.player.set_xwindow(self.video_frame.winId())
             elif sys.platform == "win32":
                 self.player.set_hwnd(self.video_frame.winId())
             elif sys.platform == "darwin":
                 self.player.set_nsobject(int(self.video_frame.winId()))
-        
+        # Close and delete the fullscreen window
+        if hasattr(self, 'fullscreen_window') and self.fullscreen_window:
+            self.fullscreen_window.close()
+            self.fullscreen_window = None
         self.is_fullscreen = False
         self.controls.set_fullscreen(False)
-        
-        # Remove event filter
-        self.video_frame.removeEventFilter(self)
 
     
     def eventFilter(self, obj, event):
@@ -366,3 +408,47 @@ class MediaPlayer(QWidget):
     def is_playing(self):
         """Check if player is currently playing"""
         return self.player.is_playing()
+
+class PlayerWindow(QMainWindow):
+    """Top-level window for video playback using MediaPlayer"""
+    add_to_favorites = pyqtSignal(dict)  # Signal to add current item to favorites
+    
+    def __init__(self, parent=None, favorites_manager=None):
+        super().__init__(parent)
+        # Get translations from parent or default to English
+        language = getattr(parent, 'language', 'en') if parent else 'en'
+        self.translations = get_translations(language)
+        self.setWindowTitle(self.translations.get("Player", "Player"))
+        self.setMinimumSize(800, 450)
+        self.favorites_manager = favorites_manager
+        self.player = MediaPlayer(self, favorites_manager)
+        self.setCentralWidget(self.player)
+        self.player.playback_stopped.connect(self.close)
+        self.player.add_to_favorites.connect(self.handle_add_to_favorites)
+        self._was_closed = False
+        self.current_item = None
+
+    def play(self, url, item=None):
+        # If the window was closed, re-create the player widget
+        if self._was_closed:
+            self.takeCentralWidget().deleteLater()
+            self.player = MediaPlayer(self, self.favorites_manager)
+            self.setCentralWidget(self.player)
+            self.player.playback_stopped.connect(self.close)
+            self.player.add_to_favorites.connect(self.handle_add_to_favorites)
+            self._was_closed = False
+        self.player.stop()  # Always stop previous playback
+        self.current_item = item
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.player.play(url, item)
+        
+    def handle_add_to_favorites(self, item):
+        """Handle add to favorites signal from player"""
+        self.add_to_favorites.emit(item)
+
+    def closeEvent(self, event):
+        self.player.stop()
+        self._was_closed = True
+        event.accept()

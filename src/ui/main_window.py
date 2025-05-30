@@ -1,36 +1,88 @@
 """
 Main application window
 """
-import os
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QMessageBox, 
-                            QAction, QMenu, QMenuBar, QToolBar, QStatusBar, QLabel)
-from PyQt5.QtCore import Qt, QSettings, QSize
-from PyQt5.QtGui import QIcon
+                            QAction, QMenu, QStatusBar, QLabel,
+                            QProgressDialog)
+from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QObject, QThread
+from PyQt5.QtSvg import QSvgWidget
 from src.api.xtream import XtreamClient
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
-from src.ui.tabs.favorites_tab import FavoritesTab
-from src.ui.tabs.downloads_tab import DownloadsTab
-from src.ui.widgets.dialogs import LoginDialog
-from src.utils.helpers import load_json_file, save_json_file, get_translations
-from src.config import FAVORITES_FILE, SETTINGS_FILE, DEFAULT_LANGUAGE, WINDOW_SIZE, ICON_SIZE
+from src.ui.tabs.search_tab import SearchTab
+
+from src.utils.helpers import get_translations
+from src.utils.favorites_manager import FavoritesManager
+from src.config import DEFAULT_LANGUAGE, WINDOW_SIZE
+from src.ui.widgets.home_screen import HomeScreenWidget
+from src.ui.player import PlayerWindow
+
+class CachePopulationThread(QThread):
+    progress_updated = pyqtSignal(int, int, str, bool)  # current_step, total_steps, message, is_error
+    population_finished = pyqtSignal(bool, str) # success, message
+
+    def __init__(self, api_client, parent=None):
+        super().__init__(parent)
+        self.api_client = api_client
+
+    def run(self):
+        try:
+            success, message = self.api_client.populate_full_cache(self.progress_callback)
+            self.population_finished.emit(success, message)
+        except Exception as e:
+            self.population_finished.emit(False, f"Error during cache population: {str(e)}")
+
+    def progress_callback(self, current_step, total_steps, message, is_error):
+        self.progress_updated.emit(current_step, total_steps, message, is_error)
+
+class LoadingIconController(QObject):
+    show_icon = pyqtSignal()
+    hide_icon = pyqtSignal()
+
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        self.show_icon.connect(self._show)
+        self.hide_icon.connect(self._hide)
+
+    def _show(self):
+        if hasattr(self.main_window, 'statusBar') and hasattr(self.main_window, 'loading_icon_label'):
+            if not self.main_window.loading_icon_label.isVisible():
+                self.main_window.statusBar.addPermanentWidget(self.main_window.loading_icon_label)
+                self.main_window.loading_icon_label.setVisible(True)
+            self.main_window.statusBar.showMessage("Loading images...")
+
+    def _hide(self):
+        if hasattr(self.main_window, 'statusBar') and hasattr(self.main_window, 'loading_icon_label'):
+            self.main_window.statusBar.clearMessage()
+            self.main_window.statusBar.removeWidget(self.main_window.loading_icon_label)
+            self.main_window.loading_icon_label.setVisible(False)
 
 class MainWindow(QMainWindow):
     """Main application window"""
+    favorites_changed = pyqtSignal()
     
     def __init__(self):
         super().__init__()
         self.api_client = XtreamClient()
-        self.favorites = []
         self.settings = QSettings()
         self.language = self.settings.value("language", DEFAULT_LANGUAGE)
         self.translations = get_translations(self.language)
         self.accounts = self.settings.value("accounts", {}, type=dict)
         self.current_account = self.settings.value("current_account", "", type=str)
-        self.setup_ui()
-        self.load_favorites()
-        self.load_settings()
+        
+        # Initialize favorites manager
+        self.favorites_manager = FavoritesManager(self.current_account)
+        self.favorites_manager.favorites_changed.connect(self.favorites_changed.emit)
+        
+        self.player_window = PlayerWindow(favorites_manager=self.favorites_manager)  # Persistent player window
+        self.player_window.add_to_favorites.connect(self.add_to_favorites)  # Connect player window favorites signal
+        self.expiry_str = ""
+        self.cache_thread = None
+        self.progress_dialog = None
+
+        self.setup_ui()  # Only call setup_ui here
         auto_login_success = False
         if self.current_account and self.current_account in self.accounts:
             acc = self.accounts[self.current_account]
@@ -43,54 +95,129 @@ class MainWindow(QMainWindow):
                     auto_login_success = True
         if not auto_login_success:
             self.show_account_switch_dialog()
-        self.downloads_tab = DownloadsTab()
-        self.tabs.addTab(self.downloads_tab, self.translations.get("Downloads", "Downloads"))
 
     def setup_ui(self):
         """Set up the UI components"""
-        self.setWindowTitle("Sahab Xtream IPTV")
+        self.setWindowTitle(self.translations.get("Sahab Xtream IPTV", "Sahab Xtream IPTV"))
         self.resize(*WINDOW_SIZE)
-        
-        # Create central widget with tabs
+
+        # --- HOME SCREEN ---
+        self.home_screen = HomeScreenWidget(
+            parent=self,
+            on_tile_clicked=self.handle_home_tile_clicked,
+            user_info={'username': self.current_account or ''},
+            expiry_date=self.expiry_str
+        )
+        self.home_screen.reload_requested.connect(self.handle_reload_requested)
+
+        # --- Prepare tabs ---
         self.tabs = QTabWidget()
-        
-        # Create tabs
-        self.live_tab = LiveTab(self.api_client, parent=self)
-        self.movies_tab = MoviesTab(self.api_client, parent=self)
-        self.series_tab = SeriesTab(self.api_client, parent=self)
-        self.favorites_tab = FavoritesTab(self.api_client, parent=self)
-        
-        # Connect signals
+        self.tabs.addTab(self.home_screen, self.translations.get("Home", "Home"))
+        self.live_tab = LiveTab(self.api_client, self.favorites_manager, parent=self)
+        self.movies_tab = MoviesTab(self.api_client, self.favorites_manager, parent=self)
+        self.series_tab = SeriesTab(self.api_client, self.favorites_manager, main_window=self)
+        self.search_tab = SearchTab(self.api_client, main_window=self) # Added SearchTab instance
+
+
         self.live_tab.add_to_favorites.connect(self.add_to_favorites)
         self.movies_tab.add_to_favorites.connect(self.add_to_favorites)
         self.series_tab.add_to_favorites.connect(self.add_to_favorites)
-        self.favorites_tab.remove_from_favorites.connect(self.remove_from_favorites)
-        
-        # Add tabs to tab widget
-        self.tabs.addTab(self.live_tab, self.translations["Live TV"])
-        self.tabs.addTab(self.movies_tab, self.translations["Movies"])
-        self.tabs.addTab(self.series_tab, self.translations["Series"])
-        self.tabs.addTab(self.favorites_tab, self.translations["Favorites"])
-        self.live_tab.main_window = self
+        # Connect SearchTab signals for item clicks
+        self.search_tab.movie_selected.connect(self.show_movie_details_from_search)
+        self.search_tab.series_selected.connect(self.show_series_details_from_search)
+        self.search_tab.channel_selected.connect(self.play_channel_from_search)
+
+        self.tabs.addTab(self.live_tab, self.translations.get("Live TV", "Live TV"))
+        self.tabs.addTab(self.movies_tab, self.translations.get("Movies", "Movies"))
+        self.tabs.addTab(self.series_tab, self.translations.get("Series", "Series"))
+
+        self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search")) # Added Search tab
+
+        self.live_tab.set_main_window(self)
         self.movies_tab.main_window = self
         self.series_tab.main_window = self
-        self.setCentralWidget(self.tabs)
+        self.search_tab.main_window = self # Set main_window for search_tab
+
         
+        # Connect favorites changed signal to update favorites tab
+
+        self.setCentralWidget(self.tabs)
+
+        # Connect tab change to handler
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+
         # Create menu bar
         self.create_menu_bar()
         
+        # Apply language settings including RTL layout
+        self.apply_language()
+
         # Create status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Ready")
-        
-        # Add account label and expiry label to status bar
+        self.statusBar.showMessage(self.translations.get("Ready", "Ready"))
         self.account_label = QLabel()
         self.expiry_label = QLabel()
         self.statusBar.addPermanentWidget(self.account_label)
         self.statusBar.addPermanentWidget(self.expiry_label)
         self.update_account_label()
-    
+        # Add loading icon label and loading counter for image loading
+        self.loading_icon_label = QSvgWidget('assets/infinite-spinner.svg')
+        self.loading_icon_label.setFixedSize(24, 24)  # Adjust size as needed for status bar
+        self.loading_icon_label.setVisible(False)
+        self.statusBar.addPermanentWidget(self.loading_icon_label, 1)
+        self.loading_counter = {'count': 0}
+        self.loading_icon_controller = LoadingIconController(self)
+
+    def show_series_details_from_search(self, series_data):
+        """Switches to Series tab and shows details for a series from search results."""
+        if hasattr(self, 'series_tab') and self.series_tab:
+            self.tabs.setCurrentWidget(self.series_tab)
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.series_tab.show_series_details_by_data(series_data))
+        else:
+            QMessageBox.warning(self, "Navigation Error", "Series tab is not available.")
+
+    def show_movie_details_from_search(self, movie_data):
+        """Switches to Movies tab and shows details for a movie from search results."""
+        if hasattr(self, 'movies_tab') and self.movies_tab:
+            self.tabs.setCurrentWidget(self.movies_tab)
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.movies_tab.show_movie_details_by_data(movie_data))
+        else:
+            QMessageBox.warning(self, "Navigation Error", "Movies tab is not available.")
+
+    def play_channel_from_search(self, channel_data):
+        """Switches to Live TV tab and plays the selected channel."""
+        if hasattr(self, 'live_tab') and self.live_tab:
+            # Optional: switch to live tab
+            # self.tabs.setCurrentWidget(self.live_tab)
+            self.live_tab.play_channel_by_data(channel_data)
+        else:
+            QMessageBox.warning(self, "Navigation Error", "Live TV tab is not available.")
+
+
+    def on_tab_changed(self, index):
+        current_widget = self.tabs.widget(index)
+        if current_widget == self.home_screen:
+            self.home_screen.update_expiry_date(self.expiry_str)
+        elif current_widget == self.series_tab and hasattr(self.series_tab, 'tab_selected'):
+            self.series_tab.tab_selected()
+        elif current_widget == self.search_tab and hasattr(self.search_tab, 'refresh_search'):
+            # self.search_tab.refresh_search() # Optionally refresh search or clear
+            pass # Search tab handles its state internally mostly
+
+    def handle_home_tile_clicked(self, key):
+        # Switch to the appropriate tab when a tile is clicked
+        # Home: 0, Live: 1, Movies: 2, Series: 3, Search: 4 (new)
+        tab_map = {'live': 1, 'movies': 2, 'series': 3, 'search': 4}
+        if key in tab_map:
+            self.tabs.setCurrentIndex(tab_map[key])
+            if key == 'search' and hasattr(self, 'search_tab'):
+                self.search_tab.search_input.setFocus() # Focus search input
+        elif key == 'settings': # Assuming 'settings' key for account management
+            self.show_account_management_screen()
+
     def create_menu_bar(self):
         """Create the menu bar"""
         menubar = self.menuBar()
@@ -138,171 +265,350 @@ class MainWindow(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
-    
-    def show_account_switch_dialog(self):
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Select IPTV Account")
-        layout = QVBoxLayout(dlg)
-        label = QLabel("Choose an account or add a new one:")
-        layout.addWidget(label)
-        combo = QComboBox()
-        combo.addItems(list(self.accounts.keys()) + ["Add new account..."])
-        layout.addWidget(combo)
-        btns = QHBoxLayout()
-        ok_btn = QPushButton("OK")
-        cancel_btn = QPushButton("Cancel")
-        edit_btn = QPushButton("Edit")
-        btns.addWidget(ok_btn)
-        btns.addWidget(edit_btn)
-        btns.addWidget(cancel_btn)
-        layout.addLayout(btns)
-        def on_ok():
-            idx = combo.currentIndex()
-            if idx == len(self.accounts):
-                self.show_login_dialog(account_switch=True)
-            else:
-                name = combo.currentText()
-                self.current_account = name
-                self.settings.setValue("current_account", name)
-                acc = self.accounts[name]
-                self.api_client.set_credentials(acc['server'], acc['username'], acc['password'])
-                success, _ = self.api_client.authenticate()
-                if success:
-                    self.connect_to_server(acc['server'], acc['username'], acc['password'])
-                else:
-                    self.show_login_dialog(account_switch=True, prefill=acc)
-            dlg.accept()
-        def on_edit():
-            idx = combo.currentIndex()
-            if idx < len(self.accounts):
-                name = combo.currentText()
-                acc = self.accounts[name]
-                self.edit_account(name, acc)
-                dlg.accept()
-        ok_btn.clicked.connect(on_ok)
-        edit_btn.clicked.connect(on_edit)
-        cancel_btn.clicked.connect(dlg.reject)
-        dlg.exec_()
 
-    def show_login_dialog(self, account_switch=False, prefill=None):
+        # Add Home action to menu bar for returning to home screen
+        home_action = QAction("Home", self)
+        home_action.setShortcut("Ctrl+H")
+        home_action.triggered.connect(self.show_home_screen)
+        menubar.addAction(home_action)
+    
+    def start_full_cache_population(self, force_reload=False):
+        if not self.api_client or not self.api_client.server_url:
+            self.show_status_message("API client not configured. Cannot populate cache.")
+            return
+
+        if self.cache_thread and self.cache_thread.isRunning():
+            self.show_status_message("Cache population is already in progress.")
+            return
+
+        if force_reload:
+            self.api_client.invalidate_cache()
+            print("[CACHE] Full cache invalidated due to forced reload.")
+
+        self.progress_dialog = QProgressDialog("Populating cache...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle(self.translations.get("Caching Data", "Caching Data"))
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(False) # We will close it manually
+        self.progress_dialog.setAutoReset(False) # We will reset it manually
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.show()
+
+        self.cache_thread = CachePopulationThread(self.api_client)
+        self.cache_thread.progress_updated.connect(self.update_progress_dialog)
+        self.cache_thread.population_finished.connect(self.on_cache_population_finished)
+        self.cache_thread.start()
+
+    def update_progress_dialog(self, current_step, total_steps, message, is_error):
+        dlg = self.progress_dialog
+        if not dlg:
+            return
+        if total_steps > 0:
+            dlg.setMaximum(total_steps)
+            dlg.setValue(current_step)
+        else:
+            dlg.setMaximum(0)
+            dlg.setValue(0)
+        dlg.setLabelText(message)
+        if dlg.wasCanceled():
+            if self.cache_thread and self.cache_thread.isRunning():
+                self.cache_thread.requestInterruption()
+                print("[CACHE POPULATE] Cache population canceled by user.")
+                # self.on_cache_population_finished(False, "Cache population canceled.")
+    
+    def on_cache_population_finished(self, success, message):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        # Always reload favorites from file after cache population to ensure they persist
+        self.load_favorites()
+        if success:
+            self.show_status_message("Full cache population completed successfully.")
+            self.reload_tab_categories()
+            self.home_screen.update_expiry_date(self.expiry_str)
+        else:
+            self.show_status_message(f"Cache population failed: {message}")
+        self.cache_thread = None # Allow re-creation
+
+    def reload_tab_categories(self):
+        """Reloads categories in all relevant tabs."""
+        if hasattr(self, 'live_tab') and self.live_tab:
+            self.live_tab.load_categories()
+        if hasattr(self, 'movies_tab') and self.movies_tab:
+            self.movies_tab.load_categories()
+        if hasattr(self, 'series_tab') and self.series_tab:
+            self.series_tab.load_categories()
+        print("[UI] Tab categories reloaded after cache population.")
+
+    def handle_reload_requested(self):
+        """Handles the reload request from the home screen."""
+        if self.api_client and self.api_client.server_url:
+            self.start_full_cache_population(force_reload=True)
+            self.show_status_message("Cache cleared and data refresh initiated.")
+        else:
+            self.show_status_message("API client not available or not configured. Cannot reload data.")
+
+    def show_account_management_screen(self):
+        from src.ui.widgets.account_management import AccountManagementScreen
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.translations.get("Account Management", "Account Management"))
+        dialog.setMinimumWidth(500)
+        layout = QVBoxLayout(dialog)
+        screen = AccountManagementScreen(self, self.accounts, self.current_account)
+        layout.addWidget(screen)
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def show_account_switch_dialog(self):
+        self.show_account_management_screen()
+
+    def show_login_dialog(self, account_switch=False, prefill=None, is_add_mode=False):
         # Get saved credentials or prefill
         if prefill:
             server = prefill.get('server', '')
             username = prefill.get('username', '')
             password = prefill.get('password', '')
-            remember = True
+            remember = True # In edit mode, 'remember' is implicitly true for existing data
             account_name = prefill.get('account_name', self.current_account or "")
-        else:
+        else: # This is typically for add mode or initial login
             server = self.settings.value("server", "")
             username = self.settings.value("username", "")
             password = self.settings.value("password", "")
             remember = self.settings.value("remember_credentials", True, type=bool)
-            account_name = self.current_account or ""
+            account_name = "" # Start with empty name for add mode
+
         from src.ui.widgets.dialogs import LoginDialog
-        from PyQt5.QtWidgets import QLineEdit, QLabel, QVBoxLayout
-        dialog = LoginDialog(self, server, username, password, remember)
-        # Add account name field to the dialog
-        name_label = QLabel("Account Name:")
-        name_edit = QLineEdit(account_name)
-        dialog.layout().insertWidget(0, name_edit)
-        dialog.layout().insertWidget(0, name_label)
+        # Pass account_name and is_add_mode to LoginDialog constructor
+        dialog = LoginDialog(self, account_name, server, username, password, remember, is_add_mode)
+
+        if is_add_mode:
+            dialog.setWindowTitle(self.translations.get("Add New Account", "Add New Account"))
+            # Button text is already handled by LoginDialog's new __init__ and setup_ui
+        else:
+            dialog.setWindowTitle(f"Edit Account: {account_name}")
+            # Button text is already handled by LoginDialog's new __init__ and setup_ui
+
         if dialog.exec_():
             credentials = dialog.get_credentials()
-            name = name_edit.text().strip() or f"Account {len(self.accounts)+1}"
-            # Save account
+            new_account_name = credentials.get('account_name', '').strip()
+
+            if not new_account_name:
+                QMessageBox.warning(self, "Input Error", "Account name cannot be empty.")
+                return # Or re-show dialog
+
+            # Check for duplicate account name (only if it's a new name or add mode)
+            if (is_add_mode and new_account_name in self.accounts) or \
+               (not is_add_mode and new_account_name != account_name and new_account_name in self.accounts):
+                QMessageBox.warning(self, "Input Error", f"An account with the name '{new_account_name}' already exists.")
+                return # Or re-show dialog
+
             acc = {
                 'server': credentials['server'],
                 'username': credentials['username'],
                 'password': credentials['password'],
-                'account_name': name
+                'account_name': new_account_name # Use the new name from dialog
             }
-            # Remove old name if renaming
-            if self.current_account and self.current_account in self.accounts and self.current_account != name:
-                self.accounts.pop(self.current_account)
-            self.accounts[name] = acc
-            self.current_account = name
+
+            # If editing and name changed, remove old entry
+            if not is_add_mode and account_name and account_name != new_account_name and account_name in self.accounts:
+                del self.accounts[account_name]
+            
+            self.accounts[new_account_name] = acc
             self.settings.setValue("accounts", self.accounts)
-            self.settings.setValue("current_account", name)
-            # Save credentials if remember is checked
-            if credentials['remember']:
-                self.settings.setValue("server", credentials['server'])
-                self.settings.setValue("username", credentials['username'])
-                self.settings.setValue("password", credentials['password'])
-                self.settings.setValue("remember_credentials", True)
+
+            if not is_add_mode: # Editing an existing account
+                # Only switch and connect if account_switch is True
+                if account_switch:
+                    self.current_account = new_account_name
+                    self.settings.setValue("current_account", new_account_name)
+                    
+                    if credentials['remember']:
+                        self.settings.setValue("server", credentials['server'])
+                        self.settings.setValue("username", credentials['username'])
+                        self.settings.setValue("password", credentials['password'])
+                        self.settings.setValue("remember_credentials", True)
+                    else:
+                        self.settings.remove("server")
+                        self.settings.remove("username")
+                        self.settings.remove("password")
+                        self.settings.setValue("remember_credentials", False)
+                    
+                    self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
+                    self.update_account_label()
+                else:
+                    # If not switching, just show a success message. 
+                    # The current account remains unchanged.
+                    self.show_status_message(f"Account '{new_account_name}' updated successfully.")
+                    # We might need to update the account label if the *current* account's name changed,
+                    # but not switch to the *edited* account if it wasn't the current one.
+                    # If the edited account *was* the current one and its name changed, 
+                    # current_account might be stale. Let's update it if the name changed.
+                    if self.current_account == account_name and account_name != new_account_name:
+                        # The current account was renamed, update self.current_account to the new name
+                        # but don't trigger a full connect/switch if account_switch is False.
+                        self.current_account = new_account_name
+                        self.settings.setValue("current_account", self.current_account)
+                    self.update_account_label() # Refresh label, might show old or new name based on current_account
             else:
-                self.settings.remove("server")
-                self.settings.remove("username")
-                self.settings.remove("password")
-                self.settings.setValue("remember_credentials", False)
-            # Connect to server
-            self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
-            self.update_account_label()  # Update app title after login
-        elif account_switch:
-            self.show_account_switch_dialog()
+                # In add mode, we just save and return to account management. No auto-switch.
+                self.show_status_message(f"Account '{new_account_name}' added successfully.")
+                # The account management screen should refresh itself or be re-shown
+
+            # Refresh account management if it's open or re-trigger it
+            # This part might need adjustment based on how AccountManagementScreen is structured
+            # For now, assume it will be re-shown or refreshed by the caller
+
+        else: # Dialog was cancelled
+            # Only close the app if it's an initial login (account_switch=True)
+            # AND it's NOT the "Add Account" dialog being cancelled (is_add_mode=False).
+            # If is_add_mode is True, cancelling should just return to account management.
+            if account_switch and not is_add_mode:
+                self.close() # Close app if initial login is cancelled
+
+    def clear_grids(self):
+        # Clear Live grid
+        if hasattr(self, 'live_tab') and hasattr(self.live_tab, 'channel_grid_layout'):
+            layout = self.live_tab.channel_grid_layout
+            if layout is not None and hasattr(layout, 'count'):
+                try:
+                    for i in reversed(range(layout.count())):
+                        item = layout.itemAt(i)
+                        if item is not None:
+                            widget = item.widget()
+                            if widget:
+                                widget.setParent(None)
+                except RuntimeError:
+                    pass  # Layout was deleted
+        # Clear Movies grid
+        if hasattr(self, 'movies_tab') and hasattr(self.movies_tab, 'movie_grid_layout'):
+            layout = self.movies_tab.movie_grid_layout
+            if layout is not None and hasattr(layout, 'count'):
+                try:
+                    for i in reversed(range(layout.count())):
+                        item = layout.itemAt(i)
+                        if item is not None:
+                            widget = item.widget()
+                            if widget:
+                                widget.setParent(None)
+                except RuntimeError:
+                    pass
+        # Clear Series grid
+        if hasattr(self, 'series_tab') and hasattr(self.series_tab, 'series_grid_layout'):
+            layout = self.series_tab.series_grid_layout
+            if layout is not None and hasattr(layout, 'count'):
+                try:
+                    for i in reversed(range(layout.count())):
+                        item = layout.itemAt(i)
+                        if item is not None:
+                            widget = item.widget()
+                            if widget:
+                                widget.setParent(None)
+                except RuntimeError:
+                    pass
 
     def connect_to_server(self, server, username, password):
-        self.statusBar.showMessage("Connecting to server...")
+        self.statusBar.showMessage(self.translations.get("Connecting to server...", "Connecting to server..."))
+        # Recreate all tabs and UI to avoid using deleted widgets
+        # self.setup_ui()  # This will recreate tabs, home_screen, etc. - Let's see if this is still needed or if selective updates are better
+        # self.load_favorites()  # Ensure favorites are loaded for the new tab instance
         self.api_client.set_credentials(server, username, password)
         success, data = self.api_client.authenticate()
         expiry_str = ""
         if success:
-            self.statusBar.showMessage("Connected successfully")
-            self.live_tab.load_categories()
-            self.movies_tab.load_categories()
-            self.series_tab.load_categories()
+            self.statusBar.showMessage(self.translations.get("Connected successfully. Populating cache...", "Connected successfully. Populating cache..."))
+            self.start_full_cache_population() # This will also reload tab categories upon completion
+            
             # Get expiry date from user_info if available
-            if data and 'user_info' in data and 'exp_date' in data['user_info']:
-                import datetime
-                exp_ts = int(data['user_info']['exp_date'])
-                expiry = datetime.datetime.fromtimestamp(exp_ts)
-                expiry_str = expiry.strftime('%Y-%m-%d')
-                self.expiry_label.setText(f"Expiry: {expiry_str}")
-            else:
-                self.expiry_label.setText("")
+            from PyQt5.QtCore import QTimer
+
+            def update_expiry():
+                if data and 'user_info' in data and 'exp_date' in data['user_info']:
+                    import datetime
+                    exp_ts = int(data['user_info']['exp_date'])
+                    expiry = datetime.datetime.fromtimestamp(exp_ts)
+                    self.expiry_str = expiry.strftime('%Y-%m-%d')
+                    if hasattr(self, 'home_screen') and self.home_screen:
+                        try:
+                            self.home_screen.update_expiry_date(self.expiry_str)
+                        except RuntimeError:
+                            print("Warning: Attempted to update expiry date on a deleted HomeScreen instance.")
+                    if hasattr(self, 'expiry_label') and self.expiry_label:
+                        self.expiry_label.setText(f"Expiry: {self.expiry_str}")
+                else:
+                    if hasattr(self, 'expiry_label') and self.expiry_label:
+                        self.expiry_label.setText("")
+
+            QTimer.singleShot(100, update_expiry)
             self.update_account_label()
             self._load_account_data()
         else:
-            self.statusBar.showMessage("Connection failed")
+            self.statusBar.showMessage(self.translations.get("Connection failed", "Connection failed"))
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Connection Error", f"Failed to connect: {data}")
             self.show_login_dialog(account_switch=True)
 
     def load_favorites(self):
-        """Load favorites from file"""
-        self.favorites = load_json_file(FAVORITES_FILE, [])
-        self.favorites_tab.set_favorites(self.favorites)
-    
+        """Load favorites from file for the current account"""
+        self.favorites_manager.load_favorites()
+
     def save_favorites(self):
-        from src.utils.helpers import save_json_file
-        fav_file = self._account_data_key('favorites.json')
-        save_json_file(fav_file, self.favorites)
-    
+        """Save favorites to file, keyed by account"""
+        self.favorites_manager.save_favorites()
+
     def add_to_favorites(self, item):
-        """Add an item to favorites"""
-        # Check if already in favorites
-        for favorite in self.favorites:
-            if (favorite['stream_type'] == item['stream_type'] and
-                ((item['stream_type'] == 'live' and favorite.get('stream_id') == item.get('stream_id')) or
-                 (item['stream_type'] == 'movie' and favorite.get('stream_id') == item.get('stream_id')) or
-                 (item['stream_type'] == 'series' and favorite.get('episode_id') == item.get('episode_id')))):
-                QMessageBox.information(self, "Already in Favorites", f"{item['name']} is already in your favorites")
-                return
+        """Add an item to favorites for the current account"""
+        if self.favorites_manager.add_to_favorites(item):
+            item_name = item.get('name', 'Item')
+            self.statusBar.showMessage(f"'{item_name}' added to favorites.", 3000)
+        else:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Favorites", "Already in favorites.")
+
+    def remove_from_favorites(self, item_to_remove):
+        """Remove an item from favorites for the current account.
         
-        # Add to favorites
-        self.favorites.append(item)
-        self.favorites_tab.set_favorites(self.favorites)
-        self.save_favorites()
+        Args:
+            item_to_remove: Can be an integer (index) or a dictionary (item data)
+        """
+        removed_item = None
         
-        QMessageBox.information(self, "Added to Favorites", f"{item['name']} has been added to your favorites")
-    
-    def remove_from_favorites(self, index):
-        """Remove an item from favorites"""
-        if 0 <= index < len(self.favorites):
-            del self.favorites[index]
-            self.favorites_tab.set_favorites(self.favorites)
-            self.save_favorites()
-    
+        if isinstance(item_to_remove, int):
+            # Remove by index
+            favorites_list = self.favorites_manager.get_favorites()
+            if 0 <= item_to_remove < len(favorites_list):
+                removed_item = favorites_list[item_to_remove]
+                self.favorites_manager.remove_from_favorites(removed_item)
+        else:
+            # Remove by matching item data
+            if self.favorites_manager.remove_from_favorites(item_to_remove):
+                removed_item = item_to_remove
+        
+        if removed_item:
+            item_name = removed_item.get('name', 'Item')
+            self.statusBar.showMessage(f"'{item_name}' removed from favorites.", 3000)
+            self.favorites_changed.emit()
+        else:
+            item_name_to_remove = item_to_remove.get('name', 'Unknown item') if isinstance(item_to_remove, dict) else 'Item at invalid index'
+            self.statusBar.showMessage(f"Could not remove '{item_name_to_remove}'. Item not found in favorites.", 3000)
+
+    def is_favorite(self, item_to_check):
+        """Check if an item is in favorites for the current account"""
+        return self.favorites_manager.is_favorite(item_to_check)
+    def switch_account(self, name):
+        """Switch to a different account and reload all tab data without deleting/recreating widgets"""
+        self.current_account = name
+        self.settings.setValue("current_account", name)
+        self.favorites_manager.set_current_account(name)
+        # Reload categories/data in all tabs to reflect new account
+        if hasattr(self, 'live_tab') and self.live_tab:
+            self.live_tab.load_categories()
+        if hasattr(self, 'movies_tab') and self.movies_tab:
+            self.movies_tab.load_categories()
+        if hasattr(self, 'series_tab') and self.series_tab:
+            self.series_tab.load_categories()
+        # Optionally, reload downloads or other per-account data here
+        # Do NOT recreate or delete any widgets/tabs/main window
+
     def load_settings(self):
         """Load application settings"""
         self.language = self.settings.value("language", DEFAULT_LANGUAGE)
@@ -326,10 +632,15 @@ class MainWindow(QMainWindow):
     def apply_language(self):
         """Apply language to UI elements"""
         # Set tab titles
-        self.tabs.setTabText(0, self.translations["Live TV"])
-        self.tabs.setTabText(1, self.translations["Movies"])
-        self.tabs.setTabText(2, self.translations["Series"])
-        self.tabs.setTabText(3, self.translations["Favorites"])
+        self.tabs.setTabText(0, self.translations.get("Home", "Home"))
+        self.tabs.setTabText(1, self.translations.get("Live TV", "Live TV"))
+        self.tabs.setTabText(2, self.translations.get("Movies", "Movies"))
+        self.tabs.setTabText(3, self.translations.get("Series", "Series"))
+        self.tabs.setTabText(4, self.translations.get("Search", "Search")) # Added Search tab title
+        
+        # Update home screen translations
+        if hasattr(self, 'home_screen') and self.home_screen:
+            self.home_screen.update_translations(self.translations)
         
         # Set layout direction
         if self.language == "ar":
@@ -346,10 +657,9 @@ class MainWindow(QMainWindow):
             "Features:\n"
             "- Live TV streaming\n"
             "- Movies and Series playback\n"
-            "- Download functionality\n"
             "- Recording capability\n"
             "- Favorites management\n\n"
-            "Version 1.0.0"
+            "Version 2.0.0"
         )
     
     def closeEvent(self, event):
@@ -360,28 +670,18 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def edit_account(self, name, acc):
-        from src.ui.widgets.dialogs import LoginDialog
-        dialog = LoginDialog(self, acc.get('server', ''), acc.get('username', ''), acc.get('password', ''), True)
-        if dialog.exec_():
-            credentials = dialog.get_credentials()
-            # Optionally allow renaming
-            from PyQt5.QtWidgets import QInputDialog
-            new_name, ok = QInputDialog.getText(self, "Edit Account Name", "Edit account name:", text=name)
-            if not ok or not new_name.strip():
-                new_name = name
-            # Update account
-            self.accounts.pop(name)
-            self.accounts[new_name] = {
-                'server': credentials['server'],
-                'username': credentials['username'],
-                'password': credentials['password']
-            }
-            self.current_account = new_name
-            self.settings.setValue("accounts", self.accounts)
-            self.settings.setValue("current_account", new_name)
-            self.api_client.set_credentials(credentials['server'], credentials['username'], credentials['password'])
-            self.connect_to_server(credentials['server'], credentials['username'], credentials['password'])
-            self.update_account_label()
+        # Ensure the account data being prefilled has the 'account_name' key
+        # which show_login_dialog expects in prefill.
+        # The 'acc' dictionary from self.accounts should already have this.
+        if 'account_name' not in acc:
+            acc['account_name'] = name # Ensure it's there for prefill
+
+        # Call the centralized show_login_dialog for editing
+        self.show_login_dialog(prefill=acc, is_add_mode=False, account_switch=False)
+        # After show_login_dialog completes, the account management screen (if open)
+        # or the main UI should reflect changes. If AccountManagementScreen is a dialog,
+        # it might need to be closed and reopened or have a refresh mechanism.
+        # For now, we assume show_login_dialog handles all necessary updates if successful.
 
     def edit_current_account(self):
         if self.current_account and self.current_account in self.accounts:
@@ -390,23 +690,26 @@ class MainWindow(QMainWindow):
     def update_account_label(self):
         if hasattr(self, 'account_label'):
             if self.current_account:
-                self.account_label.setText(f"Account: {self.current_account}")
+                user_info={'username': self.current_account or ''},
+                self.home_screen.update_user_info(self.current_account)
                 self.setWindowTitle(f"Sahab Xtream IPTV - {self.current_account}")
             else:
                 self.account_label.setText("")
-                self.setWindowTitle("Sahab Xtream IPTV")
+                self.setWindowTitle(self.translations.get("Sahab Xtream IPTV", "Sahab Xtream IPTV"))
 
     def _account_data_key(self, suffix):
         # Use a unique key for each account's data
         return f"{self.current_account}_{suffix}" if self.current_account else suffix
 
     def _load_account_data(self):
-        # Load favorites and downloads for the current account
-        from src.utils.helpers import load_json_file
-        fav_file = self._account_data_key('favorites.json')
-        try:
-            self.favorites = load_json_file(fav_file, [])
-        except Exception:
-            self.favorites = []
-        self.favorites_tab.set_favorites(self.favorites)
+        # Load downloads for the current account (favorites are already loaded by load_favorites)
         # TODO: Implement per-account downloads loading if needed
+        pass
+
+    def show_home_screen(self):
+        """Return to the home screen from any tab"""
+        self.setCentralWidget(self.home_screen)
+
+    def show_status_message(self, message, timeout=5000):
+        if hasattr(self, 'statusBar') and self.statusBar:
+            self.statusBar.showMessage(message, timeout)
