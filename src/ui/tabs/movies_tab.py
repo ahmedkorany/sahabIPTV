@@ -7,23 +7,24 @@ from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox, QListWidgetItem, QScrollArea, QGridLayout, QComboBox, QFrame
 )
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QPixmap, QFont, QFontMetrics
-from PyQt5.QtCore import QRect
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QRect
+from PyQt5.QtGui import QPixmap, QFont, QFontMetrics # QRect already in QtCore
 from src.ui.widgets.movie_details_widget import MovieDetailsWidget
 from src.utils.helpers import load_image_async, get_translations
 from src.api.tmdb import TMDBClient
 from src.ui.widgets.dialogs import MovieDetailsDialog
+from src.utils.offline_manager import OfflineManager # Added
 
 class MoviesTab(QWidget):
     """Movies tab widget"""
     add_to_favorites = pyqtSignal(dict)
     
-    def __init__(self, api_client, favorites_manager=None, parent=None):
-        super().__init__(parent)
+    def __init__(self, api_client, favorites_manager=None, offline_manager=None, main_window=None, parent=None): # Added offline_manager, main_window explicitly
+        super().__init__(parent if parent else main_window) # Ensure parent is correctly set
         self.api_client = api_client
         self.favorites_manager = favorites_manager
-        self.main_window = parent
+        self.offline_manager = offline_manager # Added
+        self.main_window = main_window if main_window else parent # Ensure main_window is set
         self.details_widget = None
         self.movies = []
         self.all_movies = []  # Store all movies across categories
@@ -45,9 +46,15 @@ class MoviesTab(QWidget):
         self.tmdb_client = TMDBClient()  # Loads keys from .env automatically
         
         # Get translations from main window
-        self.translations = get_translations(parent.language if parent and hasattr(parent, 'language') else 'en')
+        # Ensure self.main_window is used for language if available
+        language_source = self.main_window if self.main_window and hasattr(self.main_window, 'language') else parent
+        self.translations = get_translations(language_source.language if language_source and hasattr(language_source, 'language') else 'en')
 
-        self.setup_ui() # self.main_window is already set from parent
+        self.setup_ui()
+
+        if self.offline_manager:
+            self.offline_manager.status_changed_signal.connect(self._handle_download_status_changed_for_grid)
+            self.offline_manager.offline_list_changed_signal.connect(self._refresh_movie_grid_if_visible)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -391,6 +398,29 @@ class MoviesTab(QWidget):
             title_text_label.setGeometry(0, poster_height - title_box_height, poster_width, title_box_height)
             title_text_label.raise_() 
 
+            # Downloaded Indicator
+            if self.offline_manager and self.offline_manager.is_movie_downloaded(stream_id_str): # Using is_movie_downloaded for COMPLETED + file exists check
+                downloaded_indicator = QLabel(poster_container)
+                downloaded_indicator.setText("✓") # Unicode checkmark
+                downloaded_indicator.setFont(QFont('Arial', 16, QFont.Bold))
+                downloaded_indicator.setStyleSheet(
+                    "QLabel { background-color: rgba(17, 17, 17, 0.75); color: #4CAF50; "
+                    "border-radius: 3px; padding: 1px 3px; }"
+                )
+                downloaded_indicator.setAlignment(Qt.AlignCenter)
+
+                indicator_width = 28
+                indicator_height = 28
+                padding = 5
+                downloaded_indicator.setGeometry(
+                    poster_container.width() - indicator_width - padding,
+                    poster_container.height() - indicator_height - padding,
+                    indicator_width,
+                    indicator_height
+                )
+                downloaded_indicator.raise_()
+
+
             # Overlay 'new.png' if the movie is new
             is_recent = False
             if movie.get('added'):
@@ -434,6 +464,23 @@ class MoviesTab(QWidget):
                 row += 1
         # Hide sorting panel if no movies to show
         self.order_panel.setVisible(bool(movies))
+
+    def _handle_download_status_changed_for_grid(self, stream_id, status):
+        # If a movie's download status changes, refresh the current grid page
+        # This is a broad update, but ensures indicators are correct.
+        if self.stacked_widget.currentIndex() == 0: # Grid view is active
+            # Check if the stream_id is part of the currently displayed movies on the page
+            # Ensure self.filtered_movies is not None before list comprehension
+            current_movies_on_page, _ = self.paginate_items(self.filtered_movies if self.filtered_movies else [], self.current_page)
+            if any(str(m.get('stream_id')) == stream_id for m in current_movies_on_page):
+                print(f"[MoviesTab] Download status changed for {stream_id} on current page, refreshing grid.")
+                self.display_current_page()
+
+    def _refresh_movie_grid_if_visible(self):
+        # Triggered by offline_list_changed (e.g. item removed, affecting all)
+        if self.stacked_widget.currentIndex() == 0: # Grid view is active
+            print(f"[MoviesTab] Offline list changed, refreshing grid.")
+            self.display_current_page()
 
     def show_movie_details(self, movie):
         # Remove old details widget if present

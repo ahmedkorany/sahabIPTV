@@ -1,8 +1,9 @@
-from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea
-from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer, QSize
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QProgressBar, QMenu
+from PyQt5.QtGui import QPixmap, QFont, QIcon
 from src.utils.helpers import load_image_async, get_translations
 from src.ui.widgets.cast_widget import CastWidget
+from src.utils.offline_manager import OfflineManager
 
 class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
@@ -24,17 +25,46 @@ class MovieDetailsWidget(QWidget):
         # Get translations from main window or default to English
         language = getattr(main_window, 'language', 'en') if main_window else 'en'
         self.translations = get_translations(language)
+        self.offline_manager = None
+        if self.main_window and hasattr(self.main_window, 'offline_manager'):
+            self.offline_manager = self.main_window.offline_manager
+        else:
+            print("[MovieDetailsWidget] OfflineManager not available from main_window.")
+            # Potentially disable download functionality if manager is not present
+            # For now, we'll proceed, and features will fail if self.offline_manager is None
+
         self.setup_ui()
         self._set_initial_layout_direction()
         self.update_metadata_from_api()
-    
+
+        if self.offline_manager:
+            self._setup_download_connections()
+            self._update_download_ui() # Initial UI setup
+
+        # Timer for periodic UI updates
+        self.ui_update_timer = QTimer(self)
+        self.ui_update_timer.timeout.connect(self._update_download_ui_if_visible)
+        # Timer interval will be set in showEvent
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.offline_manager:
+            self.ui_update_timer.start(2000)  # Check every 2 seconds when widget is visible
+            self._update_download_ui() # Refresh UI when widget becomes visible
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self.offline_manager:
+            self.ui_update_timer.stop()
+
     def _set_initial_layout_direction(self):
         """Set initial layout direction - always LTR for MovieDetailsWidget"""
         from PyQt5.QtCore import Qt
         
         # Always set LTR layout for MovieDetailsWidget regardless of app language
         self.setLayoutDirection(Qt.LeftToRight)
-        print(f"[MovieDetailsWidget] Set LTR layout (override RTL app setting)")
+        # print(f"[MovieDetailsWidget] Set LTR layout (override RTL app setting)") # Reduced verbosity
+
     def _clear_layout(self, layout):
         if layout is not None:
             while layout.count():
@@ -261,7 +291,10 @@ class MovieDetailsWidget(QWidget):
         
         hero_layout.addLayout(info_layout)
         main_layout.addWidget(self.hero_widget)
-        
+
+        # Download UI section
+        self._setup_download_ui_elements(main_layout) # Pass main_layout to add download controls
+
         # Cast section fills all remaining space below hero
         #cast_header = QLabel("Cast")
         #cast_header.setFont(QFont('Arial', 20, QFont.Bold))
@@ -379,10 +412,253 @@ class MovieDetailsWidget(QWidget):
     
     # Removed backdrop image loading with callbacks functionality
 
+    def _setup_download_ui_elements(self, main_layout):
+        if not self.offline_manager: # Don't create UI if manager is missing
+            return
+
+        self.download_controls_widget = QWidget()
+        download_controls_layout = QHBoxLayout(self.download_controls_widget)
+        download_controls_layout.setContentsMargins(10, 5, 10, 5) # Add some margins
+        download_controls_layout.setSpacing(10)
+
+        self.download_action_button = QPushButton("Download") # Text will be updated
+        self.download_action_button.setIconSize(QSize(16,16))
+        self.download_action_button.clicked.connect(self._handle_download_action)
+        download_controls_layout.addWidget(self.download_action_button)
+
+        self.download_status_label = QLabel("")
+        download_controls_layout.addWidget(self.download_status_label)
+
+        self.download_progress_bar = QProgressBar()
+        self.download_progress_bar.setVisible(False)
+        self.download_progress_bar.setFixedHeight(20) # Make it a bit slimmer
+        self.download_progress_bar.setTextVisible(True) # Show percentage on bar
+        download_controls_layout.addWidget(self.download_progress_bar, 1) # Add stretch factor
+
+        self.cancel_download_button = QPushButton()
+        self.cancel_download_button.setIcon(QIcon.fromTheme("process-stop", QIcon("assets/reload.png"))) # Placeholder icon
+        self.cancel_download_button.setToolTip(self.translations.get_translation("Cancel Download", "Cancel Download"))
+        self.cancel_download_button.setVisible(False)
+        self.cancel_download_button.setFixedSize(QSize(30,30))
+        self.cancel_download_button.clicked.connect(self._cancel_download)
+        download_controls_layout.addWidget(self.cancel_download_button)
+
+        self.delete_download_button = QPushButton()
+        self.delete_download_button.setIcon(QIcon.fromTheme("edit-delete", QIcon("assets/reload.png"))) # Placeholder icon
+        self.delete_download_button.setToolTip(self.translations.get_translation("Delete Download", "Delete Download"))
+        self.delete_download_button.setVisible(False)
+        self.delete_download_button.setFixedSize(QSize(30,30))
+        self.delete_download_button.clicked.connect(self._delete_download)
+        download_controls_layout.addWidget(self.delete_download_button)
+
+        main_layout.addWidget(self.download_controls_widget)
+
+
+    def _setup_download_connections(self):
+        if not self.offline_manager:
+            return
+        self.offline_manager.progress_signal.connect(self._on_download_progress)
+        self.offline_manager.completion_signal.connect(self._on_download_completion)
+        self.offline_manager.error_signal.connect(self._on_download_error)
+        self.offline_manager.status_changed_signal.connect(self._on_download_status_changed)
+        # self.offline_manager.offline_list_changed_signal.connect(self._update_download_ui) # Could be too broad
+
+    def _update_download_ui_if_visible(self):
+        if self.isVisible() and self.stream_id:
+            self._update_download_ui()
+
+    def _update_download_ui(self):
+        if not self.offline_manager or not self.stream_id:
+            if hasattr(self, 'download_controls_widget'): # Check if UI elements exist
+                 self.download_controls_widget.setVisible(False) # Hide download controls if no manager or stream_id
+            return
+
+        if not hasattr(self, 'download_action_button'): # UI not setup yet
+            return
+
+        self.download_controls_widget.setVisible(True)
+
+        status = self.offline_manager.get_movie_status(self.stream_id)
+        progress = self.offline_manager.get_movie_progress(self.stream_id)
+
+        self.download_progress_bar.setVisible(False)
+        self.cancel_download_button.setVisible(False)
+        self.delete_download_button.setVisible(False)
+        self.download_action_button.setEnabled(True)
+        self.download_status_label.setText("")
+
+        if status == OfflineManager.PENDING:
+            self.download_action_button.setText(self.translations.get_translation("Pending", "Pending..."))
+            self.download_action_button.setIcon(QIcon("assets/reload.png")) # Placeholder
+            self.download_action_button.setEnabled(False) # Or enable to allow cancel from pending
+            self.cancel_download_button.setVisible(True)
+        elif status == OfflineManager.DOWNLOADING:
+            self.download_action_button.setText(self.translations.get_translation("Pause", "Pause"))
+            self.download_action_button.setIcon(QIcon.fromTheme("media-playback-pause", QIcon("assets/reload.png"))) # Placeholder
+            self.download_progress_bar.setVisible(True)
+            self.download_progress_bar.setValue(progress)
+            self.download_status_label.setText(f"{progress}%")
+            self.cancel_download_button.setVisible(True)
+        elif status == OfflineManager.PAUSED:
+            self.download_action_button.setText(self.translations.get_translation("Resume", "Resume"))
+            self.download_action_button.setIcon(QIcon.fromTheme("media-playback-start", QIcon("assets/reload.png"))) # Placeholder
+            self.download_progress_bar.setVisible(True)
+            self.download_progress_bar.setValue(progress)
+            self.download_status_label.setText(self.translations.get_translation("Paused", "Paused") + f" {progress}%")
+            self.cancel_download_button.setVisible(True)
+        elif status == OfflineManager.COMPLETED:
+            self.download_action_button.setText(self.translations.get_translation("Downloaded", "Downloaded"))
+            # self.download_action_button.setIcon(QIcon.fromTheme("emblem-ok", QIcon("assets/reload.png"))) # Placeholder
+            self.download_action_button.setIcon(QIcon("assets/settings.png")) # Placeholder for checkmark
+            self.download_action_button.setEnabled(False) # Or make it "Play Offline"
+            self.download_status_label.setText(self.translations.get_translation("Completed", "Completed"))
+            self.delete_download_button.setVisible(True)
+        elif status == OfflineManager.ERROR:
+            self.download_action_button.setText(self.translations.get_translation("Retry", "Retry"))
+            self.download_action_button.setIcon(QIcon.fromTheme("view-refresh", QIcon("assets/reload.png"))) # Placeholder
+            self.download_status_label.setText(self.translations.get_translation("Error", "Error"))
+            self.delete_download_button.setVisible(True) # Allow deleting failed downloads
+        elif status == OfflineManager.CANCELLED:
+            self.download_action_button.setText(self.translations.get_translation("Download", "Download"))
+            self.download_action_button.setIcon(QIcon.fromTheme("download", QIcon("assets/movies.png"))) # Placeholder
+            self.download_status_label.setText(self.translations.get_translation("Cancelled", "Cancelled"))
+        elif status == OfflineManager.STORAGE_FULL:
+            self.download_action_button.setText(self.translations.get_translation("Storage Full", "Storage Full"))
+            self.download_action_button.setIcon(QIcon.fromTheme("drive-harddisk", QIcon("assets/reload.png"))) # Placeholder
+            self.download_action_button.setEnabled(False)
+            self.download_status_label.setText(self.translations.get_translation("Storage Full", "Storage Full"))
+            self.cancel_download_button.setVisible(True) # Allow cancel/clear
+        else: # Not in offline_movies list or unknown status
+            self.download_action_button.setText(self.translations.get_translation("Download", "Download"))
+            self.download_action_button.setIcon(QIcon.fromTheme("download", QIcon("assets/movies.png"))) # Placeholder
+
+    def _handle_download_action(self):
+        if not self.offline_manager or not self.stream_id:
+            return
+
+        status = self.offline_manager.get_movie_status(self.stream_id)
+
+        if status == OfflineManager.DOWNLOADING:
+            self._pause_download()
+        elif status == OfflineManager.PAUSED:
+            self._resume_download()
+        elif status == OfflineManager.ERROR or status == OfflineManager.CANCELLED or status is None:
+            self._initiate_download()
+        # PENDING: usually no direct user action on the main button, handled by cancel
+        # COMPLETED: action button is disabled or becomes "Play Offline" (future)
+        # STORAGE_FULL: button disabled
+
+    def _initiate_download(self):
+        if not self.api_client or not self.offline_manager or not self.movie:
+            print("[MovieDetailsWidget] Missing api_client, offline_manager, or movie data for download.")
+            self.download_status_label.setText(self.translations.get_translation("Error: Missing components", "Error: Missing components"))
+            return
+
+        stream_id = self.movie.get('stream_id')
+        container_extension = self.movie.get('container_extension', 'mp4')
+        movie_title = self.movie.get('name', f"Movie {stream_id}")
+        icon_url = self.movie.get('stream_icon', '')
+
+        if not stream_id:
+            self.download_status_label.setText(self.translations.get_translation("Error: Missing Stream ID", "Error: Missing Stream ID"))
+            return
+
+        # Update UI to show pending/loading state immediately
+        self.download_action_button.setText(self.translations.get_translation("Fetching URL...", "Fetching URL..."))
+        self.download_action_button.setEnabled(False)
+
+        try:
+            # This should be done in a thread or async if it's blocking
+            # For now, assuming get_movie_url is reasonably fast
+            success, url_data = self.api_client.get_movie_url(stream_id, container_extension)
+            if success and url_data and url_data.get('url'):
+                download_url = url_data['url']
+                # Prepare movie metadata for OfflineManager
+                # Ensure all necessary fields for OfflineManager are present
+                movie_metadata_for_offline = {
+                    'stream_id': stream_id,
+                    'name': movie_title,
+                    'title': movie_title, # OfflineManager uses 'title'
+                    'icon_url': icon_url,
+                    'container_extension': container_extension,
+                    # Add any other relevant fields from self.movie that OfflineManager might use
+                    'category_id': self.movie.get('category_id'),
+                    'rating': self.movie.get('rating_5based'), # Or 'rating'
+                    'plot': self.movie.get('plot', ''),
+                    'genre': self.movie.get('genre', ''),
+                    'year': self.movie.get('year', ''),
+                    'director': self.movie.get('director', ''),
+                    'cast': self.movie.get('cast', ''),
+                    # 'duration_secs': self.movie.get('duration_secs'), # If available
+                    # 'duration': self.movie.get('duration_str'), # If available
+                }
+
+                self.offline_manager.add_movie(
+                    movie_id=str(stream_id), # Ensure movie_id is a string
+                    url=download_url,
+                    title=movie_title,
+                    icon_url=icon_url,
+                    metadata=movie_metadata_for_offline # Pass the whole dict
+                )
+                # UI will be updated by signals or the next timer tick
+            else:
+                error_msg = url_data.get('error_message', self.translations.get_translation("Failed to get download URL.", "Failed to get download URL."))
+                self.download_status_label.setText(error_msg)
+                self._update_download_ui() # Revert button state
+        except Exception as e:
+            print(f"[MovieDetailsWidget] Error initiating download: {e}")
+            self.download_status_label.setText(self.translations.get_translation("Error starting download.", "Error starting download."))
+            self._update_download_ui() # Revert button state
+
+
+    def _pause_download(self):
+        if self.offline_manager and self.stream_id:
+            self.offline_manager.pause_download(self.stream_id)
+
+    def _resume_download(self):
+        if self.offline_manager and self.stream_id:
+            self.offline_manager.resume_download(self.stream_id)
+
+    def _cancel_download(self):
+        if self.offline_manager and self.stream_id:
+            self.offline_manager.cancel_download(self.stream_id)
+            self._update_download_ui() # Immediate UI update
+
+    def _delete_download(self):
+        if self.offline_manager and self.stream_id:
+            self.offline_manager.remove_movie(self.stream_id)
+            self._update_download_ui() # Immediate UI update
+
+    # --- Signal Handlers ---
+    @pyqtSlot(str, int)
+    def _on_download_progress(self, movie_id, progress):
+        if self.stream_id == movie_id and hasattr(self, 'download_progress_bar'):
+            if self.download_progress_bar.isVisible():
+                self.download_progress_bar.setValue(progress)
+                self.download_status_label.setText(f"{progress}%")
+
+    @pyqtSlot(str)
+    def _on_download_completion(self, movie_id):
+        if self.stream_id == movie_id:
+            self._update_download_ui()
+
+    @pyqtSlot(str, str)
+    def _on_download_error(self, movie_id, error_message):
+        if self.stream_id == movie_id:
+            self.download_status_label.setText(f"{self.translations.get_translation('Error', 'Error')}: {error_message[:50]}") # Show short error
+            self._update_download_ui()
+
+    @pyqtSlot(str, str)
+    def _on_download_status_changed(self, movie_id, status):
+        if self.stream_id == movie_id:
+            self._update_download_ui()
+
+
     def create_poster_gradient_background(self):
         """Create a gradient background based on poster colors when backdrop is not available"""
-        if not hasattr(self, 'poster') or not self.poster.pixmap():
-            return
+        if not hasattr(self, 'poster') or not self.poster.pixmap() or self.poster.pixmap().isNull():
+            # print("[MovieDetailsWidget] Poster pixmap is null or not available for gradient.")
+            return # Skip if poster is not loaded
             
         try:
             # Extract dominant colors from poster

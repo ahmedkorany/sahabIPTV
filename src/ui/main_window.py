@@ -11,6 +11,10 @@ from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
 from src.ui.tabs.search_tab import SearchTab
+from src.ui.tabs.offline_tab import OfflineTab
+from src.utils.offline_manager import OfflineManager
+import src.config as app_config
+from src.ui.widgets.notifications import NotificationPopup # Added
 
 from src.utils.helpers import get_translations
 from src.utils.favorites_manager import FavoritesManager
@@ -62,6 +66,7 @@ class LoadingIconController(QObject):
 class MainWindow(QMainWindow):
     """Main application window"""
     favorites_changed = pyqtSignal()
+    play_offline_media_requested = pyqtSignal(str, object) # Added: filepath, movie_meta
     
     def __init__(self):
         super().__init__()
@@ -71,7 +76,15 @@ class MainWindow(QMainWindow):
         self.translations = get_translations(self.language)
         self.accounts = self.settings.value("accounts", {}, type=dict)
         self.current_account = self.settings.value("current_account", "", type=str)
-        
+        self._active_notifications = [] # Added
+
+        # Initialize OfflineManager
+        # It needs config for paths. Assuming app_config (imported src.config) is suitable.
+        self.offline_manager = OfflineManager(config=app_config, parent=self)
+        if hasattr(self, 'offline_manager') and self.offline_manager: # Connect signals
+            self.offline_manager.completion_signal.connect(self._notify_download_complete)
+            self.offline_manager.error_signal.connect(self._notify_download_error)
+
         # Initialize favorites manager
         self.favorites_manager = FavoritesManager(self.current_account)
         self.favorites_manager.favorites_changed.connect(self.favorites_changed.emit)
@@ -114,7 +127,8 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.home_screen, self.translations.get("Home", "Home"))
         self.live_tab = LiveTab(self.api_client, self.favorites_manager, parent=self)
-        self.movies_tab = MoviesTab(self.api_client, self.favorites_manager, parent=self)
+        # Pass offline_manager and main_window to MoviesTab
+        self.movies_tab = MoviesTab(self.api_client, self.favorites_manager, offline_manager=self.offline_manager, main_window=self, parent=self)
         self.series_tab = SeriesTab(self.api_client, self.favorites_manager, main_window=self)
         self.search_tab = SearchTab(self.api_client, main_window=self) # Added SearchTab instance
 
@@ -130,13 +144,19 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.live_tab, self.translations.get("Live TV", "Live TV"))
         self.tabs.addTab(self.movies_tab, self.translations.get("Movies", "Movies"))
         self.tabs.addTab(self.series_tab, self.translations.get("Series", "Series"))
+        self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search"))
 
-        self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search")) # Added Search tab
+        # Offline Tab
+        self.offline_tab = OfflineTab(self.offline_manager, self)
+        self.tabs.addTab(self.offline_tab, self.translations.get_translation("Offline", "Offline"))
+        self.offline_tab.offline_play_requested.connect(self._handle_offline_play_request)
+
 
         self.live_tab.set_main_window(self)
-        self.movies_tab.main_window = self
-        self.series_tab.main_window = self
-        self.search_tab.main_window = self # Set main_window for search_tab
+        # self.movies_tab.main_window is already set in its constructor if main_window param is used
+        self.series_tab.main_window = self # Passed to SeriesDetailsWidget
+        self.search_tab.main_window = self
+        # self.offline_tab.main_window is self, already set
 
         
         # Connect favorites changed signal to update favorites tab
@@ -636,7 +656,9 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(1, self.translations.get("Live TV", "Live TV"))
         self.tabs.setTabText(2, self.translations.get("Movies", "Movies"))
         self.tabs.setTabText(3, self.translations.get("Series", "Series"))
-        self.tabs.setTabText(4, self.translations.get("Search", "Search")) # Added Search tab title
+        self.tabs.setTabText(4, self.translations.get("Search", "Search"))
+        if self.tabs.count() > 5: # Check if Offline tab was added
+            self.tabs.setTabText(5, self.translations.get_translation("Offline", "Offline"))
         
         # Update home screen translations
         if hasattr(self, 'home_screen') and self.home_screen:
@@ -708,8 +730,102 @@ class MainWindow(QMainWindow):
 
     def show_home_screen(self):
         """Return to the home screen from any tab"""
-        self.setCentralWidget(self.home_screen)
+        self.setCentralWidget(self.home_screen) # This might be problematic if tabs are the central widget.
+        # A better approach for home might be to switch to the Home tab:
+        # self.tabs.setCurrentIndex(0)
+
 
     def show_status_message(self, message, timeout=5000):
         if hasattr(self, 'statusBar') and self.statusBar:
             self.statusBar.showMessage(message, timeout)
+
+    def _handle_offline_play_request(self, filepath, movie_meta):
+        """Handles the request to play an offline file."""
+        # Ensure os is imported if not already at the top of the file
+        import os
+        if not os.path.exists(filepath):
+            QMessageBox.warning(self,
+                                self.translations.get_translation("Playback Error", "Playback Error"),
+                                self.translations.get_translation("Offline file not found: {}", "Offline file not found: {}").format(filepath))
+            if hasattr(self, 'offline_manager') and movie_meta.get('stream_id'):
+                # Use the existing error signal for consistency if appropriate,
+                # or update status directly if the manager handles missing files that way.
+                self.offline_manager.error_signal.emit(str(movie_meta.get('stream_id')), "Offline file missing")
+            return
+
+        self.player_window.play_media(
+            media_source=filepath, # Corrected from url to media_source
+            media_type='movie',
+            metadata=movie_meta,
+            is_offline=True
+        )
+        self.player_window.show()
+        self.player_window.activateWindow()
+
+    def show_app_notification(self, title, message, type='info', duration_ms=7000, action_callback=None):
+        # Calculate position for the new notification
+        # New notifications appear above older ones
+        occupied_height = 0
+        for notification in self._active_notifications:
+            occupied_height += notification.height() + 5 # 5px spacing
+
+        popup = NotificationPopup(title, message, type=type, parent=self, timeout=duration_ms, action_callback=action_callback)
+        popup.destroyed.connect(self._remove_notification)
+
+        # Position new notification based on how many are already active
+        # This simple stacking places new ones above from bottom-right.
+        # More sophisticated stacking might involve shifting existing ones.
+        # For now, use a simple index for vertical offset.
+        position_index = len(self._active_notifications)
+        popup.show_popup(position_index=position_index)
+
+        self._active_notifications.append(popup)
+
+    def _remove_notification(self, obj):
+        # obj is the QObject that was destroyed
+        if obj in self._active_notifications:
+            self._active_notifications.remove(obj)
+        # Re-position remaining notifications if needed (optional, can be complex)
+        # For simplicity, we don't reposition here; new ones will fill gaps or stack.
+
+    def _notify_download_complete(self, movie_id):
+        if not hasattr(self, 'offline_manager'): return
+        meta = self.offline_manager.get_movie_meta(movie_id)
+        if meta:
+            movie_name = meta.get('title', meta.get('name', 'A movie')) # Use title or name
+
+            def action():
+                if hasattr(self, 'tabs') and hasattr(self, 'offline_tab'):
+                    self.tabs.setCurrentWidget(self.offline_tab)
+                    # Future: maybe select the item in offline_tab's list
+
+            self.show_app_notification(
+                self.translations.get_translation("Download Complete", "Download Complete"),
+                self.translations.get_translation("'{movie_name}' is ready to watch offline.", "'{movie_name}' is ready to watch offline.").format(movie_name=movie_name),
+                type='success',
+                action_callback=action
+            )
+
+    def _notify_download_error(self, movie_id, error_msg):
+        if not hasattr(self, 'offline_manager'): return
+
+        # Filter out less critical error messages for notifications
+        # For example, "paused" states due to network might not need an aggressive popup.
+        # This depends on the exact error messages OfflineManager emits.
+        # For now, let's check if the error_msg indicates a pause rather than a hard error.
+        if "paused" in error_msg.lower(): # Simple check
+            print(f"Download for {movie_id} paused, error: {error_msg}. Notification suppressed.")
+            # Optionally show a less intrusive status bar message for pauses
+            # self.show_status_message(f"Download for {movie_id} paused: {error_msg}", timeout=3000)
+            return
+
+        meta = self.offline_manager.get_movie_meta(movie_id)
+        movie_name = "A download"
+        if meta:
+            movie_name = meta.get('title', meta.get('name', 'A download'))
+
+        self.show_app_notification(
+            self.translations.get_translation("Download Failed", "Download Failed"),
+            self.translations.get_translation("Could not download '{movie_name}': {error_msg}", "Could not download '{movie_name}': {error_msg}").format(movie_name=movie_name, error_msg=error_msg),
+            type='error'
+        )
