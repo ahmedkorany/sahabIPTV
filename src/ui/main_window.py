@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QMessageBox,
                             QProgressDialog)
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QObject, QThread
 from PyQt5.QtSvg import QSvgWidget
-from src.api.xtream import XtreamClient
+from src.api.xtream_factory import XtreamClientFactory
 from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
@@ -15,6 +15,8 @@ from src.ui.tabs.search_tab import SearchTab
 from src.utils.helpers import get_translations
 from src.utils.favorites_manager import FavoritesManager
 from src.config import DEFAULT_LANGUAGE, WINDOW_SIZE
+from src.constants import UIConstants, ErrorMessages
+from src.services.service_container import ServiceLocator, configure_services
 from src.ui.widgets.home_screen import HomeScreenWidget
 from src.ui.player import PlayerWindow
 
@@ -65,7 +67,13 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.api_client = XtreamClient()
+        
+        # Configure services first
+        configure_services()
+        
+        # Create API client using factory
+        self.api_client = XtreamClientFactory.create_client()
+        
         self.settings = QSettings()
         self.language = self.settings.value("language", DEFAULT_LANGUAGE)
         self.translations = get_translations(self.language)

@@ -1,110 +1,65 @@
-"""
-Xtream Codes API client
-"""
+"""Xtream Codes API client"""
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from typing import Tuple, Optional, Dict, Any
+
 from src.config import API_TIMEOUT, API_RETRIES
-import time
-import pickle
-import os
-import hashlib
-
-CACHE_DIR = os.path.join(os.path.dirname(__file__), '../../assets/cache/data')
-CACHE_EXPIRATION_SECONDS = 24 * 60 * 60  # 1 day
-
-def _get_cache_path(key):
-    # Use MD5 hash of the key to create a safe filename
-    key_hash = hashlib.md5(key.encode('utf-8')).hexdigest()
-    return os.path.join(CACHE_DIR, f"xtream_{key_hash}.pkl")
-
-def _load_cache(key):
-    path = _get_cache_path(key)
-    #print(f"[CACHE] Loading cache from: {path}")
-    if not os.path.exists(path):
-        #print(f"[CACHE] Cache file does not exist: {path}")
-        return None
-    try:
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
-        if time.time() - data['timestamp'] < CACHE_EXPIRATION_SECONDS:
-            #print(f"[CACHE] Cache hit for key: {key}")
-            return data['value']
-        else:
-            #print(f"[CACHE] Cache expired for key: {key}")
-            pass
-    except Exception as e:
-        #print(f"[CACHE] Error loading cache for key {key}: {e}")
-        pass
-    return None
-
-def _save_cache(key, value):
-    if not os.path.exists(CACHE_DIR):
-        os.makedirs(CACHE_DIR)
-    path = _get_cache_path(key)
-    # print(f"[CACHE] Saving cache to: {path}")
-    try:
-        with open(path, 'wb') as f:
-            pickle.dump({'timestamp': time.time(), 'value': value}, f)
-        #print(f"[CACHE] Cache saved for key: {key}")
-    except Exception as e:
-        print(f"[CACHE] Error saving cache for key {key}: {e}")
+from src.constants import APIConstants, ErrorMessages
+from src.services.cache_manager import XtreamCacheManager
 
 class XtreamClient:
     def update_movie_cache(self, movie_to_update):
         """Updates a specific movie's details within its cached category list."""
+        if not self.cache_manager:
+            return False
+            
         category_id = movie_to_update.get('category_id')
         stream_id_to_update = movie_to_update.get('stream_id')
         new_stream_icon = movie_to_update.get('stream_icon') # Assuming this is the primary field to update
 
         if not (category_id and stream_id_to_update and self.server_url and self.username):
-            # print(f"[XtreamClient.update_movie_cache] Missing necessary data: category_id='{category_id}', stream_id='{stream_id_to_update}', server_url, or username.")
             return False
 
         cache_key = f'vod_streams_{self.server_url}_{self.username}_{category_id}'
-        # print(f"[XtreamClient.update_movie_cache] Attempting to update movie in category cache. Key: {cache_key}")
         
-        cached_category_movies = _load_cache(cache_key)
+        cached_category_movies = self.cache_manager.get(cache_key)
         
         if isinstance(cached_category_movies, list):
             updated = False
             for i, movie_in_cache in enumerate(cached_category_movies):
                 if isinstance(movie_in_cache, dict) and movie_in_cache.get('stream_id') == stream_id_to_update:
                     # Update the specific movie's details
-                    # For now, primarily stream_icon. Extend if other fields in movie_to_update need to be synced.
                     movie_in_cache['stream_icon'] = new_stream_icon 
-                    # Example: movie_in_cache.update({k: v for k, v in movie_to_update.items() if k in movie_in_cache}) # More generic update
-                    cached_category_movies[i] = movie_in_cache # Ensure the list is updated with the modified dict
+                    cached_category_movies[i] = movie_in_cache
                     updated = True
                     break
             
             if updated:
-                _save_cache(cache_key, cached_category_movies)
-                # print(f"[XtreamClient.update_movie_cache] Updated movie (ID: {stream_id_to_update}) in cached category '{category_id}'.")
+                self.cache_manager.set(cache_key, cached_category_movies)
                 return True
             else:
-                # print(f"[XtreamClient.update_movie_cache] Movie (ID: {stream_id_to_update}) not found in cached category '{category_id}'.")
                 return False
         else:
-            # print(f"[XtreamClient.update_movie_cache] No cached data or invalid format for category '{category_id}'. Key: {cache_key}")
             return False
 
     def update_series_cache(self, series_to_update):
         """Updates a specific series' details within its cached category list."""
+        if not self.cache_manager:
+            return False
+            
         category_id = series_to_update.get('category_id')
         # Series are identified by 'series_id' in Xtream Codes, not 'stream_id'
         series_id_to_update = series_to_update.get('series_id') 
         new_cover_url = series_to_update.get('cover') # 'cover' is used for series posters
 
         if not (category_id and series_id_to_update and self.server_url and self.username):
-            # print(f"[XtreamClient.update_series_cache] Missing necessary data: category_id='{category_id}', series_id='{series_id_to_update}', server_url, or username.")
             return False
 
         # Cache key for series lists within a category
         cache_key = f'series_{self.server_url}_{self.username}_{category_id}'
-        # print(f"[XtreamClient.update_series_cache] Attempting to update series in category cache. Key: {cache_key}")
         
-        cached_category_series = _load_cache(cache_key)
+        cached_category_series = self.cache_manager.get(cache_key)
         
         if isinstance(cached_category_series, list):
             updated = False
@@ -122,24 +77,22 @@ class XtreamClient:
                     break
             
             if updated:
-                _save_cache(cache_key, cached_category_series)
-                # print(f"[XtreamClient.update_series_cache] Updated series (ID: {series_id_to_update}) in cached category '{category_id}'.")
+                self.cache_manager.set(cache_key, cached_category_series)
                 return True
             else:
-                # print(f"[XtreamClient.update_series_cache] Series (ID: {series_id_to_update}) not found in cached category '{category_id}'.")
                 return False
         else:
-            # print(f"[XtreamClient.update_series_cache] No cached data or invalid format for series category '{category_id}'. Key: {cache_key}")
             return False
 
 
     """Client for Xtream Codes API"""
     
-    def __init__(self):
+    def __init__(self, cache_manager: Optional[XtreamCacheManager] = None):
         self.server_url = None
         self.username = None
         self.password = None
         self.session = self._create_session()
+        self.cache_manager = cache_manager
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': '*/*',
@@ -159,204 +112,352 @@ class XtreamClient:
         session.mount("https://", adapter)
         return session
     
-    def set_credentials(self, server_url, username, password):
-        """Set credentials for API requests"""
-        # Remove trailing slash if present
-        if server_url.endswith('/'):
-            server_url = server_url[:-1]
-            
-        self.server_url = server_url
+    def set_credentials(self, server_url: str, username: str, password: str) -> None:
+        """Set server credentials"""
+        self.server_url = server_url.rstrip('/')
         self.username = username
         self.password = password
     
-    def authenticate(self):
-        """Authenticate with the server and get user info"""
-        if not self.server_url or not self.username or not self.password:
-            return False, "Missing credentials"
+    def _has_credentials(self) -> bool:
+        """Check if all required credentials are set"""
+        return bool(self.server_url and self.username and self.password)
+    
+    def _build_api_url(self, action: str = "", **params) -> str:
+        """Build API URL with parameters"""
+        base_url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}"
+        if action:
+            base_url += f"&action={action}"
+        for key, value in params.items():
+            if value is not None:
+                base_url += f"&{key}={value}"
+        return base_url
+    
+    def authenticate(self) -> Tuple[bool, Any]:
+        """Authenticate with the server and get user info
+        
+        Returns:
+            Tuple of (success: bool, data: dict or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
         
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}"
+            url = self._build_api_url()
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             data = response.json()
             
             if 'user_info' not in data:
-                return False, "Invalid credentials"
+                return False, ErrorMessages.INVALID_CREDENTIALS
             
             return True, data
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_live_categories(self):
-        """Get live TV categories"""
-        cache_key = f'live_categories_{self.server_url}_{self.username}'
-        cached = _load_cache(cache_key)
-        if cached is not None:
-            return True, cached
+    def get_live_categories(self) -> Tuple[bool, Any]:
+        """Get live TV categories
+        
+        Returns:
+            Tuple of (success: bool, data: list or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
+        cache_key = f"live_categories_{self.username}_{self.server_url}"
+        
+        # Try cache first if cache manager is available
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                return True, cached_data
+        
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_live_categories"
+            url = self._build_api_url(action="get_live_categories")
+            response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Cache the result if cache manager is available
+                if self.cache_manager:
+                    self.cache_manager.set(cache_key, data)
+                return True, data
+            else:
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
+        except Exception as e:
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
+    
+    def get_live_streams(self, category_id: Optional[str] = None) -> Tuple[bool, Any]:
+        """Get live streams for a category
+        
+        Args:
+            category_id: Optional category ID to filter streams
+            
+        Returns:
+            Tuple of (success: bool, data: list or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
+        cache_key = f'live_streams_{self.username}_{self.server_url}_{category_id or "all"}'
+        
+        # Try cache first if cache manager is available
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                return True, cached_data
+        
+        try:
+            url = self._build_api_url(action="get_live_streams", category_id=category_id)
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             data = response.json()
-            _save_cache(cache_key, data)
+            # Cache the result if cache manager is available
+            if self.cache_manager:
+                self.cache_manager.set(cache_key, data)
             return True, data
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_live_streams(self, category_id=None):
-        """Get live streams for a category"""
-        key = f'live_streams_{self.server_url}_{self.username}_{category_id or "all"}'
-        cached = _load_cache(key)
-        if cached is not None:
-            return True, cached
+    def get_vod_categories(self) -> Tuple[bool, Any]:
+        """Get VOD (movie) categories
+        
+        Returns:
+            Tuple of (success: bool, data: list or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
+        cache_key = f'vod_categories_{self.username}_{self.server_url}'
+        
+        # Try cache first if cache manager is available
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                return True, cached_data
+        
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_live_streams"
-            if category_id:
-                url += f"&category_id={category_id}"
-                
+            url = self._build_api_url(action="get_vod_categories")
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             data = response.json()
-            _save_cache(key, data)
+            # Cache the result if cache manager is available
+            if self.cache_manager:
+                self.cache_manager.set(cache_key, data)
             return True, data
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_vod_categories(self):
-        """Get VOD (movie) categories"""
-        cache_key = f'vod_categories_{self.server_url}_{self.username}'
-        cached = _load_cache(cache_key)
-        if cached is not None:
-            return True, cached
+    def get_vod_streams(self, category_id: Optional[str] = None) -> Tuple[bool, Any]:
+        """Get VOD (movie) streams for a category
+        
+        Args:
+            category_id: Optional category ID to filter streams
+            
+        Returns:
+            Tuple of (success: bool, data: list or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
+        cache_key = f'vod_streams_{self.username}_{self.server_url}_{category_id or "all"}'
+        
+        # Try cache first if cache manager is available
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                return True, cached_data
+        
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_vod_categories"
+            url = self._build_api_url(action="get_vod_streams", category_id=category_id)
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             data = response.json()
-            _save_cache(cache_key, data)
+            # Cache the result if cache manager is available
+            if self.cache_manager:
+                self.cache_manager.set(cache_key, data)
             return True, data
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_vod_streams(self, category_id=None):
-        """Get VOD (movie) streams for a category"""
-        key = f'vod_streams_{self.server_url}_{self.username}_{category_id or "all"}'
-        cached = _load_cache(key)
-        if cached is not None:
-            return True, cached
+    def get_vod_info(self, vod_id: str) -> Tuple[bool, Any]:
+        """Get detailed information for a VOD (movie)
+        
+        Args:
+            vod_id: The VOD ID to get information for
+            
+        Returns:
+            Tuple of (success: bool, data: dict or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_vod_streams"
-            if category_id:
-                url += f"&category_id={category_id}"
-                
+            url = self._build_api_url(action="get_vod_info", vod_id=vod_id)
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
-            
-            data = response.json()
-            _save_cache(key, data)
-            return True, data
-        except Exception as e:
-            return False, str(e)
-    
-    def get_vod_info(self, vod_id):
-        """Get detailed information for a VOD (movie)"""
-        try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_vod_info&vod_id={vod_id}"
-            response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
-            
-            if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             return True, response.json()
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_series_categories(self):
-        """Get series categories"""
-        cache_key = f'series_categories_{self.server_url}_{self.username}'
-        cached = _load_cache(cache_key)
-        if cached is not None:
-            return True, cached
+    def get_series_categories(self) -> Tuple[bool, Any]:
+        """Get series categories
+        
+        Returns:
+            Tuple of (success: bool, data: list or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
+        cache_key = f'series_categories_{self.username}_{self.server_url}'
+        
+        # Try cache first if cache manager is available
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                return True, cached_data
+        
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_series_categories"
+            url = self._build_api_url(action="get_series_categories")
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             data = response.json()
-            _save_cache(cache_key, data)
+            # Cache the result if cache manager is available
+            if self.cache_manager:
+                self.cache_manager.set(cache_key, data)
             return True, data
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_series(self, category_id=None):
-        """Get series for a category"""
-        key = f'series_{self.server_url}_{self.username}_{category_id or "all"}'
-        cached = _load_cache(key)
-        if cached is not None:
-            return True, cached
+    def get_series(self, category_id: Optional[str] = None) -> Tuple[bool, Any]:
+        """Get series for a category
+        
+        Args:
+            category_id: Optional category ID to filter series
+            
+        Returns:
+            Tuple of (success: bool, data: list or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
+        cache_key = f'series_{self.username}_{self.server_url}_{category_id or "all"}'
+        
+        # Try cache first if cache manager is available
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                return True, cached_data
+        
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_series"
-            if category_id:
-                url += f"&category_id={category_id}"
-                
+            url = self._build_api_url(action="get_series", category_id=category_id)
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             data = response.json()
-            _save_cache(key, data)
+            # Cache the result if cache manager is available
+            if self.cache_manager:
+                self.cache_manager.set(cache_key, data)
             return True, data
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_series_info(self, series_id):
-        """Get detailed information for a series"""
+    def get_series_info(self, series_id: str) -> Tuple[bool, Any]:
+        """Get detailed information for a series
+        
+        Args:
+            series_id: The series ID to get information for
+            
+        Returns:
+            Tuple of (success: bool, data: dict or error_message: str)
+        """
+        if not self._has_credentials():
+            return False, ErrorMessages.MISSING_CREDENTIALS
+        
         try:
-            url = f"{self.server_url}/player_api.php?username={self.username}&password={self.password}&action=get_series_info&series_id={series_id}"
+            url = self._build_api_url(action="get_series_info", series_id=series_id)
             response = self.session.get(url, headers=self.headers, timeout=API_TIMEOUT)
             
             if response.status_code != 200:
-                return False, f"Server returned status code {response.status_code}"
+                return False, ErrorMessages.SERVER_ERROR.format(response.status_code)
             
             return True, response.json()
         except Exception as e:
-            return False, str(e)
+            return False, ErrorMessages.CONNECTION_ERROR.format(str(e))
     
-    def get_live_stream_url(self, stream_id):
-        """Get the URL for a live stream"""
+    def get_live_stream_url(self, stream_id: str) -> Optional[str]:
+        """Get the URL for a live stream
+        
+        Args:
+            stream_id: The stream ID
+            
+        Returns:
+            Stream URL or None if credentials are missing
+        """
+        if not self._has_credentials():
+            return None
         return f"{self.server_url}/live/{self.username}/{self.password}/{stream_id}.ts"
     
-    def get_movie_url(self, stream_id, container_extension="mp4"):
-        """Get the URL for a movie"""
+    def get_movie_url(self, stream_id: str, container_extension: str = "mp4") -> Optional[str]:
+        """Get the URL for a movie
+        
+        Args:
+            stream_id: The movie stream ID
+            container_extension: File extension (default: mp4)
+            
+        Returns:
+            Movie URL or None if credentials are missing
+        """
+        if not self._has_credentials():
+            return None
         return f"{self.server_url}/movie/{self.username}/{self.password}/{stream_id}.{container_extension}"
     
-    def get_series_url(self, episode_id, container_extension="mp4"):
-        """Get the URL for a series episode"""
+    def get_series_url(self, episode_id: str, container_extension: str = "mp4") -> Optional[str]:
+        """Get the URL for a series episode
+        
+        Args:
+            episode_id: The episode ID
+            container_extension: File extension (default: mp4)
+            
+        Returns:
+            Episode URL or None if credentials are missing
+        """
+        if not self._has_credentials():
+            return None
         return f"{self.server_url}/series/{self.username}/{self.password}/{episode_id}.{container_extension}"
     
-    def populate_full_cache(self, progress_callback=None):
-        """Fetch and cache all categories and their items (live, VOD, series), reporting progress."""
-        if not self.server_url or not self.username or not self.password:
+    def populate_full_cache(self, progress_callback=None) -> Tuple[bool, str]:
+        """Fetch and cache all categories and their items (live, VOD, series), reporting progress.
+        
+        Args:
+            progress_callback: Optional callback function for progress updates
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        if not self._has_credentials():
             if progress_callback:
-                progress_callback(0, 1, "Error: Missing credentials", True)
-            return False, "Missing credentials"
+                progress_callback(0, 1, ErrorMessages.MISSING_CREDENTIALS, True)
+            return False, ErrorMessages.MISSING_CREDENTIALS
 
         actions = []
         # Phase 1: Plan actions to determine total steps
@@ -380,35 +481,43 @@ class XtreamClient:
         detailed_actions = []
 
         # Step 1: Fetch Live Categories
-        if progress_callback: progress_callback(current_step, len(planned_actions) * 2, "Fetching live categories...", False) # Rough estimate
-        live_cat_success, live_categories = self.get_live_categories()
-        if live_cat_success and isinstance(live_categories, list):
+        if progress_callback: 
+            progress_callback(current_step, len(planned_actions) * 2, "Fetching live categories...", False)
+        
+        live_categories = self.get_live_categories()
+        if isinstance(live_categories, list) and live_categories:
             detailed_actions.append({'type': 'live_categories_fetched', 'data': live_categories, 'desc': 'Fetched Live Categories'})
             for cat in live_categories:
-                detailed_actions.append({'type': 'get_live_streams', 'id': cat.get('category_id'), 'desc': f"Fetching Live Streams for {cat.get('category_name')}"}) 
+                detailed_actions.append({'type': 'get_live_streams', 'id': cat.get('category_id'), 'desc': f"Fetching Live Streams for {cat.get('category_name')}"})
         else:
-            if progress_callback: progress_callback(current_step, len(planned_actions) * 2, f"Failed to fetch live categories: {live_categories}", True)
-            # Optionally, decide if to stop or continue
+            if progress_callback: 
+                progress_callback(current_step, len(planned_actions) * 2, "Failed to fetch live categories", True)
 
         # Step 2: Fetch VOD Categories
-        if progress_callback: progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), "Fetching VOD categories...", False)
+        if progress_callback: 
+            progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), "Fetching VOD categories...", False)
+        
         vod_cat_success, vod_categories = self.get_vod_categories()
         if vod_cat_success and isinstance(vod_categories, list):
             detailed_actions.append({'type': 'vod_categories_fetched', 'data': vod_categories, 'desc': 'Fetched VOD Categories'})
             for cat in vod_categories:
                 detailed_actions.append({'type': 'get_vod_streams', 'id': cat.get('category_id'), 'desc': f"Fetching VOD Streams for {cat.get('category_name')}"})
         else:
-            if progress_callback: progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), f"Failed to fetch VOD categories: {vod_categories}", True)
+            if progress_callback: 
+                progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), f"Failed to fetch VOD categories: {vod_categories if not vod_cat_success else 'Unknown error'}", True)
 
         # Step 3: Fetch Series Categories
-        if progress_callback: progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), "Fetching series categories...", False)
+        if progress_callback: 
+            progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), "Fetching series categories...", False)
+        
         series_cat_success, series_categories = self.get_series_categories()
         if series_cat_success and isinstance(series_categories, list):
             detailed_actions.append({'type': 'series_categories_fetched', 'data': series_categories, 'desc': 'Fetched Series Categories'})
             for cat in series_categories:
                 detailed_actions.append({'type': 'get_series', 'id': cat.get('category_id'), 'desc': f"Fetching Series for {cat.get('category_name')}"})
         else:
-            if progress_callback: progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), f"Failed to fetch series categories: {series_categories}", True)
+            if progress_callback: 
+                progress_callback(current_step, len(planned_actions) * 2 + len(detailed_actions), f"Failed to fetch series categories: {series_categories if not series_cat_success else 'Unknown error'}", True)
 
         total_steps = len(detailed_actions)
         
@@ -463,26 +572,36 @@ class XtreamClient:
             progress_callback(total_steps, total_steps, "Cache population complete.", False)
         return True, "Full cache population process initiated."
 
-    def get_image_data(self, url):
-        """Download image data from a URL and return bytes (for QPixmap)"""
+    def get_image_data(self, url: str) -> bytes:
+        """Download image data from a URL and return bytes (for QPixmap)
+        
+        Args:
+            url: Image URL to download
+            
+        Returns:
+            Image data as bytes or empty bytes if failed
+        """
         try:
-            import requests
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                return resp.content
+            response = self.session.get(url, timeout=APIConstants.IMAGE_TIMEOUT)
+            if response.status_code == 200:
+                return response.content
             return b''
         except Exception:
             return b''
     
-    def invalidate_cache(self):
-        """Delete all .pkl cache files in the cache directory. Does NOT touch user favorites file."""
-        if not os.path.exists(CACHE_DIR):
-            return
-        for fname in os.listdir(CACHE_DIR):
-            if fname.endswith('.pkl'):
-                try:
-                    os.remove(os.path.join(CACHE_DIR, fname))
-                    #print(f"[CACHE] Deleted cache file: {fname}")
-                except Exception as e:
-                    print(f"[CACHE] Error deleting cache file {fname}: {e}")
+    def invalidate_cache(self) -> None:
+        """Delete all cache files. Uses cache manager if available."""
+        if self.cache_manager:
+            self.cache_manager.clear_all()
+        else:
+            # Fallback for when no cache manager is available
+            import os
+            cache_dir = os.path.join(os.path.dirname(__file__), '../../assets/cache/data')
+            if os.path.exists(cache_dir):
+                for fname in os.listdir(cache_dir):
+                    if fname.endswith('.pkl') and fname.startswith('xtream_'):
+                        try:
+                            os.remove(os.path.join(cache_dir, fname))
+                        except Exception as e:
+                            print(f"Error deleting cache file {fname}: {e}")
         # Do NOT touch favorites file here!
