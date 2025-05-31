@@ -121,35 +121,12 @@ class SearchTab(QWidget):
             # If query is <3 but not empty, do nothing yet, wait for more input
             return
 
-        # TODO: Implement asynchronous search
-        # For now, synchronous search for simplicity
+        # Perform search using the search_all_data function
         print(f"Searching for: '{query}' with filter: '{self.current_filter}'")
-        # Assuming search_all_data can take the api_client and query
-        # And that it returns a list of dicts, each with a 'type' (live, movie, series), 'name', 'cover', 'rating', etc.
-        # This is a placeholder for the actual search call
-        # self.search_results = search_all_data(self.api_client, query) # This function needs to be adapted or created
-
-        # Placeholder search results for testing UI
-        # Replace with actual search_all_data call
-        all_results = [] # This should be populated by search_all_data
         
-        # Example of how search_all_data might be called if it's a global function
-        # For now, we'll simulate results.
-        # In a real scenario, you'd call:
-        # all_results = search_all_data(self.api_client, query)
-        # For now, let's assume text_search.py has a function like:
-        # from src.utils.text_search import TextSearcher
-        # searcher = TextSearcher(self.api_client) # Or pass api_client to search method
-        # all_results = searcher.search(query)
-
-        # This part will be refined once text_search.py is confirmed
-        # For now, let's assume search_all_data is a function in text_search.py
-        # that we can call.
         try:
-            # This is a conceptual call. The actual implementation of search_all_data
-            # will determine how it's used.
-            # It needs access to live channels, movies, and series data from the api_client.
-            all_raw_results = search_all_data(self.api_client, query) # This function needs to exist and work
+            # Call the search function from text_search.py
+            all_raw_results = search_all_data(self.api_client, query)
             
             # Filter results based on self.current_filter
             if self.current_filter == "All":
@@ -158,11 +135,18 @@ class SearchTab(QWidget):
                 filter_value = self.current_filter.lower()
                 if filter_value == "movies": # Adjust for the 'Movies' filter selection
                     filter_value = "movie"
-                self.search_results = [
-                    item for item in all_raw_results
-                    if item.get('stream_type', '').lower() == filter_value or \
-                       (item.get('type', '').lower() == filter_value) # Handle 'type' or 'stream_type'
-                ]
+                self.search_results = []
+                for item in all_raw_results:
+                    # Handle both dictionary and object types
+                    if hasattr(item, 'stream_type'):
+                        item_type = getattr(item, 'stream_type', '').lower()
+                    elif isinstance(item, dict):
+                        item_type = item.get('stream_type', '').lower() or item.get('type', '').lower()
+                    else:
+                        item_type = ''
+                    
+                    if item_type == filter_value:
+                        self.search_results.append(item)
 
         except Exception as e:
             print(f"Error during search: {e}")
@@ -281,13 +265,24 @@ class SearchTab(QWidget):
         poster_label.setAlignment(Qt.AlignCenter)
         poster_label.setStyleSheet("background-color: #333; border-radius: 5px;") # Placeholder bg
 
-        cover_url = item_data.get('cover') or item_data.get('stream_icon') or item_data.get('movie_image')
+        # Handle both object and dictionary types for getting values
+        def get_value(item, key, default=''):
+            if hasattr(item, key):
+                return getattr(item, key, default)
+            elif isinstance(item, dict):
+                return item.get(key, default)
+            return default
+        
+        cover_url = get_value(item_data, 'cover') or get_value(item_data, 'stream_icon') or get_value(item_data, 'movie_image')
         
         # Determine item type and default icon
-        item_type_str = item_data.get('stream_type', 'unknown').lower()
-        if 'series_id' in item_data: item_type_str = 'series'
-        elif 'stream_id' in item_data and item_type_str == 'movie': item_type_str = 'movie' # Movies have stream_id
-        elif 'live' in item_data.get('category_name', '').lower() or item_data.get('is_live'): item_type_str = 'live'
+        item_type_str = get_value(item_data, 'stream_type', 'unknown').lower()
+        if get_value(item_data, 'series_id'): 
+            item_type_str = 'series'
+        elif get_value(item_data, 'stream_id') and item_type_str in ['movie', 'unknown']: 
+            item_type_str = 'movie' # Movies have stream_id
+        elif 'live' in get_value(item_data, 'category_name', '').lower() or get_value(item_data, 'is_live'): 
+            item_type_str = 'live'
 
 
         default_icon_path = f"assets/{item_type_str}.png" if item_type_str in ['live', 'movie', 'series'] else "assets/movies.png" # Fallback
@@ -302,7 +297,7 @@ class SearchTab(QWidget):
             poster_label.setPixmap(default_pixmap.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         # --- Title Overlay ---
-        title_text = item_data.get('name', 'Unknown Title')
+        title_text = get_value(item_data, 'name', 'Unknown Title')
         title_overlay = QLabel(title_text, poster_container)
         title_overlay.setFont(QFont("Arial", 14, QFont.Bold))
         title_overlay.setStyleSheet("background-color: rgba(0, 0, 0, 0.7); color: white; padding: 3px; border-radius: 0px;")
@@ -329,7 +324,7 @@ class SearchTab(QWidget):
         item_layout.addWidget(poster_container)
 
         # --- Rating ---
-        rating_val = item_data.get('rating', 0)
+        rating_val = get_value(item_data, 'rating', 0)
         if isinstance(rating_val, str):
             try:
                 rating_val = float(rating_val)
@@ -347,30 +342,38 @@ class SearchTab(QWidget):
         return item_frame
 
     def on_item_clicked(self, item_data):
-        item_type = item_data.get('stream_type', '').lower()
-        if 'series_id' in item_data or item_type == 'series':
-            print(f"Series clicked: {item_data.get('name')}")
+        # Helper function for getting values (redefine here since it's in a different method)
+        def get_value(item, key, default=''):
+            if hasattr(item, key):
+                return getattr(item, key, default)
+            elif isinstance(item, dict):
+                return item.get(key, default)
+            return default
+            
+        item_type = get_value(item_data, 'stream_type', '').lower()
+        if get_value(item_data, 'series_id') or item_type == 'series':
+            print(f"Series clicked: {get_value(item_data, 'name')}")
             # self.series_selected.emit(item_data) # TODO: Connect this signal in main_window
             if self.main_window and hasattr(self.main_window, 'show_series_details_from_search'):
                 self.main_window.show_series_details_from_search(item_data)
             else:
                 print("Main window does not have show_series_details_from_search method.")
-        elif 'stream_id' in item_data and item_type == 'movie':
-            print(f"Movie clicked: {item_data.get('name')}")
+        elif get_value(item_data, 'stream_id') and item_type == 'movie':
+            print(f"Movie clicked: {get_value(item_data, 'name')}")
             # self.movie_selected.emit(item_data) # TODO: Connect this signal
             if self.main_window and hasattr(self.main_window, 'show_movie_details_from_search'):
                 self.main_window.show_movie_details_from_search(item_data)
             else:
                 print("Main window does not have show_movie_details_from_search method.")
         elif item_type == 'live':
-            print(f"Live channel clicked: {item_data.get('name')}")
+            print(f"Live channel clicked: {get_value(item_data, 'name')}")
             # self.channel_selected.emit(item_data) # TODO: Connect this signal
             if self.main_window and hasattr(self.main_window, 'play_channel_from_search'):
                  self.main_window.play_channel_from_search(item_data)
             else:
                 print("Main window does not have play_channel_from_search method.")
         else:
-            print(f"Unknown item type clicked: {item_data.get('name')}")
+            print(f"Unknown item type clicked: {get_value(item_data, 'name')}")
 
 
     def update_pagination_controls(self, total_items):

@@ -16,14 +16,12 @@ class MovieDetailsWidget(QWidget):
         self.api_client = api_client
         self.tmdb_client = tmdb_client
         
-        # Handle both MovieItem and dictionary formats
-        if isinstance(movie, MovieItem):
-            self.stream_id = movie.stream_id
-            self.tmdb_id = movie.tmdb_id
-        else:
-            self.stream_id = movie.get('stream_id')
-            self.tmdb_id = movie.get('tmdb_id')
+        # Ensure movie is always a MovieItem instance
+        if not isinstance(movie, MovieItem):
+            raise ValueError("MovieDetailsWidget requires a MovieItem instance")
         
+        self.stream_id = movie.stream_id
+        self.tmdb_id = movie.tmdb_id
         self.movie = movie
         self.main_window = main_window
         self._is_favorite = False
@@ -109,15 +107,10 @@ class MovieDetailsWidget(QWidget):
         self.poster.setScaledContents(True)
         self.poseter_load_failed = False
         
-        # Handle movie data access for both MovieItem and dictionary formats
-        if isinstance(self.movie, MovieItem):
-            movie_stream_icon = self.movie.stream_icon
-            movie_adult = self.movie.adult
-            movie_name = self.movie.name or ''
-        else:
-            movie_stream_icon = self.movie.get('stream_icon')
-            movie_adult = self.movie.get('adult')
-            movie_name = self.movie.get('name', '')
+        # Access movie data from MovieItem instance
+        movie_stream_icon = self.movie.stream_icon
+        movie_adult = self.movie.adult
+        movie_name = self.movie.name or ''
         
         if movie_stream_icon:
             load_image_async(movie_stream_icon, self.poster, QPixmap('assets/movies.png'), update_size=(200, 300), main_window=self, on_failure=self.onPosterLoadFailed)
@@ -221,10 +214,7 @@ class MovieDetailsWidget(QWidget):
         controls_layout.addWidget(self.favorite_btn)
         
         # Trailer button if available
-        if isinstance(self.movie, MovieItem):
-            self.trailer_url = self.movie.youtube_trailer
-        else:
-            self.trailer_url = self.movie.get('trailer_url')
+        self.trailer_url = self.movie.youtube_trailer
         self.current_trailer_url = self.trailer_url
         
         if self.trailer_url and self.trailer_url.strip():
@@ -333,18 +323,14 @@ class MovieDetailsWidget(QWidget):
                     if poster_path:
                         tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
                         if tmdb_poster_url:
-                            if isinstance(self.movie, MovieItem):
-                                original_stream_icon = self.movie.stream_icon
-                                self.movie.stream_icon = tmdb_poster_url
-                            else:
-                                original_stream_icon = self.movie.get('stream_icon')
-                                self.movie['stream_icon'] = tmdb_poster_url
+                            original_stream_icon = self.movie.stream_icon
+                            self.movie.stream_icon = tmdb_poster_url
                             # print(f"[MovieDetailsWidget] Found TMDB poster: {tmdb_poster_url}")
 
                             # --- Update movie in category cache using XtreamClient method ---
                             if hasattr(self.main_window, 'api_client') and self.main_window.api_client:
                                 # Convert MovieItem to dictionary for cache update if necessary
-                                movie_data_for_cache = self.movie.to_dict() if isinstance(self.movie, MovieItem) else self.movie
+                                movie_data_for_cache = self.movie.to_dict()
                                 self.main_window.api_client.update_movie_cache(movie_data_for_cache)
                             # else:
                                 # print("[MovieDetailsWidget] api_client not available for cache update.")
@@ -387,16 +373,10 @@ class MovieDetailsWidget(QWidget):
             self.update_favorite_btn()
             return
 
-        if isinstance(self.movie, MovieItem):
-            favorite_item_check = {
-                'stream_id': self.movie.stream_id,
-                'stream_type': 'movie'
-            }
-        else:
-            favorite_item_check = {
-                'stream_id': self.movie.get('stream_id'),
-                'stream_type': 'movie'
-            }
+        favorite_item_check = {
+            'stream_id': self.movie.stream_id,
+            'stream_type': 'movie'
+        }
 
         self._is_favorite = self.main_window.favorites_manager.is_favorite(favorite_item_check)
         self.update_favorite_btn()
@@ -681,12 +661,8 @@ class MovieDetailsWidget(QWidget):
             print(f"[MovieDetailsWidget] Error fetching TMDB credits: {e}")
         
         # Check if we need to fetch additional metadata (plot/overview)
-        if isinstance(self.movie, MovieItem):
-            current_plot = (self.movie.plot or '').strip()
-            movie_name = self.movie.name or ''
-        else:
-            current_plot = self.movie.get('plot', '').strip()
-            movie_name = self.movie.get('name', '')
+        current_plot = (self.movie.plot or '').strip()
+        movie_name = self.movie.name or ''
         
         needs_metadata_update = not current_plot
         
@@ -725,11 +701,8 @@ class MovieDetailsWidget(QWidget):
                 # Add more language detection logic as needed
                 
                 # Also check if there's a language field in movie data
-                if isinstance(self.movie, MovieItem):
-                    # MovieItem doesn't have a language field, skip this check
-                    movie_language_field = None
-                else:
-                    movie_language_field = self.movie.get('language')
+                # MovieItem doesn't have a language field, skip this check
+                movie_language_field = None
                 
                 if movie_language_field:
                     detected_lang = movie_language_field.lower()
@@ -788,10 +761,7 @@ class MovieDetailsWidget(QWidget):
                                         print(f"[MovieDetailsWidget] Translation error: {translation_error}")
                                         # Continue with English overview if translation fails
                                 
-                                if isinstance(self.movie, MovieItem):
-                                    self.movie.plot = final_overview
-                                else:
-                                    self.movie['plot'] = final_overview
+                                self.movie.plot = final_overview
                                 self.plot_label.setText(final_overview)
                                 if hasattr(self, 'desc_text'):
                                     self.desc_text.setPlainText(final_overview)
@@ -842,12 +812,8 @@ class MovieDetailsWidget(QWidget):
                     if updated_data and hasattr(self.api_client, 'update_movie_cache'):
                         try:
                             # Ensure we have the necessary data for caching
-                            if isinstance(self.movie, MovieItem):
-                                movie_data_to_cache = self.movie.to_dict()
-                                movie_name = self.movie.name
-                            else:
-                                movie_data_to_cache = self.movie.copy()
-                                movie_name = self.movie.get('name')
+                            movie_data_to_cache = self.movie.to_dict()
+                            movie_name = self.movie.name
                             
                             if self.api_client.update_movie_cache(movie_data_to_cache):
                                 print(f"[MovieDetailsWidget] Successfully cached updated metadata for movie: {movie_name}")

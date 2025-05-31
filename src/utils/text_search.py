@@ -135,29 +135,23 @@ def search_all_data(api_client, query):
         normalized_name = TextSearch.normalize_text(name)
         if normalized_query in normalized_name:
             # Create a complete movie data structure for proper display
+            # Always ensure we have a MovieItem instance
             if isinstance(item, MovieItem):
-                # If it's already a MovieItem, convert to dict with all fields
-                result_item = item.to_dict()
-                result_item['stream_type'] = 'movie'
-                result_item['cover'] = result_item.get('stream_icon')  # Map stream_icon to cover for search display
+                movie_item = item
             else:
-                # Create a complete movie data structure with all required fields
-                result_item = {
-                    'stream_type': 'movie',
+                # Create MovieItem from dictionary data
+                movie_data = {
                     'name': name,
                     'stream_id': stream_id,
-                    'cover': cover,
-                    'rating': rating,
-                    'year': year,
-                    'plot': plot,
-                    # Include all fields that MovieItem expects with defaults
                     'num': item.get('num', 0),
                     'stream_icon': cover,
+                    'plot': plot,
                     'cast': item.get('cast'),
                     'director': item.get('director'),
                     'genre': item.get('genre'),
                     'releaseDate': item.get('releaseDate'),
                     'added': item.get('added'),
+                    'rating': rating,
                     'rating_5based': item.get('rating_5based'),
                     'backdrop_path': item.get('backdrop_path'),
                     'youtube_trailer': item.get('youtube_trailer'),
@@ -165,9 +159,15 @@ def search_all_data(api_client, query):
                     'category_id': item.get('category_id'),
                     'container_extension': item.get('container_extension'),
                     'tmdb_id': item.get('tmdb_id'),
+                    'year': year,
                     'adult': item.get('adult')
                 }
-            all_results.append(result_item)
+                movie_item = MovieItem.from_dict(movie_data)
+            
+            # Add search metadata
+            movie_item.stream_type = 'movie'
+            movie_item.cover = movie_item.stream_icon  # Map stream_icon to cover for search display
+            all_results.append(movie_item)
 
     # --- Search Series ---
     # Assuming api_client.get_series_for_search() or similar exists.
@@ -200,38 +200,35 @@ def search_all_data(api_client, query):
         
         normalized_name = TextSearch.normalize_text(name)
         if normalized_query in normalized_name:
-            # Create a complete series data structure for proper display
+            # Always ensure we have a SeriesItem instance
             if isinstance(item, SeriesItem):
-                # If it's already a SeriesItem, convert to dict with all fields
-                result_item = item.to_dict()
-                result_item['stream_type'] = 'series'
-                result_item['cover'] = result_item.get('cover')  # SeriesItem already has cover field
+                series_item = item
             else:
-                # Create a complete series data structure with all required fields
-                result_item = {
-                    'stream_type': 'series',
+                # Create SeriesItem from dictionary data
+                series_data = {
                     'name': name,
                     'series_id': series_id,
-                    'cover': cover,
-                    'rating': rating,
-                    'year': year,
-                    'plot': plot,
-                    # Include all fields that SeriesItem expects with defaults
                     'num': item.get('num', 0),
+                    'cover': cover,
+                    'plot': plot,
                     'cast': item.get('cast'),
                     'director': item.get('director'),
                     'genre': item.get('genre'),
                     'releaseDate': item.get('releaseDate'),
                     'last_modified': item.get('last_modified'),
+                    'rating': rating,
                     'rating_5based': item.get('rating_5based'),
                     'backdrop_path': item.get('backdrop_path'),
                     'youtube_trailer': item.get('youtube_trailer'),
                     'episode_run_time': item.get('episode_run_time'),
                     'category_id': item.get('category_id'),
-                    'tmdb_id': item.get('tmdb_id'),
-                    'adult': item.get('adult')
+                    'tmdb_id': item.get('tmdb_id')
                 }
-            all_results.append(result_item)
+                series_item = SeriesItem.from_dict(series_data)
+            
+            # Add search metadata
+            series_item.stream_type = 'series'
+            all_results.append(series_item)
             
     # Remove duplicates if any (e.g., if an item appears in multiple categories)
     # This basic de-duplication assumes unique IDs per type.
@@ -239,21 +236,30 @@ def search_all_data(api_client, query):
     unique_results = []
     seen_ids = set()
     for item in all_results:
-        item_id = None
-        if item['stream_type'] == 'live':
-            item_id = item.get('stream_id')
-        elif item['stream_type'] == 'movie':
-            item_id = item.get('stream_id') # Use stream_id here as well for consistency during de-duplication
-        elif item['stream_type'] == 'series':
-            item_id = item.get('series_id')
+        if hasattr(item, 'stream_type'):
+            if item.stream_type == 'live':
+                item_id = getattr(item, 'stream_id', None)
+            elif item.stream_type == 'movie':
+                item_id = getattr(item, 'stream_id', None)
+            elif item.stream_type == 'series':
+                item_id = getattr(item, 'series_id', None)
+            else:
+                continue
+        else:
+            # Fallback for dictionary format (should not happen with new implementation)
+            if item.get('stream_type') == 'live':
+                item_id = item.get('stream_id')
+            elif item.get('stream_type') == 'movie':
+                item_id = item.get('stream_id')
+            elif item.get('stream_type') == 'series':
+                item_id = item.get('series_id')
+            else:
+                continue
         
-        if item_id:
-            unique_key = (item['stream_type'], item_id)
-            if unique_key not in seen_ids:
-                unique_results.append(item)
-                seen_ids.add(unique_key)
-        else: # If no ID, just add it (less ideal)
+        stream_type = getattr(item, 'stream_type', None) or (item.get('stream_type') if isinstance(item, dict) else None)
+        unique_key = (stream_type, item_id)
+        if unique_key not in seen_ids:
+            seen_ids.add(unique_key)
             unique_results.append(item)
-
-
+    
     return unique_results
