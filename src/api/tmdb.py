@@ -379,8 +379,8 @@ class TMDBClient:
         elif self.read_access_token:
             headers["Authorization"] = f"Bearer {self.read_access_token}"
         
-        if year:
-            params["first_air_date_year"] = year
+        #if year:
+        #    params["first_air_date_year"] = year
 
         max_retries = 2
         base_delay = 0.5
