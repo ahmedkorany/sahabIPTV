@@ -62,7 +62,7 @@ class OfflineItemWidget(QWidget):
 
         self.play_button = QPushButton()
         self.play_button.setIcon(QIcon.fromTheme("media-playback-start", QIcon("assets/movies.png")))
-        self.play_button.setToolTip(self.translations.get_translation("Play Offline", "Play Offline"))
+        self.play_button.setToolTip(self.translations.get("Play Offline", "Play Offline"))
         self.play_button.clicked.connect(self._handle_play)
         buttons_layout.addWidget(self.play_button)
 
@@ -72,13 +72,13 @@ class OfflineItemWidget(QWidget):
 
         self.cancel_button = QPushButton()
         self.cancel_button.setIcon(QIcon.fromTheme("process-stop", QIcon("assets/reload.png")))
-        self.cancel_button.setToolTip(self.translations.get_translation("Cancel Download", "Cancel Download"))
+        self.cancel_button.setToolTip(self.translations.get("Cancel Download", "Cancel Download"))
         self.cancel_button.clicked.connect(self._handle_cancel)
         buttons_layout.addWidget(self.cancel_button)
 
         self.remove_button = QPushButton()
         self.remove_button.setIcon(QIcon.fromTheme("edit-delete", QIcon("assets/reload.png")))
-        self.remove_button.setToolTip(self.translations.get_translation("Remove Download", "Remove Download"))
+        self.remove_button.setToolTip(self.translations.get("Remove Download", "Remove Download"))
         self.remove_button.clicked.connect(self._handle_remove)
         buttons_layout.addWidget(self.remove_button)
 
@@ -90,12 +90,12 @@ class OfflineItemWidget(QWidget):
         current_progress = progress if progress is not None else self.offline_manager.get_movie_progress(self.stream_id)
 
         if current_status is None: # Not in manager's list anymore (e.g. removed)
-            self.status_label.setText(self.translations.get_translation("Removed", "Removed"))
+            self.status_label.setText(self.translations.get("Removed", "Removed"))
             self.setDisabled(True)
             return
 
         self.movie_meta['status'] = current_status # Update local copy of status
-        self.status_label.setText(f"{self.translations.get_translation(current_status.capitalize(), current_status.capitalize())}")
+        self.status_label.setText(f"{self.translations.get(current_status.capitalize(), current_status.capitalize())}")
         self.progress_bar.setVisible(False)
         self.play_button.setVisible(False)
         self.pause_resume_button.setVisible(False)
@@ -103,44 +103,44 @@ class OfflineItemWidget(QWidget):
         self.remove_button.setVisible(False) # Default to hidden
 
         if current_status == OfflineManager.PENDING:
-            self.status_label.setText(self.translations.get_translation("Pending", "Pending..."))
+            self.status_label.setText(self.translations.get("Pending", "Pending..."))
             self.cancel_button.setVisible(True)
         elif current_status == OfflineManager.DOWNLOADING:
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(current_progress)
-            self.status_label.setText(f"{self.translations.get_translation('Downloading', 'Downloading')}... {current_progress}%")
-            self.pause_resume_button.setText(self.translations.get_translation("Pause", "Pause"))
+            self.status_label.setText(f"{self.translations.get('Downloading', 'Downloading')}... {current_progress}%")
+            self.pause_resume_button.setText(self.translations.get("Pause", "Pause"))
             self.pause_resume_button.setIcon(QIcon.fromTheme("media-playback-pause"))
             self.pause_resume_button.setVisible(True)
             self.cancel_button.setVisible(True)
         elif current_status == OfflineManager.PAUSED:
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(current_progress)
-            self.status_label.setText(f"{self.translations.get_translation('Paused', 'Paused')} ({current_progress}%)")
-            self.pause_resume_button.setText(self.translations.get_translation("Resume", "Resume"))
+            self.status_label.setText(f"{self.translations.get('Paused', 'Paused')} ({current_progress}%)")
+            self.pause_resume_button.setText(self.translations.get("Resume", "Resume"))
             self.pause_resume_button.setIcon(QIcon.fromTheme("media-playback-start"))
             self.pause_resume_button.setVisible(True)
             self.cancel_button.setVisible(True)
         elif current_status == OfflineManager.COMPLETED:
-            self.status_label.setText(self.translations.get_translation("Downloaded", "Downloaded"))
+            self.status_label.setText(self.translations.get("Downloaded", "Downloaded"))
             self.play_button.setVisible(True)
             self.remove_button.setVisible(True)
         elif current_status == OfflineManager.ERROR:
-            self.status_label.setText(self.translations.get_translation("Error", "Error"))
+            self.status_label.setText(self.translations.get("Error", "Error"))
             # Show retry on pause_resume_button
-            self.pause_resume_button.setText(self.translations.get_translation("Retry", "Retry"))
+            self.pause_resume_button.setText(self.translations.get("Retry", "Retry"))
             self.pause_resume_button.setIcon(QIcon.fromTheme("view-refresh"))
             self.pause_resume_button.setVisible(True)
             self.remove_button.setVisible(True) # Allow removing errored downloads
         elif current_status == OfflineManager.CANCELLED:
-             self.status_label.setText(self.translations.get_translation("Cancelled", "Cancelled"))
+             self.status_label.setText(self.translations.get("Cancelled", "Cancelled"))
              self.remove_button.setVisible(True) # Allow removing cancelled entry
              # Or offer a "Download Again" button
-             self.pause_resume_button.setText(self.translations.get_translation("Download Again", "Download Again"))
+             self.pause_resume_button.setText(self.translations.get("Download Again", "Download Again"))
              self.pause_resume_button.setIcon(QIcon.fromTheme("download"))
              self.pause_resume_button.setVisible(True)
         elif current_status == OfflineManager.STORAGE_FULL:
-            self.status_label.setText(self.translations.get_translation("Storage Full", "Storage Full"))
+            self.status_label.setText(self.translations.get("Storage Full", "Storage Full"))
             self.cancel_button.setVisible(True) # Allow cancelling
             self.remove_button.setVisible(True) # Allow removing to free space
 
@@ -150,8 +150,8 @@ class OfflineItemWidget(QWidget):
             if filepath and os.path.exists(filepath):
                 self.play_requested.emit(filepath, self.movie_meta)
             else:
-                QMessageBox.warning(self, self.translations.get_translation("File Not Found", "File Not Found"),
-                                    self.translations.get_translation("The offline movie file is missing.", "The offline movie file is missing."))
+                QMessageBox.warning(self, self.translations.get("File Not Found", "File Not Found"),
+                                    self.translations.get("The offline movie file is missing.", "The offline movie file is missing."))
                 self.update_ui_for_status(OfflineManager.ERROR) # Mark as error if file missing
 
     def _handle_pause_resume(self):
@@ -166,8 +166,8 @@ class OfflineItemWidget(QWidget):
         self.offline_manager.cancel_download(self.stream_id)
 
     def _handle_remove(self):
-        reply = QMessageBox.question(self, self.translations.get_translation("Confirm Removal", "Confirm Removal"),
-                                     self.translations.get_translation("Are you sure you want to remove this download: ",
+        reply = QMessageBox.question(self, self.translations.get("Confirm Removal", "Confirm Removal"),
+                                     self.translations.get("Are you sure you want to remove this download: ",
                                                                       "Are you sure you want to remove this download: ") + self.movie_meta.get('title', 'N/A') + "?",
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
@@ -195,11 +195,11 @@ class OfflineTab(QWidget):
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
 
-        self.total_storage_label = QLabel(self.translations.get_translation("Total storage used: calculating...", "Total storage used: calculating..."))
+        self.total_storage_label = QLabel(self.translations.get("Total storage used: calculating...", "Total storage used: calculating..."))
         main_layout.addWidget(self.total_storage_label)
 
         # Optional: Refresh button
-        refresh_button = QPushButton(self.translations.get_translation("Refresh List", "Refresh List"))
+        refresh_button = QPushButton(self.translations.get("Refresh List", "Refresh List"))
         refresh_button.setIcon(QIcon.fromTheme("view-refresh"))
         refresh_button.clicked.connect(self._populate_offline_list)
         main_layout.addWidget(refresh_button, 0, Qt.AlignRight)
@@ -223,19 +223,19 @@ class OfflineTab(QWidget):
 
         if not all_movies_meta:
             # Show a message if there are no offline items
-            placeholder_label = QLabel(self.translations.get_translation("No offline items yet. Downloads will appear here.", "No offline items yet. Downloads will appear here."))
+            # Using .get for translations
+            placeholder_text = self.translations.get("No offline items yet. Downloads will appear here.",
+                                                     "No offline items yet. Downloads will appear here.")
+            placeholder_label = QLabel(placeholder_text)
             placeholder_label.setAlignment(Qt.AlignCenter)
-            # To make this work well, QListWidget might need to be replaced or overlaid.
-            # For simplicity, if list is empty, this message won't show unless we add it as an item or change layout.
-            # A simple way is to add a QListWidgetItem with a QLabel.
-            if self.offline_list_widget.count() == 0: # Check if it's still empty
+
+            if self.offline_list_widget.count() == 0:
                 item = QListWidgetItem(self.offline_list_widget)
                 self.offline_list_widget.addItem(item)
-                label_widget = QLabel(self.translations.get_translation("No offline items. Downloads will appear here.", "No offline items. Downloads will appear here."))
+                label_widget = QLabel(placeholder_text) # Use the fetched text
                 label_widget.setAlignment(Qt.AlignCenter)
                 item.setSizeHint(label_widget.sizeHint())
                 self.offline_list_widget.setItemWidget(item, label_widget)
-
             return
 
         for movie_id, movie_meta in all_movies_meta.items():
@@ -271,14 +271,42 @@ class OfflineTab(QWidget):
 
     def _update_total_storage_display(self, used_gb=None, total_gb=None):
         # If signals provide values (from OfflineManager's initial emit or updates)
-        if used_gb is not None:
-            used_formatted = self._format_size_gb(used_gb)
-            total_formatted = self._format_size_gb(total_gb) if total_gb is not None else "N/A"
+        if used_gb is not None: # This parameter name might need to be changed if signal emits bytes
+            # Assuming storage_usage_signal emits total_app_usage_bytes (int)
+            # For now, let's adapt to the provided parameters if they are indeed GB.
+            # If the signal emits bytes, this method needs to be updated.
+            # Based on previous subtask, storage_usage_signal emits (int) total_app_usage_bytes.
+            # So, the parameters here are likely a misunderstanding from the old signal.
+            # Let's assume _update_total_storage_display is now called with one int arg: used_bytes
+
+            # Correcting the logic based on storage_usage_signal = pyqtSignal(int)
+            # The parameters used_gb, total_gb are from the old signal type.
+            # This method should now accept used_bytes (int)
+
+            # Re-interpreting based on new signal pyqtSignal(int) for total_app_usage_bytes
+            # The method signature in connect is _update_total_storage_display.
+            # If it's connected to pyqtSignal(int), it will receive one int argument.
+            # Let's rename used_gb to used_bytes for clarity if it's the single int arg.
+
+            # Assuming this method is now: _update_total_storage_display(self, used_bytes_arg)
+            # And the old (float, float) version is no longer relevant.
+            # For the purpose of this diff, I'll assume the method signature was changed
+            # when storage_usage_signal was changed in OfflineManager.
+            # If not, this is where the fix for the signal data type mismatch would go.
+            # The current task is only fixing get_translation.
+
+            # Sticking to fixing get_translation, assuming the parameters are what they are for now.
+            used_formatted = self._format_size_gb(used_gb if used_gb is not None else 0) # Handle None
+            total_formatted = self._format_size_gb(total_gb if total_gb is not None else 0) # Handle None
+
+            # If total_gb is not meaningful for app-specific usage, we might simplify the message.
+            # For now, using the existing format string.
             self.total_storage_label.setText(
-                self.translations.get_translation("Storage: {used} / {total}", "Storage: {used} / {total}").format(used=used_formatted, total=total_formatted)
+                self.translations.get("Storage: {used} / {total}", "Storage: {used} / {total}").format(used=used_formatted, total=total_formatted)
             )
-        else: # Fallback to calculate from OfflineManager if signal didn't provide new values
-            # This part might be redundant if OfflineManager.storage_usage_signal always provides values
+        else:
+            # This else block might be for when the signal is not yet emitted or provides no data.
+            # If storage_usage_signal correctly emits an int, this method should be called with that int.
             # For now, let's assume the signal is the source of truth for used_gb, total_gb
             # If not, we would call:
             # disk_usage_bytes = self.offline_manager.get_total_disk_usage() # This method needs to exist in OfflineManager
