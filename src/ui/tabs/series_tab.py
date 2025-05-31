@@ -129,7 +129,6 @@ class SeriesTab(QWidget):
         self.api_client = api_client
         self.favorites_manager = favorites_manager
         self.series = []
-        self.filtered_series = []
         self.all_series = []  # Store all series across categories
         self.current_series = None
         self._opened_from_search = False
@@ -144,13 +143,7 @@ class SeriesTab(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
-        # Search bar
-        search_layout = QHBoxLayout()
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText(self.translations.get("Search series...", "Search series..."))
-        self.search_input.textChanged.connect(self.on_search_text_changed)
-        search_layout.addWidget(self.search_input)
-        layout.addLayout(search_layout)
+        # Search functionality removed
         
         # Stacked widget for grid/details views
         self.stacked_widget = QStackedWidget()
@@ -227,9 +220,7 @@ class SeriesTab(QWidget):
 
         self.setLayout(layout)
 
-    def on_search_text_changed(self, text):
-        """Handle search input text changes"""
-        self.search_series(text)
+    # Search input handler removed
 
     def _show_grid_view(self):
         # Assuming grid view is at index 0 of the stacked_widget
@@ -627,60 +618,11 @@ class SeriesTab(QWidget):
             self.total_pages = 1 # Ensure at least one page if series list is empty
         
         self._series_sort_cache.clear()  # Clear cache on reload
-        self.build_series_search_index() # Populates _normalized_name
-        self.search_series(self.search_input.text()) # Apply current search or show all
+        self.display_current_page() # Display the series without search filtering
 
-    def build_series_search_index(self):
-        """Build search index for series with normalized names and sorting keys."""
-        self._series_search_index = {}
-        self._series_lc_names = []
-        if not hasattr(self, 'series') or not self.series:
-            return
-        for idx, series_data in enumerate(self.series):
-            original_name = series_data.get('name', '')
-            normalized_name = original_name.lower().strip()
-            series_data['_normalized_name'] = normalized_name
-            self._series_lc_names.append(normalized_name)
-            series_data['_sort_name'] = normalized_name
-            try:
-                series_data['_sort_date'] = int(series_data.get('added', 0))
-            except (ValueError, TypeError):
-                series_data['_sort_date'] = 0
-            try:
-                series_data['_sort_rating'] = float(series_data.get('rating', 0))
-            except (ValueError, TypeError):
-                 series_data['_sort_rating'] = 0.0
+    # Search index building functionality removed
 
-    def search_series(self, text):
-        """Fast search using index, similar to movies/channels."""
-        from src.utils.text_search import TextSearch
-        search_term = text.strip()
-        if not self.series:
-            self.display_series_grid([])
-            return
-        if not search_term:
-            self.display_series_grid(self.series)
-            return
-        query_tokens = TextSearch.normalize_text(search_term).split()
-        matched_indices = set()
-        processed_first_token = False
-        for token in query_tokens:
-            if hasattr(self, '_series_search_index') and token in self._series_search_index:
-                if not processed_first_token:
-                    matched_indices = self._series_search_index[token].copy()
-                    processed_first_token = True
-                else:
-                    matched_indices.intersection_update(self._series_search_index[token])
-            else:
-                matched_indices.clear()
-                break
-        # Fallback: substring search
-        if not matched_indices:
-            for idx, name in enumerate(self._series_lc_names):
-                if search_term.lower() in name:
-                    matched_indices.add(idx)
-        filtered = [self.series[i] for i in sorted(matched_indices)]
-        self.display_series_grid(filtered)
+    # Search functionality removed
 
         if not self.series:
             # Optionally, show a message in the grid area if no favorites
@@ -1058,21 +1000,13 @@ class SeriesTab(QWidget):
         self.empty_state_label.setWordWrap(True)
         
         source_list = []
-        search_active = hasattr(self, 'search_input') and self.search_input.text().strip()
-        if search_active:
-            if hasattr(self, 'filtered_series') and self.filtered_series is not None:
-                source_list = self.filtered_series
-        elif hasattr(self, 'series') and self.series is not None:
+        if hasattr(self, 'series') and self.series is not None:
             source_list = self.series
         
         page_items, self.total_pages = self.paginate_items(source_list, self.current_page)
         if not page_items:
             # Show empty state label in the grid
-            if search_active:
-                query = self.search_input.text().strip()
-                self.empty_state_label.setText(f"No results found for '{query}'.")
-            else:
-                self.empty_state_label.setText(self.translations.get("No items to display.", "No items to display."))
+            self.empty_state_label.setText(self.translations.get("No items to display.", "No items to display."))
             self.series_grid_layout.addWidget(self.empty_state_label, 0, 0, 1, 4)
             self.update_pagination_controls()
             return
@@ -1093,25 +1027,70 @@ class SeriesTab(QWidget):
 
     def apply_sort_and_refresh(self):
         items = list(self.series) if hasattr(self, 'series') else []
-        sort_field = self.order_combo.currentText()
+        sort_index = self.order_combo.currentIndex()
         reverse = self.sort_toggle.isChecked()
-        if sort_field == "Default":
-            sorted_items = items
-        else:
-            if sort_field == "Date":
-                key = lambda x: x.get('_sort_date', 0)
-            elif sort_field == "Name":
-                key = lambda x: x.get('_sort_name', '')
-            elif sort_field == "Rating":
-                key = lambda x: x.get('_sort_rating', 0)
+        
+        # Use index-based sorting to avoid translation issues
+        if sort_index == 0:  # Default
+            # For default, restore original order from all_series if available
+            if hasattr(self, 'all_series') and self.all_series:
+                sorted_items = list(self.all_series)
             else:
-                key = None
+                sorted_items = items
+        else:
+            key = None
+            if sort_index == 1:  # Date
+                key = lambda x: self._get_sort_date(x)
+            elif sort_index == 2:  # Rating
+                key = lambda x: self._get_sort_rating(x)
+            elif sort_index == 3:  # Name
+                key = lambda x: self._get_sort_name(x)
+            
             if key:
                 sorted_items = sorted(items, key=key, reverse=reverse)
             else:
                 sorted_items = items
+        
         # Update self.series to the sorted list so pagination always follows the sort
         self.series = sorted_items
-        self.build_series_search_index() # Rebuild index/normalized names if series order changed
         self.current_page = 1  # Reset to first page after sort
-        self.search_series(self.search_input.text()) # Re-apply search to the sorted list
+        self.display_current_page() # Display the sorted series
+    
+    def _get_sort_date(self, series_data):
+        """Extract and normalize release date for sorting."""
+        try:
+            release_date = series_data.get('releaseDate', '')
+            if release_date:
+                # Convert date string (YYYY-MM-DD) to comparable format
+                # Remove hyphens to get YYYYMMDD as integer for sorting
+                date_parts = release_date.split('-')
+                if len(date_parts) >= 1 and date_parts[0].isdigit():
+                    # Use year as primary sort key, pad with month/day if available
+                    year = int(date_parts[0])
+                    month = int(date_parts[1]) if len(date_parts) > 1 and date_parts[1].isdigit() else 1
+                    day = int(date_parts[2]) if len(date_parts) > 2 and date_parts[2].isdigit() else 1
+                    return year * 10000 + month * 100 + day
+            return 0  # Default for missing or invalid dates
+        except (ValueError, TypeError, IndexError):
+            return 0
+    
+    def _get_sort_name(self, series_data):
+        """Extract and normalize name for sorting."""
+        return series_data.get('name', '').lower().strip()
+    
+    def _get_sort_rating(self, series_data):
+        """Extract and normalize rating for sorting."""
+        try:
+            rating_value = series_data.get('rating', 0)
+            if isinstance(rating_value, str):
+                # Handle string ratings like "8.5" or "N/A"
+                if rating_value.replace('.', '').replace('-', '').isdigit():
+                    return float(rating_value)
+                else:
+                    return 0.0
+            elif isinstance(rating_value, (int, float)):
+                return float(rating_value)
+            else:
+                return 0.0
+        except (ValueError, TypeError):
+            return 0.0
