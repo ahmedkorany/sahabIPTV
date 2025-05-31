@@ -128,9 +128,180 @@ class SeriesItem:
         if self.genre:
             return [g.strip() for g in self.genre.split('/') if g.strip()]
         return []
+
+
+@dataclass
+class MovieItem:
+    """Data model for movie items received from Xtream server."""
+    
+    # Required fields
+    num: int
+    name: str
+    stream_id: int
+    
+    # Optional fields with defaults
+    stream_icon: Optional[str] = None
+    plot: Optional[str] = None
+    cast: Optional[str] = None
+    director: Optional[str] = None
+    genre: Optional[str] = None
+    releaseDate: Optional[str] = None
+    added: Optional[str] = None
+    rating: Optional[str] = None
+    rating_5based: Optional[int] = None
+    backdrop_path: Optional[List[str]] = None
+    youtube_trailer: Optional[str] = None
+    duration: Optional[str] = None
+    category_id: Optional[str] = None
+    container_extension: Optional[str] = None
+    tmdb_id: Optional[str] = None
+    year: Optional[str] = None
+    adult: Optional[bool] = None
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'MovieItem':
+        """Create MovieItem instance from dictionary data."""
+        return cls(
+            num=data.get('num', 0),
+            name=data.get('name', ''),
+            stream_id=data.get('stream_id', 0),
+            stream_icon=data.get('stream_icon'),
+            plot=data.get('plot'),
+            cast=data.get('cast'),
+            director=data.get('director'),
+            genre=data.get('genre'),
+            releaseDate=data.get('releaseDate'),
+            added=data.get('added'),
+            rating=data.get('rating'),
+            rating_5based=data.get('rating_5based'),
+            backdrop_path=data.get('backdrop_path'),
+            youtube_trailer=data.get('youtube_trailer'),
+            duration=data.get('duration'),
+            category_id=data.get('category_id'),
+            container_extension=data.get('container_extension'),
+            tmdb_id=data.get('tmdb_id'),
+            year=data.get('year'),
+            adult=data.get('adult')
+        )
+    
+    def to_dict(self) -> dict:
+        """Convert MovieItem instance to dictionary."""
+        return {
+            'num': self.num,
+            'name': self.name,
+            'stream_id': self.stream_id,
+            'stream_icon': self.stream_icon,
+            'plot': self.plot,
+            'cast': self.cast,
+            'director': self.director,
+            'genre': self.genre,
+            'releaseDate': self.releaseDate,
+            'added': self.added,
+            'rating': self.rating,
+            'rating_5based': self.rating_5based,
+            'backdrop_path': self.backdrop_path,
+            'youtube_trailer': self.youtube_trailer,
+            'duration': self.duration,
+            'category_id': self.category_id,
+            'container_extension': self.container_extension,
+            'tmdb_id': self.tmdb_id,
+            'year': self.year,
+            'adult': self.adult
+        }
+    
+    def get_release_year(self) -> Optional[int]:
+        """Extract release year from releaseDate or year field."""
+        # Try year field first
+        if self.year:
+            try:
+                return int(self.year)
+            except (ValueError, TypeError):
+                pass
+        
+        # Fallback to releaseDate
+        if self.releaseDate:
+            try:
+                return int(self.releaseDate.split('-')[0])
+            except (ValueError, IndexError):
+                pass
+        return None
+    
+    def get_rating_float(self) -> float:
+        """Get rating as float value."""
+        if self.rating:
+            try:
+                return float(self.rating)
+            except (ValueError, TypeError):
+                pass
+        return 0.0
+    
+    def get_duration_minutes(self) -> Optional[int]:
+        """Get movie duration in minutes."""
+        if self.duration:
+            try:
+                return int(self.duration)
+            except (ValueError, TypeError):
+                pass
+        return None
+    
+    def get_sort_date_value(self) -> int:
+        """Get comparable date value for sorting (timestamp or YYYYMMDD format)."""
+        # Try added timestamp first
+        if self.added:
+            try:
+                return int(self.added)
+            except (ValueError, TypeError):
+                pass
+        
+        # Fallback to release date
+        if self.releaseDate:
+            try:
+                date_parts = self.releaseDate.split('-')
+                if len(date_parts) >= 1 and date_parts[0].isdigit():
+                    year = int(date_parts[0])
+                    month = int(date_parts[1]) if len(date_parts) > 1 and date_parts[1].isdigit() else 1
+                    day = int(date_parts[2]) if len(date_parts) > 2 and date_parts[2].isdigit() else 1
+                    return year * 10000 + month * 100 + day
+            except (ValueError, IndexError):
+                pass
+        return 0
+    
+    def get_display_name(self) -> str:
+        """Get display name for UI."""
+        return self.name or f"Movie {self.stream_id}"
+    
+    def has_poster_image(self) -> bool:
+        """Check if movie has a poster image."""
+        return bool(self.stream_icon and self.stream_icon.strip())
+    
+    def has_backdrop_images(self) -> bool:
+        """Check if movie has backdrop images."""
+        return bool(self.backdrop_path and len(self.backdrop_path) > 0)
+    
+    def get_genres_list(self) -> List[str]:
+        """Get list of genres from genre string."""
+        if self.genre:
+            return [g.strip() for g in self.genre.split('/') if g.strip()]
+        return []
     
     def get_cast_list(self) -> List[str]:
         """Get list of cast members from cast string."""
         if self.cast:
             return [c.strip() for c in self.cast.split(',') if c.strip()]
         return []
+    
+    def is_adult_content(self) -> bool:
+        """Check if movie is adult content."""
+        return bool(self.adult)
+    
+    def get_stream_url(self, api_client, container_extension: Optional[str] = None) -> Optional[str]:
+        """Get the streaming URL for this movie."""
+        if not api_client:
+            return None
+        
+        extension = container_extension or self.container_extension or 'mp4'
+        return api_client.get_movie_url(self.stream_id, extension)
+    
+    def is_adult_content(self) -> bool:
+        """Check if movie is adult content."""
+        return bool(self.adult)

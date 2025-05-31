@@ -14,6 +14,7 @@ from src.ui.widgets.movie_details_widget import MovieDetailsWidget
 from src.utils.helpers import load_image_async, get_translations
 from src.api.tmdb import TMDBClient
 from src.ui.widgets.dialogs import MovieDetailsDialog
+from src.models import MovieItem
 
 class MoviesTab(QWidget):
     """Movies tab widget"""
@@ -171,11 +172,11 @@ class MoviesTab(QWidget):
 
         key_func = None
         if sort_field == self.translations.get("Date", "Date"):
-            key_func = lambda x: x.get('_sort_date', 0)
+            key_func = lambda x: getattr(x, '_sort_date', 0) if isinstance(x, MovieItem) else x.get('_sort_date', 0)
         elif sort_field == self.translations.get("Name", "Name"):
-            key_func = lambda x: x.get('_sort_name', '')
+            key_func = lambda x: getattr(x, '_sort_name', '') if isinstance(x, MovieItem) else x.get('_sort_name', '')
         elif sort_field == self.translations.get("Rating", "Rating"):
-            key_func = lambda x: x.get('_sort_rating', 0)
+            key_func = lambda x: getattr(x, '_sort_rating', 0) if isinstance(x, MovieItem) else x.get('_sort_rating', 0)
         
         if key_func:
             sorted_items = sorted(items_to_sort, key=key_func, reverse=reverse)
@@ -261,13 +262,13 @@ class MoviesTab(QWidget):
                         success, data = self.api_client.get_vod_streams(cat['category_id'])
                         if success:
                             all_movies_temp.extend(data)
-                self.all_movies = all_movies_temp # Store all movies
+                self.all_movies = [MovieItem.from_dict(item) for item in all_movies_temp] # Store all movies
             self.movies = list(self.all_movies) # Use a copy for current display
         else:
             # This branch handles specific category_id (not None and not 'favorites')
             success, data = self.api_client.get_vod_streams(category_id)
             if success:
-                self.movies = data
+                self.movies = [MovieItem.from_dict(item) for item in data]
             else:
                 QMessageBox.warning(self, self.translations.get("Error", "Error"), f"{self.translations.get('Failed to load movies', 'Failed to load movies')}: {data}")
         self.current_page = 1
@@ -286,10 +287,11 @@ class MoviesTab(QWidget):
 
         # Get favorites from the favorites manager and filter for movies
         all_favorites = self.favorites_manager.get_favorites()
-        self.movies = [
+        movie_favorites = [
             fav for fav in all_favorites
             if fav.get('stream_type') == 'movie'
         ]
+        self.movies = [MovieItem.from_dict(item) for item in movie_favorites]
 
         self.current_page = 1  # Reset to first page for favorites
         self.build_movie_search_index()  # Build index after loading (depends on self.movies)
@@ -305,19 +307,35 @@ class MoviesTab(QWidget):
         if not hasattr(self, 'movies') or not self.movies:
             return
         for idx, movie_data in enumerate(self.movies):
-            original_name = movie_data.get('name', '')
-            normalized_name = original_name.lower().strip()
-            movie_data['_normalized_name'] = normalized_name
-            self._movie_lc_names.append(normalized_name)
-            movie_data['_sort_name'] = normalized_name
-            try:
-                movie_data['_sort_date'] = int(movie_data.get('added', 0))
-            except (ValueError, TypeError):
-                movie_data['_sort_date'] = 0
-            try:
-                movie_data['_sort_rating'] = float(movie_data.get('rating', 0))
-            except (ValueError, TypeError):
-                movie_data['_sort_rating'] = 0.0
+            if isinstance(movie_data, MovieItem):
+                original_name = movie_data.name or ''
+                normalized_name = original_name.lower().strip()
+                movie_data._normalized_name = normalized_name
+                self._movie_lc_names.append(normalized_name)
+                movie_data._sort_name = normalized_name
+                try:
+                    movie_data._sort_date = int(movie_data.added or 0)
+                except (ValueError, TypeError):
+                    movie_data._sort_date = 0
+                try:
+                    movie_data._sort_rating = float(movie_data.rating or 0)
+                except (ValueError, TypeError):
+                    movie_data._sort_rating = 0.0
+            else:
+                # Fallback for dictionary format
+                original_name = movie_data.get('name', '')
+                normalized_name = original_name.lower().strip()
+                movie_data['_normalized_name'] = normalized_name
+                self._movie_lc_names.append(normalized_name)
+                movie_data['_sort_name'] = normalized_name
+                try:
+                    movie_data['_sort_date'] = int(movie_data.get('added', 0))
+                except (ValueError, TypeError):
+                    movie_data['_sort_date'] = 0
+                try:
+                    movie_data['_sort_rating'] = float(movie_data.get('rating', 0))
+                except (ValueError, TypeError):
+                    movie_data['_sort_rating'] = 0.0
 
     def display_movie_grid(self, movies):
         """Display movies as a grid of tiles"""
@@ -365,17 +383,25 @@ class MoviesTab(QWidget):
             poster_label_widget.setStyleSheet("background-color: #111111;") # Dark placeholder background
 
             # Store the label for potential updates
-            stream_id_str = str(movie.get('stream_id'))
+            if isinstance(movie, MovieItem):
+                stream_id_str = str(movie.stream_id)
+                movie_name = movie.name or 'Unnamed Movie'
+                movie_icon = movie.stream_icon
+            else:
+                stream_id_str = str(movie.get('stream_id'))
+                movie_name = movie.get('name', 'Unnamed Movie')
+                movie_icon = movie.get('stream_icon')
+            
             self.poster_labels[stream_id_str] = poster_label_widget
 
             default_pix = QPixmap('assets/movies.png')
-            if movie.get('stream_icon'):
-                load_image_async(movie['stream_icon'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, on_failure=partial(self.onPosterDownloadFailed, movie))
+            if movie_icon:
+                load_image_async(movie_icon, poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, on_failure=partial(self.onPosterDownloadFailed, movie))
             else:
                 poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
             # Title overlay
-            title_text_label = QLabel(movie.get('name', 'Unnamed Movie'), poster_container) 
+            title_text_label = QLabel(movie_name, poster_container) 
             title_text_label.setWordWrap(True)
             title_text_label.setAlignment(Qt.AlignCenter) 
             title_text_label.setFont(QFont('Arial', 14, QFont.Bold)) # User requested font 14px and bold
@@ -383,7 +409,7 @@ class MoviesTab(QWidget):
             
             font_metrics = QFontMetrics(title_text_label.font())
             max_title_width = poster_width - 10 # 5px padding on each side for text
-            text_rect = font_metrics.boundingRect(QRect(0, 0, max_title_width, poster_height), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, movie.get('name', 'Unnamed Movie'))
+            text_rect = font_metrics.boundingRect(QRect(0, 0, max_title_width, poster_height), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, movie_name)
             single_line_height = font_metrics.height()
             estimated_title_height = min(text_rect.height(), single_line_height * 2) 
             title_box_height = estimated_title_height + 10 
@@ -393,10 +419,11 @@ class MoviesTab(QWidget):
 
             # Overlay 'new.png' if the movie is new
             is_recent = False
-            if movie.get('added'):
+            movie_added = movie.added if isinstance(movie, MovieItem) else movie.get('added')
+            if movie_added:
                 from datetime import datetime, timedelta # Import here is fine as it's conditional
                 try:
-                    added_time = datetime.fromtimestamp(int(movie['added']))
+                    added_time = datetime.fromtimestamp(int(movie_added))
                     if (datetime.now() - added_time) < timedelta(days=7):
                         is_recent = True
                 except Exception:
@@ -421,8 +448,9 @@ class MoviesTab(QWidget):
             # name.setStyleSheet("color: #fff;")
             # tile_layout.addWidget(name)
             # Rating (if available)
-            if movie.get('rating'):
-                rating = QLabel(f"★ {movie['rating']}")
+            movie_rating = movie.rating if isinstance(movie, MovieItem) else movie.get('rating')
+            if movie_rating:
+                rating = QLabel(f"★ {movie_rating}")
                 rating.setAlignment(Qt.AlignCenter)
                 rating.setStyleSheet("color: gold;")
                 tile_layout.addWidget(rating)
@@ -521,12 +549,20 @@ class MoviesTab(QWidget):
         main_window = self.window()
         dlg = MovieDetailsDialog(movie, self.api_client, parent=self, main_window=main_window)
         # Create movie item with necessary information for favorites
-        movie_item = {
-            'name': movie['name'],
-            'stream_id': movie['stream_id'],
-            'container_extension': movie['container_extension'],
-            'stream_type': 'movie'
-        }
+        if isinstance(movie, MovieItem):
+            movie_item = {
+                'name': movie.name,
+                'stream_id': movie.stream_id,
+                'container_extension': movie.container_extension,
+                'stream_type': 'movie'
+            }
+        else:
+            movie_item = {
+                'name': movie['name'],
+                'stream_id': movie['stream_id'],
+                'container_extension': movie.get('container_extension', ''),
+                'stream_type': 'movie'
+            }
         dlg.play_movie(movie_item)  # Play directly, don't show dialog
 
     def _play_trailer(self, trailer_url):
@@ -546,27 +582,33 @@ class MoviesTab(QWidget):
             self.add_to_favorites.emit(movie_data)
             return
 
-        # Ensure 'stream_type' is present in movie_data
-        if 'stream_type' not in movie_data:
-            movie_data['stream_type'] = 'movie'
+        # Convert MovieItem to dictionary if needed
+        if isinstance(movie_data, MovieItem):
+            movie_dict = movie_data.to_dict()
+            movie_dict['stream_type'] = 'movie'
+            favorite_item = movie_dict
+        else:
+            # Ensure 'stream_type' is present in movie_data
+            if 'stream_type' not in movie_data:
+                movie_data['stream_type'] = 'movie'
 
-        # Create favorite item with required fields
-        favorite_item = {
-            'stream_id': movie_data.get('stream_id'),
-            'stream_type': 'movie',
-            'name': movie_data.get('name', ''),
-            'cover': movie_data.get('stream_icon', ''),
-            'category_id': movie_data.get('category_id', ''),
-            'added': movie_data.get('added', ''),
-            'rating': movie_data.get('rating', ''),
-            'rating_5based': movie_data.get('rating_5based', ''),
-            'container_extension': movie_data.get('container_extension', '')
-        }
+            # Create favorite item with required fields
+            favorite_item = {
+                'stream_id': movie_data.get('stream_id'),
+                'stream_type': 'movie',
+                'name': movie_data.get('name', ''),
+                'cover': movie_data.get('stream_icon', ''),
+                'category_id': movie_data.get('category_id', ''),
+                'added': movie_data.get('added', ''),
+                'rating': movie_data.get('rating', ''),
+                'rating_5based': movie_data.get('rating_5based', ''),
+                'container_extension': movie_data.get('container_extension', '')
+            }
 
-        # Add other fields as expected by favorites manager
-        for key, value in movie_data.items():
-            if key not in favorite_item:
-                favorite_item[key] = value
+            # Add other fields as expected by favorites manager
+            for key, value in movie_data.items():
+                if key not in favorite_item:
+                    favorite_item[key] = value
 
         # Use favorites manager to toggle favorite status
         main_window.favorites_manager.toggle_favorite(favorite_item)
@@ -660,13 +702,22 @@ class MoviesTab(QWidget):
 
     def movie_double_clicked(self, item):
         """Handle movie double-click"""
-        movie_item = {
-            'name': item['name'],
-            'stream_id': item['stream_id'],
-            'container_extension': item['container_extension'],
-            'stream_url': item['stream_url'],
-            'stream_type': 'movie'
-        }
+        if isinstance(item, MovieItem):
+            movie_item = {
+                'name': item.name,
+                'stream_id': item.stream_id,
+                'container_extension': item.container_extension,
+                'stream_url': getattr(item, 'stream_url', ''),
+                'stream_type': 'movie'
+            }
+        else:
+            movie_item = {
+                'name': item['name'],
+                'stream_id': item['stream_id'],
+                'container_extension': item['container_extension'],
+                'stream_url': item['stream_url'],
+                'stream_type': 'movie'
+            }
         self.play_movie(movie_item)
     
     def play_movie(self):
@@ -732,18 +783,30 @@ class MoviesTab(QWidget):
     @pyqtSlot(dict)
     def onPosterDownloadFailed(self, movie=None):
         if movie:
-            if 'tmdb' in movie['stream_icon']:
-                print(f"[MovieTab] Failed to download poster from TMDB {movie.get('stream_icon', 'Unknown')}. Using default poster.")
+            # Handle both MovieItem and dictionary formats
+            if isinstance(movie, MovieItem):
+                stream_icon = movie.stream_icon or ''
+                movie_name = movie.name or 'Unknown'
+                movie_tmdb_id = movie.tmdb_id
+                movie_stream_id = movie.stream_id
+            else:
+                stream_icon = movie.get('stream_icon', '')
+                movie_name = movie.get('name', 'Unknown')
+                movie_tmdb_id = movie.get('tmdb_id')
+                movie_stream_id = movie.get('stream_id')
+            
+            if 'tmdb' in stream_icon:
+                print(f"[MovieTab] Failed to download poster from TMDB {stream_icon}. Using default poster.")
                 return
             else:
-                #print(f"[MovieTab] Failed to download poster from Xtream server {movie.get('stream_icon', 'Unknown')}. Using default poster.")
+                #print(f"[MovieTab] Failed to download poster from Xtream server {stream_icon}. Using default poster.")
                 pass
             tmdb_id = None
-            if movie.get('tmdb_id'):
-                tmdb_id = movie.get('tmdb_id')
+            if movie_tmdb_id:
+                tmdb_id = movie_tmdb_id
             else:
                 try:
-                    success, vod_info = self.api_client.get_vod_info(movie.get('stream_id'))
+                    success, vod_info = self.api_client.get_vod_info(movie_stream_id)
                     if 'movie_data' in vod_info and isinstance(vod_info['movie_data'], dict) and 'tmdb_id' in vod_info['movie_data']:
                         tmdb_id = vod_info['movie_data']['tmdb_id']
                     elif 'info' in vod_info and isinstance(vod_info['info'], dict) and 'tmdb_id' in vod_info['info']:
@@ -759,11 +822,24 @@ class MoviesTab(QWidget):
                         poster_path = details.get('poster_path')
                         tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
                         if tmdb_poster_url:
-                            orriginal_stream = str(movie['stream_id'])
-                            #print(f"[MovieTab] Failed to download poster from {movie['stream_icon']}. Using TMDB poster instead: {tmdb_poster_url}")
-                            movie['tmdb_id'] = tmdb_id
-                            movie['stream_icon'] = tmdb_poster_url
-                            self.api_client.update_movie_cache(movie)
+                            orriginal_stream = str(movie_stream_id)
+                            #print(f"[MovieTab] Failed to download poster from {stream_icon}. Using TMDB poster instead: {tmdb_poster_url}")
+                            
+                            # Update movie data with TMDB info
+                            if isinstance(movie, MovieItem):
+                                # For MovieItem, we need to update the cache with dictionary format
+                                movie_dict = movie.to_dict()
+                                movie_dict['tmdb_id'] = tmdb_id
+                                movie_dict['stream_icon'] = tmdb_poster_url
+                                self.api_client.update_movie_cache(movie_dict)
+                                # Also update the MovieItem object
+                                movie.tmdb_id = tmdb_id
+                                movie.stream_icon = tmdb_poster_url
+                            else:
+                                movie['tmdb_id'] = tmdb_id
+                                movie['stream_icon'] = tmdb_poster_url
+                                self.api_client.update_movie_cache(movie)
+                            
                             if orriginal_stream in self.poster_labels:
                                 poster_label_widget = self.poster_labels[orriginal_stream]
                                 poster_width = 125

@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont
 from src.utils.helpers import apply_dark_theme, get_translations
+from src.models import MovieItem
 
 class LoginDialog(QDialog):
     """Dialog for entering IPTV server credentials"""
@@ -263,7 +264,13 @@ class MovieDetailsDialog(QDialog):
             language = parent.language
         self.translations = get_translations(language)
         
-        self.setWindowTitle(movie.get('name', 'Movie Details'))
+        # Handle both MovieItem and dictionary formats
+        if isinstance(movie, MovieItem):
+            movie_name = movie.name or 'Movie Details'
+        else:
+            movie_name = movie.get('name', 'Movie Details')
+        
+        self.setWindowTitle(movie_name)
         self.setMinimumWidth(900)
         self.movie = movie
         self.api_client = api_client
@@ -305,7 +312,10 @@ class MovieDetailsDialog(QDialog):
         poster.setAlignment(Qt.AlignTop)
         pix = QPixmap()
         # Try all possible image keys in order of preference
-        image_url = self.movie.get('stream_icon') or self.movie.get('movie_image') or self.movie.get('cover_big')
+        if isinstance(self.movie, MovieItem):
+            image_url = self.movie.stream_icon or self.movie.movie_image or self.movie.cover_big
+        else:
+            image_url = self.movie.get('stream_icon') or self.movie.get('movie_image') or self.movie.get('cover_big')
         if image_url:
             pix = self.get_cached_pixmap(image_url, 'assets/movies.png')
         else:
@@ -322,7 +332,11 @@ class MovieDetailsDialog(QDialog):
         main_window = self.main_window if hasattr(self, 'main_window') else None
         if main_window and hasattr(main_window, 'favorites'):
             favs = main_window.favorites
-            is_favorite = any(fav.get('stream_id') == self.movie.get('stream_id') for fav in favs)
+            if isinstance(self.movie, MovieItem):
+                movie_stream_id = self.movie.stream_id
+            else:
+                movie_stream_id = self.movie.get('stream_id')
+            is_favorite = any(fav.get('stream_id') == movie_stream_id for fav in favs)
         def update_favorite_btn():
             if is_favorite:
                 favorite_btn.setText("★")
@@ -352,27 +366,46 @@ class MovieDetailsDialog(QDialog):
         # Metadata and actions
         right_layout = QVBoxLayout()
         # Title
-        title = QLabel(self.movie.get('name', ''))
+        if isinstance(self.movie, MovieItem):
+            movie_name = self.movie.name or ''
+            movie_year = self.movie.year or '--'
+            movie_genre = self.movie.genre or '--'
+            movie_duration = self.movie.duration or '--'
+            movie_director = self.movie.director or '--'
+            movie_cast = self.movie.cast or '--'
+            movie_rating = self.movie.rating or '--'
+            movie_plot = self.movie.plot or ''
+        else:
+            movie_name = self.movie.get('name', '')
+            movie_year = self.movie.get('year', '--')
+            movie_genre = self.movie.get('genre', '--')
+            movie_duration = self.movie.get('duration', '--')
+            movie_director = self.movie.get('director', '--')
+            movie_cast = self.movie.get('cast', '--')
+            movie_rating = self.movie.get('rating', '--')
+            movie_plot = self.movie.get('plot', '')
+        
+        title = QLabel(movie_name)
         title.setFont(QFont('Arial', 16, QFont.Bold))
         right_layout.addWidget(title)
         # Metadata
         meta = QLabel()
-        meta.setText(f"Year: {self.movie.get('year', '--')} | Genre: {self.movie.get('genre', '--')} | Duration: {self.movie.get('duration', '--')} min")
+        meta.setText(f"Year: {movie_year} | Genre: {movie_genre} | Duration: {movie_duration} min")
         right_layout.addWidget(meta)
         # Director, cast, rating
-        director = self.movie.get('director', '--')
-        cast = self.movie.get('cast', '--')
-        rating = self.movie.get('rating', '--')
-        right_layout.addWidget(QLabel(f"Director: {director}"))
-        if rating and rating != '--':
-            right_layout.addWidget(QLabel(f"★ {rating}"))
+        right_layout.addWidget(QLabel(f"Director: {movie_director}"))
+        if movie_rating and movie_rating != '--':
+            right_layout.addWidget(QLabel(f"★ {movie_rating}"))
         # Description
-        desc = QTextEdit(self.movie.get('plot', ''))
+        desc = QTextEdit(movie_plot)
         desc.setReadOnly(True)
         desc.setMaximumHeight(80)
         right_layout.addWidget(desc)
         # Cast photos (if available)
-        cast_photos = self.movie.get('cast_photos', [])
+        if isinstance(self.movie, MovieItem):
+            cast_photos = []  # MovieItem doesn't have cast_photos attribute
+        else:
+            cast_photos = self.movie.get('cast_photos', [])
         if cast_photos:
             cast_layout = QHBoxLayout()
             for cast_member in cast_photos:
@@ -391,8 +424,8 @@ class MovieDetailsDialog(QDialog):
                 vbox.addWidget(name_label)
                 cast_layout.addLayout(vbox)
             right_layout.addLayout(cast_layout)
-        elif cast and cast != '--':
-            right_layout.addWidget(QLabel(f"Cast: {cast}"))
+        elif movie_cast and movie_cast != '--':
+            right_layout.addWidget(QLabel(f"Cast: {movie_cast}"))
         # Action buttons
         btn_layout = QHBoxLayout()
         play_btn = QPushButton(self.translations.get("PLAY", "PLAY"))
