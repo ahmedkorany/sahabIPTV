@@ -12,6 +12,7 @@ from PyQt5.QtCore import QRect
 from src.utils.helpers import load_image_async
 from src.ui.widgets.series_details_widget import SeriesDetailsWidget
 from src.api.tmdb import TMDBClient
+from src.models import SeriesItem
 
 def get_api_client_from_label(label, main_window):
     if main_window and hasattr(main_window, 'api_client'):
@@ -258,6 +259,10 @@ class SeriesTab(QWidget):
             self.details_widget.deleteLater()
             self.details_widget = None
 
+        # Ensure series_data is a SeriesItem object
+        if not isinstance(series_data, SeriesItem):
+            series_data = SeriesItem.from_dict(series_data)
+        
         self.current_series = series_data # Keep track of the series being detailed
         self.details_widget = SeriesDetailsWidget(
             series_data=series_data,
@@ -296,6 +301,10 @@ class SeriesTab(QWidget):
 
     def show_series_details_by_data(self, series_data):
         """Shows series details based on provided series_data, typically from an external source like search."""
+        # Ensure series_data is a SeriesItem object
+        if not isinstance(series_data, SeriesItem):
+            series_data = SeriesItem.from_dict(series_data)
+        
         self._opened_from_search = True
         # This method is similar to show_series_details but callable with data directly.
         if not series_data or not isinstance(series_data, dict):
@@ -357,7 +366,11 @@ class SeriesTab(QWidget):
                 # Fallback: if series_id is in episode_data (not typical but as a safeguard)
                 series_id_for_url = episode_data.get('series_id') 
             else:
-                series_id_for_url = self.current_series.get('series_id')
+                from src.models import SeriesItem
+                if isinstance(self.current_series, SeriesItem):
+                    series_id_for_url = self.current_series.series_id
+                else:
+                    series_id_for_url = self.current_series.get('series_id')
 
             # The get_series_url might need series_id if it's not part of episode's stream_id logic
             # Assuming get_series_url can derive necessary info from stream_id and container_extension
@@ -365,7 +378,13 @@ class SeriesTab(QWidget):
 
             if stream_url:
                 episode_name = episode_data.get('title', 'Episode')
-                series_name = self.current_series.get('name', 'Series') if hasattr(self, 'current_series') and self.current_series else ''
+                if hasattr(self, 'current_series') and self.current_series:
+                    if isinstance(self.current_series, SeriesItem):
+                        series_name = self.current_series.name or 'Series'
+                    else:
+                        series_name = self.current_series.get('name', 'Series')
+                else:
+                    series_name = ''
                 
                 player_item_info = {
                     'name': f"{series_name} - {episode_name}",
@@ -580,7 +599,8 @@ class SeriesTab(QWidget):
                         success, data = self.api_client.get_series(cat['category_id'])
                         if success:
                             temp_all_series.extend(data)
-                self.all_series = temp_all_series # Store all series
+                # Convert raw data to SeriesItem objects
+                self.all_series = [SeriesItem.from_dict(item) for item in temp_all_series]
             all_series = list(self.all_series) # Use a copy for current display
             self.series = all_series
             if not self.all_series: # Populate self.all_series if it's empty and ALL was clicked
@@ -588,7 +608,8 @@ class SeriesTab(QWidget):
         else:
             success, data = self.api_client.get_series(category_id) # Changed from get_series_streams
             if success:
-                self.series = data
+                # Convert raw data to SeriesItem objects
+                self.series = [SeriesItem.from_dict(item) for item in data]
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load series: {data}")
         self.current_page = 1
@@ -607,10 +628,12 @@ class SeriesTab(QWidget):
 
         # Get favorites from the favorites manager and filter for series
         all_favorites = self.favorites_manager.get_favorites()
-        self.series = [
+        series_favorites = [
             fav for fav in all_favorites
             if fav.get('stream_type') == 'series' and fav.get('series_id')
         ]
+        # Convert to SeriesItem objects
+        self.series = [SeriesItem.from_dict(item) for item in series_favorites]
 
         self.current_page = 1
         self.total_pages = (len(self.series) + self.page_size - 1) // self.page_size
@@ -666,17 +689,21 @@ class SeriesTab(QWidget):
             poster_label_widget.setStyleSheet("background-color: #111111;") # Dark placeholder background
 
             default_pix = QPixmap('assets/series.png')
-            if series.get('cover'):
+            # Handle both SeriesItem objects and dict objects
+            cover_url = series.cover if isinstance(series, SeriesItem) else series.get('cover')
+            series_name = series.name if isinstance(series, SeriesItem) else series.get('name', '')
+            
+            if cover_url:
                 # Pass a lambda that calls onPosterDownloadFailed with series data and the label
                 on_failure_callback = lambda s=series, lbl=poster_label_widget: self.onPosterDownloadFailed(s, lbl)
-                load_image_async(series['cover'], poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, loading_counter=loading_counter, on_failure=on_failure_callback)
+                load_image_async(cover_url, poster_label_widget, default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation), update_size=(poster_width, poster_height), main_window=main_window, loading_counter=loading_counter, on_failure=on_failure_callback)
             else:
                 poster_label_widget.setPixmap(default_pix.scaled(poster_width, poster_height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
                 # Call fallback directly if no cover URL is provided initially
                 self.onPosterDownloadFailed(series, poster_label_widget)
 
             # Title overlay
-            title_text_label = QLabel(series['name'], poster_container) 
+            title_text_label = QLabel(series_name, poster_container) 
             title_text_label.setWordWrap(True)
             title_text_label.setAlignment(Qt.AlignCenter) 
             title_text_label.setFont(QFont('Arial', 14, QFont.Bold)) # User requested font 14px and bold
@@ -685,7 +712,7 @@ class SeriesTab(QWidget):
             font_metrics = QFontMetrics(title_text_label.font())
             max_title_width = poster_width - 10 # 5px padding on each side for text
             # Calculate height for up to two lines of text.
-            text_rect = font_metrics.boundingRect(QRect(0, 0, max_title_width, poster_height), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, series['name'])
+            text_rect = font_metrics.boundingRect(QRect(0, 0, max_title_width, poster_height), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, series_name)
             # Ensure title_height is at least one line, max two lines, plus padding.
             single_line_height = font_metrics.height()
             estimated_title_height = min(text_rect.height(), single_line_height * 2) # Cap actual text height at 2 lines
@@ -696,10 +723,12 @@ class SeriesTab(QWidget):
 
             # Overlay 'new.png' if the series is new
             is_recent = False
-            if series.get('added'):
+            # Handle both SeriesItem objects and dict objects
+            added_value = series.last_modified if isinstance(series, SeriesItem) else series.get('added')
+            if added_value:
                 from datetime import datetime, timedelta # Import here is fine as it's conditional
                 try:
-                    added_time = datetime.fromtimestamp(int(series['added']))
+                    added_time = datetime.fromtimestamp(int(added_value))
                     if (datetime.now() - added_time) < timedelta(days=7):
                         is_recent = True
                 except Exception:
@@ -717,8 +746,9 @@ class SeriesTab(QWidget):
             tile_layout.addWidget(poster_container, alignment=Qt.AlignCenter)
             # Original series name QLabel is removed, title is now an overlay.
             # Rating (if available)
-            if series.get('rating'):
-                rating = QLabel(f"★ {series['rating']}")
+            rating_value = series.rating if isinstance(series, SeriesItem) else series.get('rating')
+            if rating_value:
+                rating = QLabel(f"★ {rating_value}")
                 rating.setAlignment(Qt.AlignCenter)
                 rating.setStyleSheet("color: gold;")
                 tile_layout.addWidget(rating)
@@ -736,15 +766,17 @@ class SeriesTab(QWidget):
 
     def onPosterDownloadFailed(self, series_data, poster_label_widget):
         """Callback function for when a poster download fails."""
-        print(f"Poster download failed for series: {series_data.get('name')}. Attempting TMDB fallback.")
+        # Handle both SeriesItem objects and dict objects
+        series_name = series_data.name if isinstance(series_data, SeriesItem) else series_data.get('name')
+        print(f"Poster download failed for series: {series_name}. Attempting TMDB fallback.")
         # Implementation will follow: search TMDB, get poster, reload image
         # For now, just a placeholder
-        series_name = series_data.get('name')
-        tmdb_id = series_data.get('tmdb_id') # Assuming tmdb_id might exist
+        tmdb_id = getattr(series_data, 'tmdb_id', None) if isinstance(series_data, SeriesItem) else series_data.get('tmdb_id')
         series_year = None
-        if series_data.get('releaseDate'):
+        release_date = series_data.releaseDate if isinstance(series_data, SeriesItem) else series_data.get('releaseDate')
+        if release_date:
             try:
-                series_year = series_data.get('releaseDate').split('-')[0]
+                series_year = release_date.split('-')[0]
             except:
                 pass # Ignore if year cannot be parsed
 
@@ -774,7 +806,20 @@ class SeriesTab(QWidget):
                 print(f"Loading new poster from TMDB: {full_poster_url}")
 
                 # Prepare data for cache update
-                series_data_to_cache = series_data.copy() # Avoid modifying the original dict directly if it's a reference
+                from src.models import SeriesItem
+                if isinstance(series_data, SeriesItem):
+                    # Convert SeriesItem to dictionary for caching
+                    series_data_to_cache = {
+                        'series_id': series_data.series_id,
+                        'name': series_data.name,
+                        'cover': series_data.cover,
+                        'plot': series_data.plot,
+                        'genre': series_data.genre,
+                        'year': series_data.get_release_year(),
+                        'tmdb_id': getattr(series_data, 'tmdb_id', None)
+                    }
+                else:
+                    series_data_to_cache = series_data.copy() # Avoid modifying the original dict directly if it's a reference
                 series_data_to_cache['cover'] = full_poster_url
                 # If tmdb_id was found and used, or found via search, ensure it's in the data for caching
                 if tmdb_id: # This would be the one from series_data initially
@@ -1056,34 +1101,39 @@ class SeriesTab(QWidget):
         self.current_page = 1  # Reset to first page after sort
         self.display_current_page() # Display the sorted series
     
-    def _get_sort_date(self, series_data):
+    def _get_sort_date(self, series_item):
         """Extract and normalize release date for sorting."""
+        if isinstance(series_item, SeriesItem):
+            return series_item.get_sort_date_value()
+        # Fallback for dict objects (backward compatibility)
         try:
-            release_date = series_data.get('releaseDate', '')
+            release_date = series_item.get('releaseDate', '')
             if release_date:
-                # Convert date string (YYYY-MM-DD) to comparable format
-                # Remove hyphens to get YYYYMMDD as integer for sorting
                 date_parts = release_date.split('-')
                 if len(date_parts) >= 1 and date_parts[0].isdigit():
-                    # Use year as primary sort key, pad with month/day if available
                     year = int(date_parts[0])
                     month = int(date_parts[1]) if len(date_parts) > 1 and date_parts[1].isdigit() else 1
                     day = int(date_parts[2]) if len(date_parts) > 2 and date_parts[2].isdigit() else 1
                     return year * 10000 + month * 100 + day
-            return 0  # Default for missing or invalid dates
+            return 0
         except (ValueError, TypeError, IndexError):
             return 0
     
-    def _get_sort_name(self, series_data):
+    def _get_sort_name(self, series_item):
         """Extract and normalize name for sorting."""
-        return series_data.get('name', '').lower().strip()
+        if isinstance(series_item, SeriesItem):
+            return series_item.name.lower().strip() if series_item.name else ''
+        # Fallback for dict objects (backward compatibility)
+        return series_item.get('name', '').lower().strip()
     
-    def _get_sort_rating(self, series_data):
+    def _get_sort_rating(self, series_item):
         """Extract and normalize rating for sorting."""
+        if isinstance(series_item, SeriesItem):
+            return series_item.get_rating_float()
+        # Fallback for dict objects (backward compatibility)
         try:
-            rating_value = series_data.get('rating', 0)
+            rating_value = series_item.get('rating', 0)
             if isinstance(rating_value, str):
-                # Handle string ratings like "8.5" or "N/A"
                 if rating_value.replace('.', '').replace('-', '').isdigit():
                     return float(rating_value)
                 else:

@@ -10,6 +10,7 @@ from PyQt5.QtGui import QPixmap, QFont
 from src.api.tmdb import TMDBClient # Added import
 from src.ui.widgets.cast_widget import CastWidget
 from src.utils.helpers import get_translations
+from src.models import SeriesItem
 
 class SeriesDetailsWidget(QWidget):
     back_clicked = pyqtSignal()
@@ -174,14 +175,28 @@ class SeriesDetailsWidget(QWidget):
         self.setLayout(layout)
 
     def _load_initial_data(self):
-        series_id = self.series_data.get('series_id')
-        self.title_label.setText(self.series_data.get('name', ''))
-        self.meta_label.setText(f"Year: {self.series_data.get('year', '--')} | Genre: {self.series_data.get('genre', '--')}")
-        self.desc_text.setPlainText(self.series_data.get('plot', ''))
+        # Handle both SeriesItem objects and dict objects
+        if isinstance(self.series_data, SeriesItem):
+            series_id = self.series_data.series_id
+            series_name = self.series_data.name
+            series_year = self.series_data.get_release_year()
+            series_genre = self.series_data.genre
+            series_plot = self.series_data.plot
+            series_cover_url = self.series_data.cover
+        else:
+            series_id = self.series_data.get('series_id')
+            series_name = self.series_data.get('name', '')
+            series_year = self.series_data.get('year', '--')
+            series_genre = self.series_data.get('genre', '--')
+            series_plot = self.series_data.get('plot', '')
+            series_cover_url = self.series_data.get('cover')
+        
+        self.title_label.setText(series_name)
+        self.meta_label.setText(f"Year: {series_year} | Genre: {series_genre}")
+        self.desc_text.setPlainText(series_plot)
 
         # Load poster
         pix = QPixmap()
-        series_cover_url = self.series_data.get('cover')
         poster_loaded_successfully = False
         
         if series_cover_url:
@@ -192,22 +207,22 @@ class SeriesDetailsWidget(QWidget):
                 if not pix.isNull():
                     poster_loaded_successfully = True
             else:
-                print(f"Failed to load image data from existing cover URL: {series_cover_url} for {self.series_data.get('name')}. This might be a temporary issue or broken URL.")
+                print(f"Failed to load image data from existing cover URL: {series_cover_url} for {series_name}. This might be a temporary issue or broken URL.")
         
         # Only attempt TMDB fallback if the initial cover URL was missing or if loading from it failed AND it's considered okay to fallback
         # The original logic would fallback even if a cover URL was present but failed to load.
         # We adjust this to primarily fallback if series_cover_url was initially empty.
         if not series_cover_url or not poster_loaded_successfully: # Adjusted condition
             if not series_cover_url:
-                print(f"Initial cover URL missing for {self.series_data.get('name')}. Attempting TMDB fallback.")
+                print(f"Initial cover URL missing for {series_name}. Attempting TMDB fallback.")
             elif not poster_loaded_successfully:
                  # This case means a cover URL was present but failed to load. 
                  # Depending on desired behavior, one might choose *not* to fallback immediately
                  # or to have a more nuanced check. For now, we proceed with TMDB fallback as per original intent if load failed.
-                print(f"Initial poster load from {series_cover_url} failed for {self.series_data.get('name')}. Attempting TMDB fallback.")
+                print(f"Initial poster load from {series_cover_url} failed for {series_name}. Attempting TMDB fallback.")
 
             tmdb_poster_url = None
-            tmdb_id = self.series_data.get('tmdb_id')
+            tmdb_id = getattr(self.series_data, 'tmdb_id', None) if isinstance(self.series_data, SeriesItem) else self.series_data.get('tmdb_id')
             new_tmdb_id_found = None
 
             if tmdb_id:
@@ -219,10 +234,10 @@ class SeriesDetailsWidget(QWidget):
                     print(f"Error fetching series details from TMDB by ID {tmdb_id}: {e}")
             
             if not tmdb_poster_url:
-                series_name = self.series_data.get('name')
-                series_year = self.series_data.get('year')
+                # series_name and series_year already extracted above
+                search_year = series_year if series_year != '--' else None
                 try:
-                    results = self.tmdb_client.search_series(series_name, year=series_year)
+                    results = self.tmdb_client.search_series(series_name, year=search_year)
                     if results and results.get('results'):
                         first_result = results['results'][0]
                         if first_result.get('poster_path'):
@@ -255,18 +270,32 @@ class SeriesDetailsWidget(QWidget):
                             self._fetch_tmdb_credits(tmdb_id)
                         
                         if hasattr(self.api_client, 'update_series_cache'):
-                            series_data_to_cache = self.series_data.copy()
+                            if isinstance(self.series_data, SeriesItem):
+                                # Convert SeriesItem to dictionary for caching
+                                series_data_to_cache = {
+                                    'series_id': self.series_data.series_id,
+                                    'name': self.series_data.name,
+                                    'cover': self.series_data.cover,
+                                    'plot': self.series_data.plot,
+                                    'genre': self.series_data.genre,
+                                    'year': self.series_data.get_release_year(),
+                                    'tmdb_id': getattr(self.series_data, 'tmdb_id', None)
+                                }
+                            else:
+                                series_data_to_cache = self.series_data.copy()
+                            
                             if 'category_id' not in series_data_to_cache and hasattr(self, 'main_window') and hasattr(self.main_window, 'current_category_id_for_details'):
                                 series_data_to_cache['category_id'] = self.main_window.current_category_id_for_details
 
                             self.api_client.update_series_cache(series_data_to_cache)
-                            print(f"Updated cache for {self.series_data.get('name')} with new TMDB poster.")
+                            series_name = self.series_data.name if isinstance(self.series_data, SeriesItem) else self.series_data.get('name')
+                            print(f"Updated cache for {series_name} with new TMDB poster.")
                         else:
                             print("api_client does not have update_series_cache method.")
             
         if not poster_loaded_successfully:
             # Fallback to local placeholder if all attempts fail
-            print(f"All poster loading attempts failed for {self.series_data.get('name')}. Using default placeholder.")
+            print(f"All poster loading attempts failed for {series_name}. Using default placeholder.")
             pix = QPixmap('assets/series.png') 
         
         if not pix.isNull():
@@ -275,21 +304,22 @@ class SeriesDetailsWidget(QWidget):
         self._update_favorite_series_button_text()
 
         # Always attempt to get TMDB ID for credits, even if poster loaded successfully
-        final_tmdb_id = self.series_data.get('tmdb_id')
+        final_tmdb_id = getattr(self.series_data, 'tmdb_id', None) if isinstance(self.series_data, SeriesItem) else self.series_data.get('tmdb_id')
         if not final_tmdb_id:
             print(f"[SeriesDetailsWidget] No TMDB ID in series data, searching TMDB for credits")
             # Search TMDB for this series to get an ID for credits
-            series_name = self.series_data.get('name')
-            series_year = self.series_data.get('year')
+            # series_name and series_year already extracted above
             if series_name:
                 try:
-                    results = self.tmdb_client.search_series(series_name, year=series_year)
+                    results = self.tmdb_client.search_series(series_name, year=search_year)
                     if results and results.get('results'):
                         first_result = results['results'][0]
                         final_tmdb_id = first_result.get('id')
                         if final_tmdb_id:
                             print(f"[SeriesDetailsWidget] Found TMDB ID from search: {final_tmdb_id}")
-                            self.series_data['tmdb_id'] = final_tmdb_id
+                            # Only update dict objects, not SeriesItem objects
+                            if not isinstance(self.series_data, SeriesItem):
+                                self.series_data['tmdb_id'] = final_tmdb_id
                 except Exception as e:
                     print(f"[SeriesDetailsWidget] Error searching TMDB for '{series_name}': {e}")
         
@@ -309,12 +339,18 @@ class SeriesDetailsWidget(QWidget):
                     
                     # Update metadata from detailed info if available
                     # Update metadata from detailed info if available, but preserve TMDB data if it exists
-                    year_to_display = self.series_data.get('year', info_dict.get('releaseDate', '--'))
-                    genre_to_display = self.series_data.get('genre', info_dict.get('genre', '--'))
+                    if isinstance(self.series_data, SeriesItem):
+                        year_to_display = self.series_data.get_release_year() or info_dict.get('releaseDate', '--')
+                        genre_to_display = self.series_data.genre or info_dict.get('genre', '--')
+                        plot_to_display = self.series_data.plot or info_dict.get('plot', '')
+                    else:
+                        year_to_display = self.series_data.get('year', info_dict.get('releaseDate', '--'))
+                        genre_to_display = self.series_data.get('genre', info_dict.get('genre', '--'))
+                        plot_to_display = self.series_data.get('plot', info_dict.get('plot', ''))
+                    
                     self.meta_label.setText(f"Year: {year_to_display} | Genre: {genre_to_display}")
                     
                     # Update description, but preserve TMDB plot data if it exists
-                    plot_to_display = self.series_data.get('plot', info_dict.get('plot', ''))
                     self.desc_text.setPlainText(plot_to_display)
                     
                     # Update poster if a better one is in detailed info
@@ -341,7 +377,7 @@ class SeriesDetailsWidget(QWidget):
                     self._load_seasons_from_info()
                     
                     # Fetch TMDB credits if tmdb_id is available
-                    tmdb_id = self.series_data.get('tmdb_id')
+                    tmdb_id = getattr(self.series_data, 'tmdb_id', None) if isinstance(self.series_data, SeriesItem) else self.series_data.get('tmdb_id')
                     if tmdb_id:
                         self._fetch_tmdb_credits(tmdb_id)
                 else:
@@ -540,8 +576,11 @@ class SeriesDetailsWidget(QWidget):
             self.favorite_series_btn.setText(self.translations.get("Favorite N/A", "Favorite N/A"))
             return
 
+        # Handle both SeriesItem objects and dict objects
+        series_id = self.series_data.series_id if isinstance(self.series_data, SeriesItem) else self.series_data.get('series_id')
+        
         favorite_item_check = {
-            'series_id': self.series_data.get('series_id'),
+            'series_id': series_id,
             'stream_type': 'series'
         }
 
@@ -615,8 +654,9 @@ class SeriesDetailsWidget(QWidget):
         
         # Check if we need to fetch additional metadata
         needs_metadata_update = False
-        current_year = self.series_data.get('year')
-        current_genre = self.series_data.get('genre')
+        # Handle both SeriesItem objects and dict objects
+        current_year = self.series_data.get_release_year() if isinstance(self.series_data, SeriesItem) else self.series_data.get('year')
+        current_genre = self.series_data.genre if isinstance(self.series_data, SeriesItem) else self.series_data.get('genre')
         
         # Check if year or genre is missing or empty
         if not current_year or current_year == '--' or not current_genre or current_genre == '--':
@@ -683,7 +723,13 @@ class SeriesDetailsWidget(QWidget):
                         try:
                             year = series_details['first_air_date'][:4]  # Extract year from date
                             self.series_data['year'] = year
-                            self.meta_label.setText(f"Year: {year} | Genre: {self.series_data.get('genre', '--')}")
+                            if isinstance(self.series_data, SeriesItem):
+                                # For SeriesItem, we can't directly update attributes, so just update the display
+                                current_genre_display = self.series_data.genre or '--'
+                                self.meta_label.setText(f"Year: {year} | Genre: {current_genre_display}")
+                            else:
+                                self.series_data['year'] = year
+                                self.meta_label.setText(f"Year: {year} | Genre: {self.series_data.get('genre', '--')}")
                             updated_data = True
                             print(f"[SeriesDetailsWidget] Updated year to: {year}")
                         except (ValueError, IndexError):
@@ -694,15 +740,23 @@ class SeriesDetailsWidget(QWidget):
                         try:
                             genres = [genre['name'] for genre in series_details['genres'][:3]]  # Take first 3 genres
                             genre_string = ', '.join(genres)
-                            self.series_data['genre'] = genre_string
-                            self.meta_label.setText(f"Year: {self.series_data.get('year', '--')} | Genre: {genre_string}")
+                            if isinstance(self.series_data, SeriesItem):
+                                # For SeriesItem, we can't directly update attributes, so just update the display
+                                current_year_display = self.series_data.get_release_year() or '--'
+                                self.meta_label.setText(f"Year: {current_year_display} | Genre: {genre_string}")
+                            else:
+                                self.series_data['genre'] = genre_string
+                                self.meta_label.setText(f"Year: {self.series_data.get('year', '--')} | Genre: {genre_string}")
                             updated_data = True
                             print(f"[SeriesDetailsWidget] Updated genre to: {genre_string}")
                         except (KeyError, TypeError):
                             print(f"[SeriesDetailsWidget] Could not parse genres from TMDB response")
                     
                     # Update plot/overview if missing or empty
-                    current_plot = self.series_data.get('plot', '').strip()
+                    if isinstance(self.series_data, SeriesItem):
+                        current_plot = (self.series_data.plot or '').strip()
+                    else:
+                        current_plot = self.series_data.get('plot', '').strip()
                     if not current_plot and series_details.get('overview'):
                         try:
                             overview = series_details['overview'].strip()
@@ -727,8 +781,12 @@ class SeriesDetailsWidget(QWidget):
                                         print(f"[SeriesDetailsWidget] Translation error: {translation_error}")
                                         # Continue with English overview if translation fails
                                 
-                                self.series_data['plot'] = final_overview
-                                self.desc_text.setPlainText(final_overview)
+                                if isinstance(self.series_data, SeriesItem):
+                                    # For SeriesItem, we can't directly update attributes, so just update the display
+                                    self.desc_text.setPlainText(final_overview)
+                                else:
+                                    self.series_data['plot'] = final_overview
+                                    self.desc_text.setPlainText(final_overview)
                                 updated_data = True
                                 print(f"[SeriesDetailsWidget] Updated plot from TMDB overview")
                         except (KeyError, TypeError):
@@ -738,11 +796,25 @@ class SeriesDetailsWidget(QWidget):
                     if updated_data and hasattr(self.api_client, 'update_series_cache'):
                         try:
                             # Ensure we have the necessary data for caching
-                            series_data_to_cache = self.series_data.copy()
-                            if self.api_client.update_series_cache(series_data_to_cache):
-                                print(f"[SeriesDetailsWidget] Successfully cached updated metadata for series: {self.series_data.get('name')}")
+                            if isinstance(self.series_data, SeriesItem):
+                                # Convert SeriesItem to dictionary for caching
+                                series_data_to_cache = {
+                                    'series_id': self.series_data.series_id,
+                                    'name': self.series_data.name,
+                                    'cover': self.series_data.cover,
+                                    'plot': self.series_data.plot,
+                                    'genre': self.series_data.genre,
+                                    'year': self.series_data.get_release_year(),
+                                    'tmdb_id': getattr(self.series_data, 'tmdb_id', None)
+                                }
                             else:
-                                print(f"[SeriesDetailsWidget] Failed to cache updated metadata for series: {self.series_data.get('name')}")
+                                series_data_to_cache = self.series_data.copy()
+                            if self.api_client.update_series_cache(series_data_to_cache):
+                                series_name = self.series_data.name if isinstance(self.series_data, SeriesItem) else self.series_data.get('name')
+                                print(f"[SeriesDetailsWidget] Successfully cached updated metadata for series: {series_name}")
+                            else:
+                                series_name = self.series_data.name if isinstance(self.series_data, SeriesItem) else self.series_data.get('name')
+                                print(f"[SeriesDetailsWidget] Failed to cache updated metadata for series: {series_name}")
                         except Exception as cache_error:
                             print(f"[SeriesDetailsWidget] Error caching updated series data: {cache_error}")
                             
