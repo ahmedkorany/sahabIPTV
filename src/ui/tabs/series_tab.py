@@ -301,15 +301,15 @@ class SeriesTab(QWidget):
 
     def show_series_details_by_data(self, series_data):
         """Shows series details based on provided series_data, typically from an external source like search."""
+        self._opened_from_search = True
+        # This method is similar to show_series_details but callable with data directly.
+        if not series_data:
+            QMessageBox.warning(self, "Error", "Invalid series data provided.")
+            return
+            
         # Ensure series_data is a SeriesItem object
         if not isinstance(series_data, SeriesItem):
             series_data = SeriesItem.from_dict(series_data)
-        
-        self._opened_from_search = True
-        # This method is similar to show_series_details but callable with data directly.
-        if not series_data or not isinstance(series_data, dict):
-            QMessageBox.warning(self, "Error", "Invalid series data provided.")
-            return
 
         # Clear existing details widget if any
         if self.details_widget:

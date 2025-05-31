@@ -286,7 +286,7 @@ class SearchTab(QWidget):
         # Determine item type and default icon
         item_type_str = item_data.get('stream_type', 'unknown').lower()
         if 'series_id' in item_data: item_type_str = 'series'
-        elif 'movie_id' in item_data: item_type_str = 'movie' # Assuming movie_id for movies
+        elif 'stream_id' in item_data and item_type_str == 'movie': item_type_str = 'movie' # Movies have stream_id
         elif 'live' in item_data.get('category_name', '').lower() or item_data.get('is_live'): item_type_str = 'live'
 
 
@@ -355,7 +355,7 @@ class SearchTab(QWidget):
                 self.main_window.show_series_details_from_search(item_data)
             else:
                 print("Main window does not have show_series_details_from_search method.")
-        elif 'movie_id' in item_data or item_type == 'movie':
+        elif 'stream_id' in item_data and item_type == 'movie':
             print(f"Movie clicked: {item_data.get('name')}")
             # self.movie_selected.emit(item_data) # TODO: Connect this signal
             if self.main_window and hasattr(self.main_window, 'show_movie_details_from_search'):

@@ -1,5 +1,6 @@
 import unicodedata
 import re
+from src.models import MovieItem, SeriesItem
 
 class TextSearch:
     @staticmethod
@@ -115,17 +116,32 @@ def search_all_data(api_client, query):
                     movies_data.extend(movies) 
     
     for item in movies_data:
-        name = item.get('name', '')
+        # Handle both MovieItem instances and dictionaries
+        if isinstance(item, MovieItem):
+            name = item.name
+            stream_id = item.stream_id
+            cover = item.stream_icon
+            rating = item.rating or 0
+            year = item.year
+            plot = item.plot
+        else:
+            name = item.get('name', '')
+            stream_id = item.get('stream_id')
+            cover = item.get('stream_icon') or item.get('movie_image')
+            rating = item.get('rating', 0)
+            year = item.get('year')
+            plot = item.get('plot')
+        
         normalized_name = TextSearch.normalize_text(name)
         if normalized_query in normalized_name:
             result_item = {
                 'stream_type': 'movie',
                 'name': name,
-                'stream_id': item.get('stream_id'), # Use stream_id consistently
-                'cover': item.get('stream_icon') or item.get('movie_image'),
-                'rating': item.get('rating', 0),
-                'year': item.get('year'),
-                'plot': item.get('plot'),
+                'stream_id': stream_id, # Use stream_id consistently
+                'cover': cover,
+                'rating': rating,
+                'year': year,
+                'plot': plot,
                 # Add other relevant fields
             }
             all_results.append(result_item)
@@ -143,17 +159,32 @@ def search_all_data(api_client, query):
                     series_data.extend(series_list)
 
     for item in series_data:
-        name = item.get('name', '')
+        # Handle both SeriesItem instances and dictionaries
+        if isinstance(item, SeriesItem):
+            name = item.name
+            series_id = item.series_id
+            cover = item.cover
+            rating = item.rating or 0
+            plot = item.plot
+            year = item.get_release_year()  # Use the method to extract year
+        else:
+            name = item.get('name', '')
+            series_id = item.get('series_id')
+            cover = item.get('cover')
+            rating = item.get('rating', 0)
+            plot = item.get('plot')
+            year = item.get('year')
+        
         normalized_name = TextSearch.normalize_text(name)
         if normalized_query in normalized_name:
             result_item = {
                 'stream_type': 'series',
                 'name': name,
-                'series_id': item.get('series_id'),
-                'cover': item.get('cover'),
-                'rating': item.get('rating', 0),
-                'plot': item.get('plot'),
-                'year': item.get('year'),
+                'series_id': series_id,
+                'cover': cover,
+                'rating': rating,
+                'plot': plot,
+                'year': year,
                 # Add other relevant fields
             }
             all_results.append(result_item)
