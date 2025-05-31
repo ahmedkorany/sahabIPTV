@@ -12,7 +12,8 @@ class OfflineManager(QObject):
     error_signal = pyqtSignal(str, str)  # movie_id, error_message
     status_changed_signal = pyqtSignal(str, str)  # movie_id, status
     offline_list_changed_signal = pyqtSignal()
-    storage_usage_signal = pyqtSignal(float, float)  # used_gb, total_gb
+    # Changed to emit total bytes used by app's offline files
+    storage_usage_signal = pyqtSignal(int)  # total_app_usage_bytes
 
     PENDING = "pending"
     DOWNLOADING = "downloading"
@@ -36,7 +37,7 @@ class OfflineManager(QObject):
 
         os.makedirs(self.offline_movies_dir, exist_ok=True)
         self._load_metadata()
-        self._emit_storage_usage()
+        self.update_total_storage_usage() # Corrected call
 
     def _load_metadata(self):
         if os.path.exists(self.metadata_file):
@@ -57,18 +58,25 @@ class OfflineManager(QObject):
         with open(self.metadata_file, 'w') as f:
             json.dump(self.offline_movies, f, indent=4)
         self.offline_list_changed_signal.emit()
-        self._emit_storage_usage()
+        self.update_total_storage_usage() # Update usage after metadata changes
 
     def _update_status(self, movie_id, status, emit_signal=True):
         if movie_id in self.offline_movies:
             self.offline_movies[movie_id]['status'] = status
             if emit_signal:
                 self.status_changed_signal.emit(movie_id, status)
-            self._save_metadata() # Save metadata whenever status changes
+            # _save_metadata will call update_total_storage_usage, so no need to call it directly here
+            # if status change implies a potential change in storage (e.g. COMPLETED, CANCELLED involving file ops)
+            self._save_metadata()
 
-    def _emit_storage_usage(self):
-        used, total, _ = psutil.disk_usage(self.offline_movies_dir)
-        self.storage_usage_signal.emit(used / (1024**3), total / (1024**3)) # GB
+    # Removed faulty _emit_storage_usage method.
+    # System-wide disk usage (free/total) is checked directly where needed (start_download, _download_worker).
+    # storage_usage_signal now reports app-specific usage.
+
+    def update_total_storage_usage(self):
+        """Calculates and emits the total storage used by offline downloads."""
+        usage_bytes = self.get_total_offline_storage_usage()
+        self.storage_usage_signal.emit(usage_bytes)
 
     def get_movie_filepath(self, movie_id):
         if movie_id in self.offline_movies:
@@ -138,11 +146,13 @@ class OfflineManager(QObject):
             free_space = psutil.disk_usage(self.offline_movies_dir).free
 
             # Use the class-level STORAGE_BUFFER_BYTES for consistency
+            disk_info = psutil.disk_usage(self.offline_movies_dir) # Get named tuple
+            free_space = disk_info.free
             if total_size > 0 and free_space < (total_size + self.STORAGE_BUFFER_BYTES):
                 print(f"Storage check failed for {movie_id}: Required {total_size + self.STORAGE_BUFFER_BYTES}, Available {free_space}")
                 self._update_status(movie_id, self.STORAGE_FULL)
                 self.error_signal.emit(movie_id, "Not enough storage space to start download.")
-                self._emit_storage_usage()
+                # self.update_total_storage_usage() # _update_status calls _save_metadata which calls this
                 return
             elif total_size == 0: # Content-Length was 0 or not provided
                  print(f"Warning: Content-Length is 0 or not provided for {movie_id}. Proceeding without pre-download storage check for file size.")
@@ -325,8 +335,13 @@ class OfflineManager(QObject):
                         downloaded_this_session += len(chunk)
                         current_file_size = current_size + downloaded_this_session
 
+                        # Update current actual size in metadata for get_total_offline_storage_usage
+                        self.offline_movies[movie_id]['current_actual_size_bytes'] = current_file_size
+
+
                         # Refined In-Download Storage Check
-                        free_space_in_loop = psutil.disk_usage(os.path.dirname(filepath)).free
+                        disk_info_loop = psutil.disk_usage(os.path.dirname(filepath))
+                        free_space_in_loop = disk_info_loop.free
                         required_for_chunk = len(chunk)
                         if free_space_in_loop < required_for_chunk + self.STORAGE_BUFFER_BYTES:
                             print(f"Stopping download for {movie_id} due to insufficient storage during download.")
@@ -397,8 +412,8 @@ class OfflineManager(QObject):
                 # Check if thread is still the one we manage, relevant for quick start/stop/resume
                 if threading.current_thread() == self.download_threads.get(movie_id):
                     pass #
+            # _save_metadata calls update_total_storage_usage
             self._save_metadata() # Ensure metadata is saved at the end of a download attempt
-            self._emit_storage_usage() # Update storage usage
 
 
     def get_offline_movies_list(self):
@@ -410,21 +425,20 @@ class OfflineManager(QObject):
     def get_movie_progress(self, movie_id):
         return self.offline_movies.get(movie_id, {}).get('progress', 0)
 
-    def get_total_disk_usage(self):
-        # This calculates the sum of 'size_bytes' from metadata for COMPLETED movies
-        # For a more accurate disk usage, one might sum os.path.getsize for each file
-        total_usage = 0
-        for movie_id, data in self.offline_movies.items():
-            if data['status'] == self.COMPLETED and 'filepath' in data and os.path.exists(data['filepath']):
-                 total_usage += os.path.getsize(data['filepath'])
-            elif 'size_bytes' in data and data['status'] != self.CANCELLED : # Include size of partially downloaded files too
-                 # This might overestimate if 'size_bytes' is total and file is partial.
-                 # A more accurate way for partials is os.path.getsize(data['filepath'])
-                 if 'filepath' in data and os.path.exists(data['filepath']):
-                     total_usage += os.path.getsize(data['filepath'])
-                 # else:
-                 #    total_usage += data.get('size_bytes',0) # fallback to stored size_bytes if file doesn't exist
-        return total_usage
+    def get_total_offline_storage_usage(self):
+        """Calculates total storage used by successfully downloaded or partially downloaded files."""
+        total_usage_bytes = 0
+        for movie_id, meta in self.offline_movies.items():
+            filepath = meta.get('filepath')
+            if filepath and os.path.exists(filepath):
+                if meta['status'] == self.COMPLETED:
+                    total_usage_bytes += os.path.getsize(filepath)
+                elif meta['status'] in [self.DOWNLOADING, self.PAUSED, self.ERROR, self.STORAGE_FULL]:
+                    # For incomplete downloads, use actual current file size
+                    total_usage_bytes += os.path.getsize(filepath)
+            # If file doesn't exist but metadata is there (e.g. pending, or error before file creation),
+            # it contributes 0 to current usage.
+        return total_usage_bytes
 
     def retry_download(self, movie_id):
         if movie_id in self.offline_movies:
