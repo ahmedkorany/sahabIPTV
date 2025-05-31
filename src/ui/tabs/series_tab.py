@@ -786,13 +786,22 @@ class SeriesTab(QWidget):
             if tmdb_id:
                 print(f"Attempting to fetch series details from TMDB with id: {tmdb_id}")
                 series_details_tmdb = self.tmdb_client.get_series_details(tmdb_id)
-                if series_details_tmdb and series_details_tmdb.get('poster_path'):
-                    tmdb_poster_path = series_details_tmdb['poster_path']
+                if series_details_tmdb:
+                    # Handle SeriesDetails model or raw dict
+                    poster_path = None
+                    if hasattr(series_details_tmdb, 'poster_path'):
+                        poster_path = series_details_tmdb.poster_path
+                    else:
+                        poster_path = series_details_tmdb.get('poster_path')
+                    
+                    if poster_path:
+                        tmdb_poster_path = poster_path
                     print(f"Found poster via TMDB ID: {tmdb_poster_path}")
 
             if not tmdb_poster_path and series_name:
                 print(f"Attempting to search series on TMDB with name: {series_name}, year: {series_year}")
                 search_results = self.tmdb_client.search_series(series_name, year=series_year)
+                # Handle search results (always returns raw dict)
                 if search_results and search_results.get('results'):
                     # Try to find a match, potentially based on name and year if available
                     # For simplicity, taking the first result for now

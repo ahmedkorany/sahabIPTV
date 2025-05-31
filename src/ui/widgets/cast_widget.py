@@ -19,13 +19,22 @@ class CastDataWorker(QObject):
         try:
             print(f"[CastDataWorker] Fetching cast data for TMDB ID: {self.tmdb_id}")
             credits_data = self.tmdb_client.get_series_credits(self.tmdb_id)
-            if credits_data and 'cast' in credits_data:
-                cast_list = credits_data['cast']
-                print(f"[CastDataWorker] Successfully fetched {len(cast_list)} cast members")
-                self.cast_data_ready.emit(cast_list)
-            else:
-                print("[CastDataWorker] No cast data found in TMDB response")
-                self.cast_data_ready.emit([])
+            
+            cast_list = []
+            if credits_data:
+                # Handle SeriesCredits model
+                if hasattr(credits_data, 'cast'):
+                    # Convert CastMember objects to dictionaries for compatibility
+                    cast_list = [cast_member.to_dict() for cast_member in credits_data.cast]
+                    print(f"[CastDataWorker] Successfully fetched {len(cast_list)} cast members from SeriesCredits model")
+                # Handle raw dictionary (fallback)
+                elif isinstance(credits_data, dict) and 'cast' in credits_data:
+                    cast_list = credits_data['cast']
+                    print(f"[CastDataWorker] Successfully fetched {len(cast_list)} cast members from raw data")
+                else:
+                    print("[CastDataWorker] No cast data found in TMDB response")
+            
+            self.cast_data_ready.emit(cast_list)
         except Exception as e:
             error_msg = f"Error fetching cast data: {str(e)}"
             print(f"[CastDataWorker] {error_msg}")

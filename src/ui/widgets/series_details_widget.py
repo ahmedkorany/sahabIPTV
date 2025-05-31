@@ -228,8 +228,16 @@ class SeriesDetailsWidget(QWidget):
             if tmdb_id:
                 try:
                     details = self.tmdb_client.get_series_details(tmdb_id)
-                    if details and details.get('poster_path'):
-                        tmdb_poster_url = self.tmdb_client.get_full_poster_url(details['poster_path'])
+                    if details:
+                        # Handle SeriesDetails model or raw dict
+                        poster_path = None
+                        if hasattr(details, 'poster_path'):
+                            poster_path = details.poster_path
+                        else:
+                            poster_path = details.get('poster_path')
+                        
+                        if poster_path:
+                            tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
                 except Exception as e:
                     print(f"Error fetching series details from TMDB by ID {tmdb_id}: {e}")
             
@@ -238,6 +246,7 @@ class SeriesDetailsWidget(QWidget):
                 search_year = series_year if series_year != '--' else None
                 try:
                     results = self.tmdb_client.search_series(series_name, year=search_year)
+                    # Handle search results (always returns raw dict)
                     if results and results.get('results'):
                         first_result = results['results'][0]
                         if first_result.get('poster_path'):
@@ -312,6 +321,7 @@ class SeriesDetailsWidget(QWidget):
             if series_name:
                 try:
                     results = self.tmdb_client.search_series(series_name, year=search_year)
+                    # Handle search results (always returns raw dict)
                     if results and results.get('results'):
                         first_result = results['results'][0]
                         final_tmdb_id = first_result.get('id')
@@ -718,10 +728,17 @@ class SeriesDetailsWidget(QWidget):
                 if series_details:
                     updated_data = False
                     
+                    # Get first_air_date from SeriesDetails model or raw dict
+                    first_air_date = None
+                    if hasattr(series_details, 'first_air_date'):
+                        first_air_date = series_details.first_air_date
+                    else:
+                        first_air_date = series_details.get('first_air_date')
+                    
                     # Update year if missing
-                    if (not current_year or current_year == '--') and series_details.get('first_air_date'):
+                    if (not current_year or current_year == '--') and first_air_date:
                         try:
-                            year = series_details['first_air_date'][:4]  # Extract year from date
+                            year = first_air_date[:4]  # Extract year from date
                             self.series_data['year'] = year
                             if isinstance(self.series_data, SeriesItem):
                                 # For SeriesItem, we can't directly update attributes, so just update the display
@@ -733,12 +750,25 @@ class SeriesDetailsWidget(QWidget):
                             updated_data = True
                             print(f"[SeriesDetailsWidget] Updated year to: {year}")
                         except (ValueError, IndexError):
-                            print(f"[SeriesDetailsWidget] Could not parse year from: {series_details.get('first_air_date')}")
+                            print(f"[SeriesDetailsWidget] Could not parse year from: {first_air_date}")
+                    
+                    # Get genres from SeriesDetails model or raw dict
+                    genres_data = None
+                    if hasattr(series_details, 'genres'):
+                        genres_data = series_details.genres
+                    else:
+                        genres_data = series_details.get('genres')
                     
                     # Update genre if missing
-                    if (not current_genre or current_genre == '--') and series_details.get('genres'):
+                    if (not current_genre or current_genre == '--') and genres_data:
                         try:
-                            genres = [genre['name'] for genre in series_details['genres'][:3]]  # Take first 3 genres
+                            # Handle Genre objects or raw dicts
+                            if genres_data and hasattr(genres_data[0], 'name'):
+                                # Genre model objects
+                                genres = [genre.name for genre in genres_data[:3]]  # Take first 3 genres
+                            else:
+                                # Raw dict format
+                                genres = [genre['name'] for genre in genres_data[:3]]  # Take first 3 genres
                             genre_string = ', '.join(genres)
                             if isinstance(self.series_data, SeriesItem):
                                 # For SeriesItem, we can't directly update attributes, so just update the display
@@ -757,9 +787,16 @@ class SeriesDetailsWidget(QWidget):
                         current_plot = (self.series_data.plot or '').strip()
                     else:
                         current_plot = self.series_data.get('plot', '').strip()
-                    if not current_plot and series_details.get('overview'):
+                    # Get overview from SeriesDetails model or raw dict
+                    overview = None
+                    if hasattr(series_details, 'overview'):
+                        overview = series_details.overview
+                    else:
+                        overview = series_details.get('overview')
+                    
+                    if not current_plot and overview:
                         try:
-                            overview = series_details['overview'].strip()
+                            overview = overview.strip()
                             if overview:
                                 # If we detected a non-English language and got English overview, try to translate
                                 final_overview = overview

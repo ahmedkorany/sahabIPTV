@@ -1,4 +1,4 @@
-"""Cache management service for the IPTV application"""
+#!/usr/bin/env python3
 import os
 import time
 import pickle
@@ -282,3 +282,11 @@ class XtreamCacheManager(CacheManager):
                 return self.set(cache_key, cached_series)
         
         return False
+    
+    def clear_all(self) -> bool:
+        """Clear all cached values (alias for clear method)
+        
+        Returns:
+            True if successfully cleared, False otherwise
+        """
+        return self.clear()

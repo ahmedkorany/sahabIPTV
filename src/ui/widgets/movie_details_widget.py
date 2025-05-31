@@ -325,7 +325,11 @@ class MovieDetailsWidget(QWidget):
             try:
                 details = self.tmdb_client.get_movie_details(tmdb_id)
                 if details:
-                    poster_path = details.get('poster_path')
+                    # Handle MovieDetails model or raw dict
+                    if hasattr(details, 'poster_path'):
+                        poster_path = details.poster_path
+                    else:
+                        poster_path = details.get('poster_path')
                     if poster_path:
                         tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
                         if tmdb_poster_url:
@@ -654,11 +658,25 @@ class MovieDetailsWidget(QWidget):
         try:
             credits_data = self.tmdb_client.get_movie_credits(tmdb_id)
             print(f"[MovieDetailsWidget] TMDB credits data received: {str(credits_data)[:200]}...")
-            if 'cast' in credits_data and credits_data['cast']:
-                print(f"[MovieDetailsWidget] Found {len(credits_data['cast'])} cast members.")
-                self.cast_widget.set_cast(credits_data['cast'])
+            
+            cast_list = []
+            if credits_data:
+                # Handle MovieCredits model
+                if hasattr(credits_data, 'cast'):
+                    # Convert CastMember objects to dictionaries for compatibility
+                    cast_list = [cast_member.to_dict() for cast_member in credits_data.cast]
+                    print(f"[MovieDetailsWidget] Found {len(cast_list)} cast members from MovieCredits model.")
+                # Handle raw dictionary (fallback)
+                elif isinstance(credits_data, dict) and 'cast' in credits_data:
+                    cast_list = credits_data['cast']
+                    print(f"[MovieDetailsWidget] Found {len(cast_list)} cast members from raw data.")
+                else:
+                    print("[MovieDetailsWidget] No cast data found in TMDB credits response.")
+            
+            if cast_list:
+                self.cast_widget.set_cast(cast_list)
             else:
-                print("[MovieDetailsWidget] 'cast' key not found or empty in TMDB credits response.")
+                print("[MovieDetailsWidget] No cast members to display.")
         except Exception as e:
             print(f"[MovieDetailsWidget] Error fetching TMDB credits: {e}")
         
@@ -708,7 +726,8 @@ class MovieDetailsWidget(QWidget):
                 
                 # Also check if there's a language field in movie data
                 if isinstance(self.movie, MovieItem):
-                    movie_language_field = self.movie.language
+                    # MovieItem doesn't have a language field, skip this check
+                    movie_language_field = None
                 else:
                     movie_language_field = self.movie.get('language')
                 
@@ -737,10 +756,17 @@ class MovieDetailsWidget(QWidget):
                 if movie_details:
                     updated_data = False
                     
+                    # Get overview from MovieDetails model or raw dict
+                    overview = None
+                    if hasattr(movie_details, 'overview'):
+                        overview = movie_details.overview
+                    else:
+                        overview = movie_details.get('overview')
+                    
                     # Update plot/overview if missing or empty
-                    if not current_plot and movie_details.get('overview'):
+                    if not current_plot and overview:
                         try:
-                            overview = movie_details['overview'].strip()
+                            overview = overview.strip()
                             if overview:
                                 # If we detected a non-English language and got English overview, try to translate
                                 final_overview = overview
@@ -775,8 +801,14 @@ class MovieDetailsWidget(QWidget):
                             print(f"[MovieDetailsWidget] Could not parse overview from TMDB response")
                     
                     # Update additional TMDB data
-                    if movie_details.get('tagline'):
-                        self.tagline_label.setText(f'"{movie_details["tagline"]}"')
+                    tagline = None
+                    if hasattr(movie_details, 'tagline'):
+                        tagline = movie_details.tagline
+                    else:
+                        tagline = movie_details.get('tagline')
+                    
+                    if tagline:
+                        self.tagline_label.setText(f'"{tagline}"')
                         self.tagline_label.show()
                     
                     # Update release year

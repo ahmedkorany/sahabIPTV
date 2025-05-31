@@ -833,7 +833,12 @@ class MoviesTab(QWidget):
                     details = self.tmdb_client.get_movie_details(tmdb_id)
                     # print(f"[MovieTab >>>] got details of movie with TMDB ID: {tmdb_id} and stream icon: {details.get('poster_path')}")
                     if details:
-                        poster_path = details.get('poster_path')
+                        # Handle MovieDetails model or raw dict
+                        poster_path = None
+                        if hasattr(details, 'poster_path'):
+                            poster_path = details.poster_path
+                        else:
+                            poster_path = details.get('poster_path')
                         tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
                         if tmdb_poster_url:
                             orriginal_stream = str(movie_stream_id)
