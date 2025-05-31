@@ -5,7 +5,7 @@ import os
 import time
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QMessageBox, QComboBox, QScrollArea, QGridLayout)
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QFont
 from src.api.tmdb import TMDBClient # Added import
 from src.ui.widgets.cast_widget import CastWidget
@@ -195,120 +195,12 @@ class SeriesDetailsWidget(QWidget):
         self.meta_label.setText(f"Year: {series_year} | Genre: {series_genre}")
         self.desc_text.setPlainText(series_plot)
 
-        # Load poster
-        pix = QPixmap()
-        poster_loaded_successfully = False
         
         if series_cover_url:
-            # Attempt to load from the provided cover URL first
-            image_data = self.api_client.get_image_data(series_cover_url)
-            if image_data:
-                pix.loadFromData(image_data)
-                if not pix.isNull():
-                    poster_loaded_successfully = True
-            else:
-                print(f"Failed to load image data from existing cover URL: {series_cover_url} for {series_name}. This might be a temporary issue or broken URL.")
+            from src.utils.helpers import load_image_async
+            self.poster_label.setPixmap(QPixmap('assets/series.png'))
+            load_image_async(series_cover_url, self.poster_label, QPixmap('assets/series.png'), update_size=(200, 300), main_window=self.main_window, on_failure=self.onPosterLoadFailed)
         
-        # Only attempt TMDB fallback if the initial cover URL was missing or if loading from it failed AND it's considered okay to fallback
-        # The original logic would fallback even if a cover URL was present but failed to load.
-        # We adjust this to primarily fallback if series_cover_url was initially empty.
-        if not series_cover_url or not poster_loaded_successfully: # Adjusted condition
-            if not series_cover_url:
-                print(f"Initial cover URL missing for {series_name}. Attempting TMDB fallback.")
-            elif not poster_loaded_successfully:
-                 # This case means a cover URL was present but failed to load. 
-                 # Depending on desired behavior, one might choose *not* to fallback immediately
-                 # or to have a more nuanced check. For now, we proceed with TMDB fallback as per original intent if load failed.
-                print(f"Initial poster load from {series_cover_url} failed for {series_name}. Attempting TMDB fallback.")
-
-            tmdb_poster_url = None
-            tmdb_id = getattr(self.series_data, 'tmdb_id', None) if isinstance(self.series_data, SeriesItem) else self.series_data.get('tmdb_id')
-            new_tmdb_id_found = None
-
-            if tmdb_id:
-                try:
-                    details = self.tmdb_client.get_series_details(tmdb_id)
-                    if details:
-                        # Handle SeriesDetails model or raw dict
-                        poster_path = None
-                        if hasattr(details, 'poster_path'):
-                            poster_path = details.poster_path
-                        else:
-                            poster_path = details.get('poster_path')
-                        
-                        if poster_path:
-                            tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
-                except Exception as e:
-                    print(f"Error fetching series details from TMDB by ID {tmdb_id}: {e}")
-            
-            if not tmdb_poster_url:
-                # series_name and series_year already extracted above
-                search_year = series_year if series_year != '--' else None
-                try:
-                    results = self.tmdb_client.search_series(series_name, year=search_year)
-                    # Handle search results (always returns raw dict)
-                    if results and results.get('results'):
-                        first_result = results['results'][0]
-                        if first_result.get('poster_path'):
-                            tmdb_poster_url = self.tmdb_client.get_full_poster_url(first_result['poster_path'])
-                            new_tmdb_id_found = first_result.get('id')
-                except Exception as e:
-                    print(f"Error searching series '{series_name}' on TMDB: {e}")
-
-            if tmdb_poster_url:
-                print(f"Found TMDB poster: {tmdb_poster_url}")
-                tmdb_image_data = self.api_client.get_image_data(tmdb_poster_url)
-                if tmdb_image_data:
-                    # Create a new QPixmap for TMDB image to avoid issues if original pix was somehow corrupted
-                    tmdb_pix = QPixmap()
-                    tmdb_pix.loadFromData(tmdb_image_data)
-                    if not tmdb_pix.isNull():
-                        pix = tmdb_pix # Use the new TMDB pixmap
-                        poster_loaded_successfully = True
-                        # Update series_data and cache
-                        self.series_data['cover'] = tmdb_poster_url
-                        if new_tmdb_id_found:
-                             self.series_data['tmdb_id'] = new_tmdb_id_found
-                             print(f"[SeriesDetailsWidget] Found new TMDB ID: {new_tmdb_id_found}, fetching credits")
-                             # Fetch TMDB credits with the new ID
-                             self._fetch_tmdb_credits(new_tmdb_id_found)
-                        elif tmdb_id: # Ensure existing tmdb_id is preserved if used
-                            self.series_data['tmdb_id'] = tmdb_id
-                            print(f"[SeriesDetailsWidget] Using existing TMDB ID: {tmdb_id}, fetching credits")
-                            # Fetch TMDB credits with the existing ID
-                            self._fetch_tmdb_credits(tmdb_id)
-                        
-                        if hasattr(self.api_client, 'update_series_cache'):
-                            if isinstance(self.series_data, SeriesItem):
-                                # Convert SeriesItem to dictionary for caching
-                                series_data_to_cache = {
-                                    'series_id': self.series_data.series_id,
-                                    'name': self.series_data.name,
-                                    'cover': self.series_data.cover,
-                                    'plot': self.series_data.plot,
-                                    'genre': self.series_data.genre,
-                                    'year': self.series_data.get_release_year(),
-                                    'tmdb_id': getattr(self.series_data, 'tmdb_id', None)
-                                }
-                            else:
-                                series_data_to_cache = self.series_data.copy()
-                            
-                            if 'category_id' not in series_data_to_cache and hasattr(self, 'main_window') and hasattr(self.main_window, 'current_category_id_for_details'):
-                                series_data_to_cache['category_id'] = self.main_window.current_category_id_for_details
-
-                            self.api_client.update_series_cache(series_data_to_cache)
-                            series_name = self.series_data.name if isinstance(self.series_data, SeriesItem) else self.series_data.get('name')
-                            print(f"Updated cache for {series_name} with new TMDB poster.")
-                        else:
-                            print("api_client does not have update_series_cache method.")
-            
-        if not poster_loaded_successfully:
-            # Fallback to local placeholder if all attempts fail
-            print(f"All poster loading attempts failed for {series_name}. Using default placeholder.")
-            pix = QPixmap('assets/series.png') 
-        
-        if not pix.isNull():
-            self.poster_label.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         
         self._update_favorite_series_button_text()
 
@@ -320,7 +212,7 @@ class SeriesDetailsWidget(QWidget):
             # series_name and series_year already extracted above
             if series_name:
                 try:
-                    results = self.tmdb_client.search_series(series_name, year=search_year)
+                    results = self.tmdb_client.search_series(series_name, year=self.series_data.get_release_year())
                     # Handle search results (always returns raw dict)
                     if results and results.get('results'):
                         first_result = results['results'][0]
@@ -400,7 +292,127 @@ class SeriesDetailsWidget(QWidget):
                 self._load_seasons_from_info() # Fallback
         else:
              QMessageBox.warning(self, "Error", "Series ID is missing, cannot load details.")
+    
+    def Load_cover_from_TMDB(self, series_name, series_year, series_cover_url=None):
+        """Load cover image from TMDB and update series data.
+        
+        Args:
+            series_name (str): Name of the series
+            series_year (str): Year of the series
+            series_cover_url (str, optional): Original cover URL that failed to load
+            
+        Returns:
+            QPixmap or None: The loaded pixmap if successful, None otherwise
+        """
+        if not series_cover_url:
+            print(f"Initial cover URL missing for {series_name}. Attempting TMDB fallback.")
+        else:
+            # This case means a cover URL was present but failed to load. 
+            # Depending on desired behavior, one might choose *not* to fallback immediately
+            # or to have a more nuanced check. For now, we proceed with TMDB fallback as per original intent if load failed.
+            print(f"Initial poster load failed for {series_name}. Attempting TMDB fallback.")
 
+        tmdb_poster_url = None
+        tmdb_id = getattr(self.series_data, 'tmdb_id', None) if isinstance(self.series_data, SeriesItem) else self.series_data.get('tmdb_id')
+        new_tmdb_id_found = None
+
+        if tmdb_id:
+            try:
+                details = self.tmdb_client.get_series_details(tmdb_id)
+                if details:
+                    # Handle SeriesDetails model or raw dict
+                    poster_path = None
+                    if hasattr(details, 'poster_path'):
+                        poster_path = details.poster_path
+                    else:
+                        poster_path = details.get('poster_path')
+                    
+                    if poster_path:
+                        tmdb_poster_url = self.tmdb_client.get_full_poster_url(poster_path)
+            except Exception as e:
+                print(f"Error fetching series details from TMDB by ID {tmdb_id}: {e}")
+        
+        if not tmdb_poster_url:
+            # series_name and series_year already extracted above
+            search_year = series_year if series_year != '--' else None
+            try:
+                results = self.tmdb_client.search_series(series_name, year=search_year)
+                # Handle search results (always returns raw dict)
+                if results and results.get('results'):
+                    first_result = results['results'][0]
+                    if first_result.get('poster_path'):
+                        tmdb_poster_url = self.tmdb_client.get_full_poster_url(first_result['poster_path'])
+                        new_tmdb_id_found = first_result.get('id')
+            except Exception as e:
+                print(f"Error searching series '{series_name}' on TMDB: {e}")
+
+        if tmdb_poster_url:
+            print(f"Found TMDB poster: {tmdb_poster_url}")
+            tmdb_image_data = self.api_client.get_image_data(tmdb_poster_url)
+            if tmdb_image_data:
+                # Create a new QPixmap for TMDB image to avoid issues if original pix was somehow corrupted
+                tmdb_pix = QPixmap()
+                tmdb_pix.loadFromData(tmdb_image_data)
+                if not tmdb_pix.isNull():
+                    # Update series_data and cache
+                    self.series_data['cover'] = tmdb_poster_url
+                    if new_tmdb_id_found:
+                         self.series_data['tmdb_id'] = new_tmdb_id_found
+                         print(f"[SeriesDetailsWidget] Found new TMDB ID: {new_tmdb_id_found}, fetching credits")
+                         # Fetch TMDB credits with the new ID
+                         self._fetch_tmdb_credits(new_tmdb_id_found)
+                    elif tmdb_id: # Ensure existing tmdb_id is preserved if used
+                        self.series_data['tmdb_id'] = tmdb_id
+                        print(f"[SeriesDetailsWidget] Using existing TMDB ID: {tmdb_id}, fetching credits")
+                        # Fetch TMDB credits with the existing ID
+                        self._fetch_tmdb_credits(tmdb_id)
+                    
+                    if hasattr(self.api_client, 'update_series_cache'):
+                        if isinstance(self.series_data, SeriesItem):
+                            # Convert SeriesItem to dictionary for caching
+                            series_data_to_cache = {
+                                'series_id': self.series_data.series_id,
+                                'name': self.series_data.name,
+                                'cover': self.series_data.cover,
+                                'plot': self.series_data.plot,
+                                'genre': self.series_data.genre,
+                                'year': self.series_data.get_release_year(),
+                                'tmdb_id': getattr(self.series_data, 'tmdb_id', None)
+                            }
+                        else:
+                            series_data_to_cache = self.series_data.copy()
+                        
+                        if 'category_id' not in series_data_to_cache and hasattr(self, 'main_window') and hasattr(self.main_window, 'current_category_id_for_details'):
+                            series_data_to_cache['category_id'] = self.main_window.current_category_id_for_details
+
+                        self.api_client.update_series_cache(series_data_to_cache)
+                        series_name = self.series_data.name if isinstance(self.series_data, SeriesItem) else self.series_data.get('name')
+                        print(f"Updated cache for {series_name} with new TMDB poster.")
+                    else:
+                        print("api_client does not have update_series_cache method.")
+                    
+                    return tmdb_pix
+        
+        return None
+
+    @pyqtSlot(bool)
+    def onPosterLoadFailed(self, is_network_error=False):
+        if is_network_error:
+            print("[MovieDetailsWidget] Poster load failed due to network error. Not re-attempting TMDB fetch.")
+            self.poseter_load_failed = True
+        else:
+            tmdb_result = self.Load_cover_from_TMDB(self.series_data.series_name, self.series_data.series_year, self.series_data.series_cover_url)
+            if tmdb_result:
+                pix = tmdb_result
+                poster_loaded_successfully = True
+            
+        if not poster_loaded_successfully:
+            # Fallback to local placeholder if all attempts fail
+            print(f"All poster loading attempts failed for {self.series_data.series_name}. Using default placeholder.")
+            pix = QPixmap('assets/series.png') 
+        
+        if not pix.isNull():
+            self.poster_label.setPixmap(pix.scaled(180, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     def _load_seasons_from_info(self):
         self.seasons_combo.clear()
         self._clear_episodes()
