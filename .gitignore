@@ -2,8 +2,6 @@
 *.pyc
 *.pyo
 *.pyd
-__pycache__/
-**/*.pyc
+**/__pycache__/
 .DS_Store
 assets/cache/
-src/__pycache__/*.pyc
