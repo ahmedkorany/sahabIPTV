@@ -1,0 +1,193 @@
+{
+  "Live TV": "البث المباشر",
+  "Movies": "الأفلام",
+  "Series": "المسلسلات",
+  "Favorites": "المفضلة",
+  "Play": "تشغيل",
+  "Pause": "إيقاف مؤقت",
+  "Stop": "إيقاف",
+  "Record": "تسجيل",
+  "Stop Recording": "إيقاف التسجيل",
+  "Add to Favorites": "إضافة إلى المفضلة",
+  "Remove from Favorites": "إزالة من المفضلة",
+  "Connect": "اتصال",
+  "Server URL": "عنوان الخادم",
+  "Username": "اسم المستخدم",
+  "Password": "كلمة المرور",
+  "Remember": "تذكر",
+  "Search channels...": "البحث في القنوات...",
+  "Search movies...": "البحث في الأفلام...",
+  "Search series...": "البحث في المسلسلات...",
+  "Search favorites...": "البحث في المفضلة...",
+  "Settings": "الإعدادات",
+  "Language": "اللغة",
+  "Dark Mode": "الوضع الداكن",
+  "Volume": "الصوت",
+  "Mute": "كتم",
+  "Fullscreen": "ملء الشاشة",
+  "Exit Fullscreen": "الخروج من ملء الشاشة",
+  "Speed": "السرعة",
+  "Home": "الرئيسية",
+  "Search": "البحث",
+  "Categories": "الفئات",
+  "Channels": "القنوات",
+  "ALL": "الكل",
+  "Default": "افتراضي",
+  "Date": "التاريخ",
+  "Rating": "التقييم",
+  "Name": "الاسم",
+  "Desc": "تنازلي",
+  "Asc": "تصاعدي",
+  "Previous": "السابق",
+  "Next": "التالي",
+  "All": "الكل",
+  "Live": "مباشر",
+  "Save": "حفظ",
+  "Cancel": "إلغاء",
+  "Edit Account": "تعديل الحساب",
+  "Add Account": "إضافة حساب",
+  "Delete Account": "حذف الحساب",
+  "Switch Account": "تبديل الحساب",
+  "No items to display.": "لا توجد عناصر للعرض.",
+  "No channels to display.": "لا توجد قنوات للعرض.",
+  "No movies to display.": "لا توجد أفلام للعرض.",
+  "Account Management": "إدارة الحسابات",
+  "Error": "خطأ",
+  "Warning": "تحذير",
+  "Information": "معلومات",
+  "Success": "نجح",
+  "Episodes": "الحلقات",
+  "Cast": "طاقم التمثيل",
+  "Export Season URLs": "تصدير روابط الموسم",
+  "WATCH TRAILER": "مشاهدة الإعلان",
+  "PLAY": "تشغيل",
+  "No cast information available": "لا توجد معلومات عن طاقم التمثيل",
+  "No rating": "لا يوجد تقييم",
+  "Ready": "جاهز",
+  "File": "ملف",
+  "Exit": "خروج",
+  "Help": "مساعدة",
+  "About": "حول",
+  "English": "الإنجليزية",
+  "Arabic": "العربية",
+  "Fast Backward": "ترجيع سريع",
+  "Fast Forward": "تقديم سريع",
+  "Player": "المشغل",
+  "Recording": "التسجيل",
+  "Trailer": "الإعلان",
+  "Download": "تحميل",
+  "Export": "تصدير",
+  "Season": "الموسم",
+  "Episode": "الحلقة",
+  "Progress": "التقدم",
+  "Please wait...": "يرجى الانتظار...",
+  "My IPTV Account": "حساب IPTV الخاص بي",
+  "Remember credentials": "تذكر بيانات الاعتماد",
+  "Connection Error": "خطأ في الاتصال",
+  "Playback Error": "خطأ في التشغيل",
+  "Recording Error": "خطأ في التسجيل",
+  "Input Error": "خطأ في الإدخال",
+  "Navigation Error": "خطأ في التنقل",
+  "Edit Current Account": "تعديل الحساب الحالي",
+  "Add New Account": "إضافة حساب جديد",
+  "Caching Data": "تخزين البيانات مؤقتاً",
+  "Populating cache...": "ملء التخزين المؤقت...",
+  "Connection failed": "فشل الاتصال",
+  "Already in favorites": "موجود بالفعل في المفضلة",
+  "Download Started": "بدأ التحميل",
+  "Export Successful": "تم التصدير بنجاح",
+  "Export Error": "خطأ في التصدير",
+  "Export Failed": "فشل التصدير",
+  "Export Complete": "اكتمل التصدير",
+  "Save Episode": "حفظ الحلقة",
+  "Save Recording": "حفظ التسجيل",
+  "Video Files": "ملفات الفيديو",
+  "Text Files": "الملفات النصية",
+  "M3U Playlist": "قائمة تشغيل M3U",
+  "All Files": "جميع الملفات",
+  "Sahab Xtream IPTV": "سحاب إكستريم IPTV",
+  "Connecting to server...": "الاتصال بالخادم...",
+  "Connected successfully. Populating cache...": "تم الاتصال بنجاح. جاري تحديث التخزين المؤقت...",
+  "Loading...": "جاري التحميل...",
+  "Loading cast...": "جاري تحميل طاقم التمثيل...",
+  "Loading images...": "جاري تحميل الصور...",
+  "Order by": "ترتيب حسب:",
+  "Speed": "السرعة:",
+  "Page": "صفحة",
+  "of": "من",
+  "Account Name": "اسم الحساب:",
+  "Director": "المخرج:",
+  "← Back": "← رجوع",
+  "▶ PLAY": "▶ تشغيل",
+  "🎬 TRAILER": "🎬 إعلان",
+  "Search Live, Movies, and Series...": "البحث في البث المباشر والأفلام والمسلسلات...",
+  "e.g. My IPTV Account": "مثال: حساب IPTV الخاص بي",
+  "http://example.com": "http://example.com",
+  "Add/Edit Account": "إضافة/تعديل حساب",
+  "Director: ": "المخرج: ",
+  "This category doesn't contain any Series": "هذه الفئة لا تحتوي على أي مسلسلات",
+  "Reload Data": "إعادة تحميل البيانات",
+  "Press ESC to return to normal view": "اضغط ESC للعودة إلى العرض العادي",
+  "Play Episode": "تشغيل الحلقة",
+  "Trailer playback not implemented.": "تشغيل الإعلان غير مطبق.",
+  "Unable to get movie stream URL.": "غير قادر على الحصول على رابط تدفق الفيلم.",
+  "Player window not available.": "نافذة المشغل غير متاحة.",
+  "Invalid series data provided.": "بيانات المسلسل المقدمة غير صحيحة.",
+  "Could not retrieve stream URL for the episode.": "لا يمكن استرداد رابط التدفق للحلقة.",
+  "Player window or episode data not available.": "نافذة المشغل أو بيانات الحلقة غير متاحة.",
+  "Favorite functionality not available.": "وظيفة المفضلة غير متاحة.",
+  "Series data is incomplete for favorites.": "بيانات المسلسل غير مكتملة للمفضلة.",
+  "Episode or series data not found for download.": "بيانات الحلقة أو المسلسل غير موجودة للتحميل.",
+  "Could not retrieve download URL for the episode.": "لا يمكن استرداد رابط التحميل للحلقة.",
+  "Series data not available for season export.": "بيانات المسلسل غير متاحة لتصدير الموسم.",
+  "No episodes found for Season": "لم يتم العثور على حلقات للموسم",
+  "to export.": "للتصدير.",
+  "Could not load favorites from favorites manager.": "لا يمكن تحميل المفضلة من مدير المفضلة.",
+  "No episode selected": "لم يتم تحديد حلقة",
+  "No season selected": "لم يتم تحديد موسم",
+  "Failed to get season information": "فشل في الحصول على معلومات الموسم",
+  "Season URLs exported to": "تم تصدير روابط الموسم إلى:",
+  "Failed to export season URLs": "فشل في تصدير روابط الموسم:",
+  "Select an account to edit.": "حدد حساباً للتعديل.",
+  "Select an account to delete.": "حدد حساباً للحذف.",
+  "Cannot delete the currently active account.": "لا يمكن حذف الحساب النشط حالياً.",
+  "Delete account": "حذف الحساب",
+  "Select an account to switch to.": "حدد حساباً للتبديل إليه.",
+  "Already using this account.": "تستخدم هذا الحساب بالفعل.",
+  "Authentication failed. Please check credentials.": "فشل في المصادقة. يرجى التحقق من بيانات الاعتماد.",
+  "Failed to load categories": "فشل في تحميل الفئات:",
+  "Failed to load movies": "فشل في تحميل الأفلام:",
+  "Failed to load series": "فشل في تحميل المسلسلات:",
+  "Favorites manager not available.": "مدير المفضلة غير متاح.",
+  "No movie selected": "لم يتم تحديد فيلم",
+  "No movie is playing": "لا يوجد فيلم قيد التشغيل",
+  "Failed to load channels": "فشل في تحميل القنوات:",
+  "No channel selected": "لم يتم تحديد قناة",
+  "Could not open the stream. The channel may be temporarily unavailable.": "لا يمكن فتح التدفق. قد تكون القناة غير متاحة مؤقتاً.",
+  "Channel data is missing stream ID": "بيانات القناة تفتقر إلى معرف التدفق",
+  "Could not play the channel from search.": "لا يمكن تشغيل القناة من البحث.",
+  "No channel is playing": "لا توجد قناة قيد التشغيل",
+  "Recording started successfully": "بدأ التسجيل بنجاح",
+  "Recording stopped successfully": "توقف التسجيل بنجاح",
+  "Failed to load detailed series information": "فشل في تحميل معلومات المسلسل التفصيلية:",
+  "Error fetching detailed series metadata": "خطأ في جلب البيانات الوصفية التفصيلية للمسلسل:",
+  "Series ID is missing, cannot load details.": "معرف المسلسل مفقود، لا يمكن تحميل التفاصيل.",
+  "Episode data not found.": "بيانات الحلقة غير موجودة.",
+  "No trailer URL available for this series.": "لا يوجد رابط إعلان متاح لهذا المسلسل.",
+  "No season selected to export.": "لم يتم تحديد موسم للتصدير.",
+  "Series tab is not available.": "تبويب المسلسلات غير متاح.",
+  "Movies tab is not available.": "تبويب الأفلام غير متاح.",
+  "Live TV tab is not available.": "تبويب البث المباشر غير متاح.",
+  "Account name cannot be empty.": "اسم الحساب لا يمكن أن يكون فارغاً.",
+  "An account with the name": "حساب بالاسم",
+  "already exists.": "موجود بالفعل.",
+  "Failed to connect": "فشل في الاتصال:",
+  "Page 1 of 1": "صفحة 1 من 1",
+  "Back": "رجوع",
+  "Add to favorites": "إضافة للمفضلة",
+  "Remove from favorites": "إزالة من المفضلة",
+  "User": "المستخدم",
+  "Subscription expires": "إنتهاء الاشتراك",
+  "Password": "كلمة المرور:",
+  "Server URL": "رابط الخادم:"
+}
