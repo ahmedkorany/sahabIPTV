@@ -134,16 +134,39 @@ def search_all_data(api_client, query):
         
         normalized_name = TextSearch.normalize_text(name)
         if normalized_query in normalized_name:
-            result_item = {
-                'stream_type': 'movie',
-                'name': name,
-                'stream_id': stream_id, # Use stream_id consistently
-                'cover': cover,
-                'rating': rating,
-                'year': year,
-                'plot': plot,
-                # Add other relevant fields
-            }
+            # Create a complete movie data structure for proper display
+            if isinstance(item, MovieItem):
+                # If it's already a MovieItem, convert to dict with all fields
+                result_item = item.to_dict()
+                result_item['stream_type'] = 'movie'
+                result_item['cover'] = result_item.get('stream_icon')  # Map stream_icon to cover for search display
+            else:
+                # Create a complete movie data structure with all required fields
+                result_item = {
+                    'stream_type': 'movie',
+                    'name': name,
+                    'stream_id': stream_id,
+                    'cover': cover,
+                    'rating': rating,
+                    'year': year,
+                    'plot': plot,
+                    # Include all fields that MovieItem expects with defaults
+                    'num': item.get('num', 0),
+                    'stream_icon': cover,
+                    'cast': item.get('cast'),
+                    'director': item.get('director'),
+                    'genre': item.get('genre'),
+                    'releaseDate': item.get('releaseDate'),
+                    'added': item.get('added'),
+                    'rating_5based': item.get('rating_5based'),
+                    'backdrop_path': item.get('backdrop_path'),
+                    'youtube_trailer': item.get('youtube_trailer'),
+                    'duration': item.get('duration'),
+                    'category_id': item.get('category_id'),
+                    'container_extension': item.get('container_extension'),
+                    'tmdb_id': item.get('tmdb_id'),
+                    'adult': item.get('adult')
+                }
             all_results.append(result_item)
 
     # --- Search Series ---
@@ -177,16 +200,37 @@ def search_all_data(api_client, query):
         
         normalized_name = TextSearch.normalize_text(name)
         if normalized_query in normalized_name:
-            result_item = {
-                'stream_type': 'series',
-                'name': name,
-                'series_id': series_id,
-                'cover': cover,
-                'rating': rating,
-                'plot': plot,
-                'year': year,
-                # Add other relevant fields
-            }
+            # Create a complete series data structure for proper display
+            if isinstance(item, SeriesItem):
+                # If it's already a SeriesItem, convert to dict with all fields
+                result_item = item.to_dict()
+                result_item['stream_type'] = 'series'
+                result_item['cover'] = result_item.get('cover')  # SeriesItem already has cover field
+            else:
+                # Create a complete series data structure with all required fields
+                result_item = {
+                    'stream_type': 'series',
+                    'name': name,
+                    'series_id': series_id,
+                    'cover': cover,
+                    'rating': rating,
+                    'year': year,
+                    'plot': plot,
+                    # Include all fields that SeriesItem expects with defaults
+                    'num': item.get('num', 0),
+                    'cast': item.get('cast'),
+                    'director': item.get('director'),
+                    'genre': item.get('genre'),
+                    'releaseDate': item.get('releaseDate'),
+                    'last_modified': item.get('last_modified'),
+                    'rating_5based': item.get('rating_5based'),
+                    'backdrop_path': item.get('backdrop_path'),
+                    'youtube_trailer': item.get('youtube_trailer'),
+                    'episode_run_time': item.get('episode_run_time'),
+                    'category_id': item.get('category_id'),
+                    'tmdb_id': item.get('tmdb_id'),
+                    'adult': item.get('adult')
+                }
             all_results.append(result_item)
             
     # Remove duplicates if any (e.g., if an item appears in multiple categories)

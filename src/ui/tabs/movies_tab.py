@@ -514,6 +514,20 @@ class MoviesTab(QWidget):
     def show_movie_details_by_data(self, movie_data):
         """Show movie details from search data"""
         self._opened_from_search = True
+        
+        # Validate and convert movie data if necessary
+        if not movie_data:
+            QMessageBox.warning(self, "Error", "Invalid movie data provided.")
+            return
+            
+        # Ensure movie_data is a MovieItem instance for consistent handling
+        if not isinstance(movie_data, MovieItem):
+            try:
+                movie_data = MovieItem.from_dict(movie_data)
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to process movie data: {str(e)}")
+                return
+        
         # Remove old details widget if present
         if self.details_widget:
             self.stacked_widget.removeWidget(self.details_widget)

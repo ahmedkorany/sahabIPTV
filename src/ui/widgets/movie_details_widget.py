@@ -339,8 +339,9 @@ class MovieDetailsWidget(QWidget):
 
                             # --- Update movie in category cache using XtreamClient method ---
                             if hasattr(self.main_window, 'api_client') and self.main_window.api_client:
-                                # self.movie dictionary should already contain category_id, stream_id, and the new stream_icon
-                                self.main_window.api_client.update_movie_cache(self.movie)
+                                # Convert MovieItem to dictionary for cache update if necessary
+                                movie_data_for_cache = self.movie.to_dict() if isinstance(self.movie, MovieItem) else self.movie
+                                self.main_window.api_client.update_movie_cache(movie_data_for_cache)
                             # else:
                                 # print("[MovieDetailsWidget] api_client not available for cache update.")
                             # --- End update movie in category cache ---
