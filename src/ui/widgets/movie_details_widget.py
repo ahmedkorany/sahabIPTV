@@ -112,8 +112,20 @@ class MovieDetailsWidget(QWidget):
         movie_adult = self.movie.adult
         movie_name = self.movie.name or ''
         
-        if movie_stream_icon:
-            load_image_async(movie_stream_icon, self.poster, QPixmap('assets/movies.png'), update_size=(200, 300), main_window=self, on_failure=self.onPosterLoadFailed)
+        # Check if TMDB details are available and use poster from there first
+        poster_url = None
+        if self.movie.has_tmdb_details():
+            tmdb_details = self.movie.get_tmdb_details()
+            if tmdb_details and tmdb_details.poster_path:
+                # Use TMDB poster if available
+                poster_url = self.tmdb_client.get_full_poster_url(tmdb_details.poster_path) if self.tmdb_client else None
+        
+        # Fall back to movie stream icon if no TMDB poster
+        if not poster_url:
+            poster_url = movie_stream_icon
+        
+        if poster_url:
+            load_image_async(poster_url, self.poster, QPixmap('assets/movies.png'), update_size=(200, 300), main_window=self, on_failure=self.onPosterLoadFailed)
         else:
             self.load_poster_from_TMDB(self.tmdb_id)
             
@@ -315,6 +327,15 @@ class MovieDetailsWidget(QWidget):
             try:
                 details = self.tmdb_client.get_movie_details(tmdb_id)
                 if details:
+                    # Store TMDB details in MovieItem
+                    if hasattr(details, 'to_dict'):
+                        # details is a TMDBMovieDetails object
+                        self.movie.tmdb_details = details
+                    else:
+                        # details is a dict, convert to TMDBMovieDetails
+                        from src.tmdb_models import TMDBMovieDetails
+                        self.movie.tmdb_details = TMDBMovieDetails.from_dict(details)
+                    
                     # Handle MovieDetails model or raw dict
                     if hasattr(details, 'poster_path'):
                         poster_path = details.poster_path
@@ -537,6 +558,14 @@ class MovieDetailsWidget(QWidget):
                 
                 # Update rating with percentage display
                 rating = info_data.get('rating', 'N/A')
+                
+                # If no rating and TMDB details available, use TMDB rating
+                if (not rating or rating == 'N/A') and hasattr(self.movie, 'tmdb_details') and self.movie.tmdb_details:
+                    if hasattr(self.movie.tmdb_details, 'vote_average') and self.movie.tmdb_details.vote_average > 0:
+                        rating = str(self.movie.tmdb_details.vote_average)
+                    elif isinstance(self.movie.tmdb_details, dict) and self.movie.tmdb_details.get('vote_average', 0) > 0:
+                        rating = str(self.movie.tmdb_details['vote_average'])
+                
                 if rating and rating != 'N/A':
                     try:
                         rating_float = float(rating)
@@ -727,6 +756,15 @@ class MovieDetailsWidget(QWidget):
                 
                 movie_details = self.tmdb_client.get_movie_details(tmdb_id, language=movie_language)
                 if movie_details:
+                    # Store TMDB details in MovieItem
+                    if hasattr(movie_details, 'to_dict'):
+                        # movie_details is a TMDBMovieDetails object
+                        self.movie.tmdb_details = movie_details
+                    else:
+                        # movie_details is a dict, convert to TMDBMovieDetails
+                        from src.tmdb_models import TMDBMovieDetails
+                        self.movie.tmdb_details = TMDBMovieDetails.from_dict(movie_details)
+                    
                     updated_data = False
                     
                     # Get overview from MovieDetails model or raw dict
@@ -782,34 +820,62 @@ class MovieDetailsWidget(QWidget):
                         self.tagline_label.show()
                     
                     # Update release year
-                    if movie_details.get('release_date'):
+                    release_date = None
+                    if hasattr(movie_details, 'release_date'):
+                        release_date = movie_details.release_date
+                    elif isinstance(movie_details, dict):
+                        release_date = movie_details.get('release_date')
+                    
+                    if release_date:
                         try:
-                            release_year = movie_details['release_date'][:4]
+                            release_year = release_date[:4]
                             self.year_label.setText(f"({release_year})")
                         except:
                             pass
                     
                     # Update runtime/duration
-                    if movie_details.get('runtime'):
-                        runtime = movie_details['runtime']
+                    runtime = None
+                    if hasattr(movie_details, 'runtime'):
+                        runtime = movie_details.runtime
+                    elif isinstance(movie_details, dict):
+                        runtime = movie_details.get('runtime')
+                    
+                    if runtime:
                         self.duration_label.setText(f" • {runtime} min")
                     
                     # Update rating
-                    if movie_details.get('vote_average'):
+                    vote_average = None
+                    if hasattr(movie_details, 'vote_average'):
+                        vote_average = movie_details.vote_average
+                    elif isinstance(movie_details, dict):
+                        vote_average = movie_details.get('vote_average')
+                    
+                    if vote_average:
                         try:
-                            rating = float(movie_details['vote_average'])
+                            rating = float(vote_average)
                             rating_percent = int(rating * 10)
                             self.rating_widget.setText(f"{rating_percent}%")
                         except:
                             pass
                     
                     # Update genres
-                    if movie_details.get('genres'):
-                        genres = [genre['name'] for genre in movie_details['genres'][:3]]  # Limit to 3 genres
+                    genres_data = None
+                    if hasattr(movie_details, 'genres'):
+                        genres_data = movie_details.genres
+                    elif isinstance(movie_details, dict):
+                        genres_data = movie_details.get('genres')
+                    
+                    if genres_data:
+                        if hasattr(genres_data[0], 'name') if genres_data else False:
+                            # TMDBMovieDetails with Genre objects
+                            genres = [genre.name for genre in genres_data[:3]]  # Limit to 3 genres
+                        else:
+                            # Dictionary format
+                            genres = [genre['name'] for genre in genres_data[:3]]  # Limit to 3 genres
                         self.genre_label.setText(', '.join(genres))
                     
-                    # Cache the updated movie data if we made changes
-                    if updated_data and hasattr(self.api_client, 'update_movie_cache'):
+                    # Cache the updated movie data if we made changes or stored TMDB details
+                    if (updated_data or self.movie.tmdb_details) and hasattr(self.api_client, 'update_movie_cache'):
                         try:
                             # Ensure we have the necessary data for caching
                             movie_data_to_cache = self.movie.to_dict()

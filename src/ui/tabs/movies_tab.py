@@ -386,7 +386,16 @@ class MoviesTab(QWidget):
             if isinstance(movie, MovieItem):
                 stream_id_str = str(movie.stream_id)
                 movie_name = movie.name or 'Unnamed Movie'
-                movie_icon = movie.stream_icon
+                # Prioritize TMDB poster if available
+                movie_icon = None
+                if hasattr(movie, 'tmdb_details') and movie.tmdb_details:
+                    if hasattr(movie.tmdb_details, 'poster_path') and movie.tmdb_details.poster_path:
+                        movie_icon = f"https://image.tmdb.org/t/p/w500{movie.tmdb_details.poster_path}"
+                    elif isinstance(movie.tmdb_details, dict) and movie.tmdb_details.get('poster_path'):
+                        movie_icon = f"https://image.tmdb.org/t/p/w500{movie.tmdb_details['poster_path']}"
+                # Fall back to stream_icon if no TMDB poster
+                if not movie_icon:
+                    movie_icon = movie.stream_icon
             else:
                 stream_id_str = str(movie.get('stream_id'))
                 movie_name = movie.get('name', 'Unnamed Movie')
@@ -449,6 +458,14 @@ class MoviesTab(QWidget):
             # tile_layout.addWidget(name)
             # Rating (if available)
             movie_rating = movie.rating if isinstance(movie, MovieItem) else movie.get('rating')
+            
+            # If no rating and TMDB details available, use TMDB rating
+            if not movie_rating and isinstance(movie, MovieItem) and hasattr(movie, 'tmdb_details') and movie.tmdb_details:
+                if hasattr(movie.tmdb_details, 'vote_average') and movie.tmdb_details.vote_average > 0:
+                    movie_rating = str(movie.tmdb_details.vote_average)
+                elif isinstance(movie.tmdb_details, dict) and movie.tmdb_details.get('vote_average', 0) > 0:
+                    movie_rating = str(movie.tmdb_details['vote_average'])
+            
             if movie_rating:
                 rating = QLabel(f"★ {movie_rating}")
                 rating.setAlignment(Qt.AlignCenter)
@@ -850,7 +867,17 @@ class MoviesTab(QWidget):
                                 movie_dict = movie.to_dict()
                                 movie_dict['tmdb_id'] = tmdb_id
                                 movie_dict['stream_icon'] = tmdb_poster_url
-                                self.api_client.update_movie_cache(movie_dict)
+                                
+                                # Store TMDB details in MovieItem
+                                if hasattr(details, 'to_dict'):
+                                    # details is a TMDBMovieDetails object
+                                    movie.tmdb_details = details
+                                else:
+                                    # details is a dict, convert to TMDBMovieDetails
+                                    from src.tmdb_models import TMDBMovieDetails
+                                    movie.tmdb_details = TMDBMovieDetails.from_dict(details)
+                                
+                                self.api_client.update_movie_cache(movie.to_dict())
                                 # Also update the MovieItem object
                                 movie.tmdb_id = tmdb_id
                                 movie.stream_icon = tmdb_poster_url

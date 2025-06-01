@@ -273,7 +273,17 @@ class SearchTab(QWidget):
                 return item.get(key, default)
             return default
         
-        cover_url = get_value(item_data, 'cover') or get_value(item_data, 'stream_icon') or get_value(item_data, 'movie_image')
+        # Prioritize TMDB poster if available for MovieItem instances
+        cover_url = None
+        if hasattr(item_data, 'tmdb_details') and item_data.tmdb_details:
+            if hasattr(item_data.tmdb_details, 'poster_path') and item_data.tmdb_details.poster_path:
+                cover_url = f"https://image.tmdb.org/t/p/w500{item_data.tmdb_details.poster_path}"
+            elif isinstance(item_data.tmdb_details, dict) and item_data.tmdb_details.get('poster_path'):
+                cover_url = f"https://image.tmdb.org/t/p/w500{item_data.tmdb_details['poster_path']}"
+        
+        # Fall back to existing cover sources if no TMDB poster
+        if not cover_url:
+            cover_url = get_value(item_data, 'cover') or get_value(item_data, 'stream_icon') or get_value(item_data, 'movie_image')
         
         # Determine item type and default icon
         item_type_str = get_value(item_data, 'stream_type', 'unknown').lower()
@@ -330,6 +340,13 @@ class SearchTab(QWidget):
                 rating_val = float(rating_val)
             except ValueError:
                 rating_val = 0
+        
+        # If no rating and TMDB details available, use TMDB rating
+        if rating_val == 0 and hasattr(item_data, 'tmdb_details') and item_data.tmdb_details:
+            if hasattr(item_data.tmdb_details, 'vote_average') and item_data.tmdb_details.vote_average > 0:
+                rating_val = item_data.tmdb_details.vote_average
+            elif isinstance(item_data.tmdb_details, dict) and item_data.tmdb_details.get('vote_average', 0) > 0:
+                rating_val = item_data.tmdb_details['vote_average']
         
         rating_text = f"★ {rating_val:.1f}/10" if rating_val > 0 else "No rating"
         rating_label = QLabel(rating_text)

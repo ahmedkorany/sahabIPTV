@@ -103,7 +103,7 @@ class SpokenLanguage:
 
 
 @dataclass
-class MovieDetails:
+class TMDBMovieDetails:
     """TMDB Movie Details model."""
     id: int
     title: str
@@ -146,7 +146,7 @@ class MovieDetails:
             self.spoken_languages = []
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MovieDetails':
+    def from_dict(cls, data: Dict[str, Any]) -> 'TMDBMovieDetails':
         """Create MovieDetails instance from dictionary data."""
         return cls(
             id=data.get('id', 0),
@@ -540,7 +540,7 @@ class Season:
 
 
 @dataclass
-class SeriesDetails:
+class TMDBSeriesDetails:
     """TMDB Series Details model."""
     id: int
     name: str
@@ -599,7 +599,7 @@ class SeriesDetails:
             self.spoken_languages = []
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SeriesDetails':
+    def from_dict(cls, data: Dict[str, Any]) -> 'TMDBSeriesDetails':
         """Create SeriesDetails instance from dictionary data."""
         last_episode = data.get('last_episode_to_air')
         next_episode = data.get('next_episode_to_air')

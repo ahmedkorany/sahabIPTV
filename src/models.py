@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import List, Optional, Union
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tmdb_models import TMDBMovieDetails
 
 
 @dataclass
@@ -78,6 +82,18 @@ class SeriesItem:
             except (ValueError, IndexError):
                 pass
         return None
+    
+    def has_tmdb_details(self) -> bool:
+        """Check if TMDB details are available for this movie."""
+        return self.tmdb_details is not None
+    
+    def get_tmdb_details(self) -> Optional['TMDBMovieDetails']:
+        """Get TMDB details if available."""
+        return self.tmdb_details
+    
+    def set_tmdb_details(self, details: 'TMDBMovieDetails') -> None:
+        """Set TMDB details for this movie."""
+        self.tmdb_details = details
     
     def get_rating_float(self) -> float:
         """Get rating as float value."""
@@ -157,10 +173,18 @@ class MovieItem:
     tmdb_id: Optional[str] = None
     year: Optional[str] = None
     adult: Optional[bool] = None
+    tmdb_details: Optional['TMDBMovieDetails'] = None
     
     @classmethod
     def from_dict(cls, data: dict) -> 'MovieItem':
         """Create MovieItem instance from dictionary data."""
+        from .tmdb_models import TMDBMovieDetails
+        
+        # Handle TMDB details if present in cache
+        tmdb_details = None
+        if 'tmdb_details' in data and data['tmdb_details']:
+            tmdb_details = TMDBMovieDetails.from_dict(data['tmdb_details'])
+        
         return cls(
             num=data.get('num', 0),
             name=data.get('name', ''),
@@ -181,12 +205,13 @@ class MovieItem:
             container_extension=data.get('container_extension'),
             tmdb_id=data.get('tmdb_id'),
             year=data.get('year'),
-            adult=data.get('adult')
+            adult=data.get('adult'),
+            tmdb_details=tmdb_details
         )
     
     def to_dict(self) -> dict:
         """Convert MovieItem instance to dictionary."""
-        return {
+        result = {
             'num': self.num,
             'name': self.name,
             'stream_id': self.stream_id,
@@ -208,6 +233,12 @@ class MovieItem:
             'year': self.year,
             'adult': self.adult
         }
+        
+        # Include TMDB details if available
+        if self.tmdb_details:
+            result['tmdb_details'] = self.tmdb_details.to_dict()
+        
+        return result
     
     def get_release_year(self) -> Optional[int]:
         """Extract release year from releaseDate or year field."""
@@ -225,6 +256,18 @@ class MovieItem:
             except (ValueError, IndexError):
                 pass
         return None
+    
+    def has_tmdb_details(self) -> bool:
+        """Check if TMDB details are available for this movie."""
+        return self.tmdb_details is not None
+    
+    def get_tmdb_details(self) -> Optional['TMDBMovieDetails']:
+        """Get TMDB details if available."""
+        return self.tmdb_details
+    
+    def set_tmdb_details(self, details: 'TMDBMovieDetails') -> None:
+        """Set TMDB details for this movie."""
+        self.tmdb_details = details
     
     def get_rating_float(self) -> float:
         """Get rating as float value."""

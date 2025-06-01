@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 from typing import Optional, Union
-from ..tmdb_models import MovieDetails, MovieCredits, SeriesDetails, SeriesCredits
+from ..tmdb_models import TMDBMovieDetails, MovieCredits, TMDBSeriesDetails, SeriesCredits
 
 class TMDBClient:
     BASE_URL = "https://api.themoviedb.org/3"
@@ -203,7 +203,7 @@ class TMDBClient:
             poster_path = poster_path[1:]
         return f"{self.IMAGE_BASE_URL}{size}/{poster_path}"
 
-    def get_movie_details(self, tmdb_id, language=None, return_raw: bool = False) -> Union[MovieDetails, dict, None]:
+    def get_movie_details(self, tmdb_id, language=None, return_raw: bool = False) -> Union[TMDBMovieDetails, dict, None]:
         """Fetch movie details from TMDB by tmdb_id with retry logic and caching.
         
         Args:
@@ -225,7 +225,7 @@ class TMDBClient:
                 if return_raw:
                     return cached_data
                 try:
-                    return MovieDetails.from_dict(cached_data)
+                    return TMDBMovieDetails.from_dict(cached_data)
                 except Exception as e:
                     print(f"[TMDB] Error creating MovieDetails from cached data: {e}")
                     return cached_data if return_raw else None
@@ -263,7 +263,7 @@ class TMDBClient:
                     return data
                 
                 try:
-                    return MovieDetails.from_dict(data)
+                    return TMDBMovieDetails.from_dict(data)
                 except Exception as e:
                     print(f"[TMDB] Error creating MovieDetails from API data: {e}")
                     return data if return_raw else None
@@ -277,7 +277,7 @@ class TMDBClient:
                 return None
         return None
 
-    def get_series_details(self, tmdb_id, language=None, return_raw: bool = False) -> Union[SeriesDetails, dict, None]:
+    def get_series_details(self, tmdb_id, language=None, return_raw: bool = False) -> Union[TMDBSeriesDetails, dict, None]:
         """Fetch series details from TMDB by tmdb_id with retry logic and caching.
         
         Args:
@@ -299,7 +299,7 @@ class TMDBClient:
                 if return_raw:
                     return cached_data
                 try:
-                    return SeriesDetails.from_dict(cached_data)
+                    return TMDBSeriesDetails.from_dict(cached_data)
                 except Exception as e:
                     print(f"[TMDB] Error creating SeriesDetails from cached data: {e}")
                     return cached_data if return_raw else None
@@ -337,7 +337,7 @@ class TMDBClient:
                     return data
                 
                 try:
-                    return SeriesDetails.from_dict(data)
+                    return TMDBSeriesDetails.from_dict(data)
                 except Exception as e:
                     print(f"[TMDB] Error creating SeriesDetails from API data: {e}")
                     return data if return_raw else None

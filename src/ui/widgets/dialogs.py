@@ -309,7 +309,17 @@ class MovieDetailsDialog(QDialog):
         poster.setAlignment(Qt.AlignTop)
         pix = QPixmap()
         # Try all possible image keys in order of preference
-        image_url = self.movie.stream_icon or self.movie.movie_image or self.movie.cover_big
+        # First check if we have TMDB details with a poster
+        image_url = None
+        if hasattr(self.movie, 'tmdb_details') and self.movie.tmdb_details:
+            if hasattr(self.movie.tmdb_details, 'poster_path') and self.movie.tmdb_details.poster_path:
+                image_url = f"https://image.tmdb.org/t/p/w500{self.movie.tmdb_details.poster_path}"
+            elif isinstance(self.movie.tmdb_details, dict) and self.movie.tmdb_details.get('poster_path'):
+                image_url = f"https://image.tmdb.org/t/p/w500{self.movie.tmdb_details['poster_path']}"
+        
+        # Fall back to existing image sources if no TMDB poster
+        if not image_url:
+            image_url = self.movie.stream_icon or self.movie.movie_image or self.movie.cover_big
         if image_url:
             pix = self.get_cached_pixmap(image_url, 'assets/movies.png')
         else:

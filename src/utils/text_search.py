@@ -120,7 +120,16 @@ def search_all_data(api_client, query):
         if isinstance(item, MovieItem):
             name = item.name
             stream_id = item.stream_id
-            cover = item.stream_icon
+            # Prioritize TMDB poster if available
+            cover = None
+            if hasattr(item, 'tmdb_details') and item.tmdb_details:
+                if hasattr(item.tmdb_details, 'poster_path') and item.tmdb_details.poster_path:
+                    cover = f"https://image.tmdb.org/t/p/w500{item.tmdb_details.poster_path}"
+                elif isinstance(item.tmdb_details, dict) and item.tmdb_details.get('poster_path'):
+                    cover = f"https://image.tmdb.org/t/p/w500{item.tmdb_details['poster_path']}"
+            # Fall back to stream_icon if no TMDB poster
+            if not cover:
+                cover = item.stream_icon
             rating = item.rating or 0
             year = item.year
             plot = item.plot
@@ -166,7 +175,15 @@ def search_all_data(api_client, query):
             
             # Add search metadata
             movie_item.stream_type = 'movie'
-            movie_item.cover = movie_item.stream_icon  # Map stream_icon to cover for search display
+            # Prioritize TMDB poster for cover display
+            movie_cover = None
+            if hasattr(movie_item, 'tmdb_details') and movie_item.tmdb_details:
+                if hasattr(movie_item.tmdb_details, 'poster_path') and movie_item.tmdb_details.poster_path:
+                    movie_cover = f"https://image.tmdb.org/t/p/w500{movie_item.tmdb_details.poster_path}"
+                elif isinstance(movie_item.tmdb_details, dict) and movie_item.tmdb_details.get('poster_path'):
+                    movie_cover = f"https://image.tmdb.org/t/p/w500{movie_item.tmdb_details['poster_path']}"
+            # Fall back to stream_icon if no TMDB poster
+            movie_item.cover = movie_cover or movie_item.stream_icon
             all_results.append(movie_item)
 
     # --- Search Series ---
