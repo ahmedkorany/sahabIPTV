@@ -204,7 +204,7 @@ class MovieDetailsWidget(QWidget):
         self.play_btn.setFont(QFont('Arial', 16, QFont.Bold))
         self.play_btn.setStyleSheet("""
             QPushButton {
-                background: #e50914;
+                background: rgba(0, 0, 0, 0.8);
                 color: white;
                 border: none;
                 padding: 12px 24px;

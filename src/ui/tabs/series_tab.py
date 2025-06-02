@@ -690,8 +690,31 @@ class SeriesTab(QWidget):
 
             default_pix = QPixmap('assets/series.png')
             # Handle both SeriesItem objects and dict objects
-            cover_url = series.cover if isinstance(series, SeriesItem) else series.get('cover')
             series_name = series.name if isinstance(series, SeriesItem) else series.get('name', '')
+            
+            # Prioritize TMDB poster over series cover
+            cover_url = None
+            
+            # Check for TMDB details first
+            tmdb_details = None
+            if isinstance(series, SeriesItem) and hasattr(series, 'tmdb_details') and series.tmdb_details:
+                tmdb_details = series.tmdb_details
+            elif isinstance(series, dict) and series.get('tmdb_details'):
+                tmdb_details = series.get('tmdb_details')
+            
+            if tmdb_details:
+                poster_path = None
+                if hasattr(tmdb_details, 'poster_path'):
+                    poster_path = tmdb_details.poster_path
+                elif isinstance(tmdb_details, dict):
+                    poster_path = tmdb_details.get('poster_path')
+                
+                if poster_path:
+                    cover_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+            
+            # Fallback to original cover if no TMDB poster
+            if not cover_url:
+                cover_url = series.cover if isinstance(series, SeriesItem) else series.get('cover')
             
             if cover_url:
                 # Pass a lambda that calls onPosterDownloadFailed with series data and the label
@@ -745,8 +768,20 @@ class SeriesTab(QWidget):
             
             tile_layout.addWidget(poster_container, alignment=Qt.AlignCenter)
             # Original series name QLabel is removed, title is now an overlay.
-            # Rating (if available)
+            # Rating (if available) - prioritize TMDB rating
             rating_value = series.rating if isinstance(series, SeriesItem) else series.get('rating')
+            
+            # Fallback to TMDB rating if no rating available
+            if not rating_value and tmdb_details:
+                vote_average = None
+                if hasattr(tmdb_details, 'vote_average'):
+                    vote_average = tmdb_details.vote_average
+                elif isinstance(tmdb_details, dict):
+                    vote_average = tmdb_details.get('vote_average')
+                
+                if vote_average and vote_average > 0:
+                    rating_value = str(vote_average)
+            
             if rating_value:
                 rating = QLabel(f"★ {rating_value}")
                 rating.setAlignment(Qt.AlignCenter)

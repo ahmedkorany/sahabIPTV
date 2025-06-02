@@ -187,14 +187,44 @@ class SeriesDetailsWidget(QWidget):
         series_cover_url = self.series_data.cover
         
         self.title_label.setText(series_name)
-        self.meta_label.setText(f"Year: {series_year} | Genre: {series_genre}")
+        
+        # Get rating with TMDB fallback
+        series_rating = self.series_data.rating
+        if not series_rating and hasattr(self.series_data, 'tmdb_details') and self.series_data.tmdb_details:
+            tmdb_details = self.series_data.tmdb_details
+            if hasattr(tmdb_details, 'vote_average') and tmdb_details.vote_average and tmdb_details.vote_average > 0:
+                series_rating = str(tmdb_details.vote_average)
+            elif isinstance(tmdb_details, dict) and tmdb_details.get('vote_average') and tmdb_details.get('vote_average') > 0:
+                series_rating = str(tmdb_details.get('vote_average'))
+        
+        # Build meta text with rating if available
+        meta_parts = [f"Year: {series_year}", f"Genre: {series_genre}"]
+        if series_rating:
+            meta_parts.append(f"Rating: ★ {series_rating}")
+        
+        self.meta_label.setText(" | ".join(meta_parts))
         self.desc_text.setPlainText(series_plot)
 
         
-        if series_cover_url:
+        # Load poster - prioritize TMDB poster over series cover
+        poster_url = None
+        
+        # Check for TMDB details first
+        if hasattr(self.series_data, 'tmdb_details') and self.series_data.tmdb_details:
+            tmdb_details = self.series_data.tmdb_details
+            if hasattr(tmdb_details, 'poster_path') and tmdb_details.poster_path:
+                poster_url = f"https://image.tmdb.org/t/p/w500{tmdb_details.poster_path}"
+            elif isinstance(tmdb_details, dict) and tmdb_details.get('poster_path'):
+                poster_url = f"https://image.tmdb.org/t/p/w500{tmdb_details['poster_path']}"
+        
+        # Fallback to original cover if no TMDB poster
+        if not poster_url:
+            poster_url = series_cover_url
+        
+        if poster_url:
             from src.utils.helpers import load_image_async
             self.poster_label.setPixmap(QPixmap('assets/series.png'))
-            load_image_async(series_cover_url, self.poster_label, QPixmap('assets/series.png'), update_size=(200, 300), main_window=self.main_window, on_failure=self.onPosterLoadFailed)
+            load_image_async(poster_url, self.poster_label, QPixmap('assets/series.png'), update_size=(200, 300), main_window=self.main_window, on_failure=self.onPosterLoadFailed)
         
         
         self._update_favorite_series_button_text()
@@ -241,7 +271,21 @@ class SeriesDetailsWidget(QWidget):
                     genre_to_display = self.series_data.genre or info_dict.get('genre', '--')
                     plot_to_display = self.series_data.plot or info_dict.get('plot', '')
                     
-                    self.meta_label.setText(f"Year: {year_to_display} | Genre: {genre_to_display}")
+                    # Get rating with TMDB fallback
+                    series_rating = self.series_data.rating or info_dict.get('rating', '')
+                    if not series_rating and hasattr(self.series_data, 'tmdb_details') and self.series_data.tmdb_details:
+                        tmdb_details = self.series_data.tmdb_details
+                        if hasattr(tmdb_details, 'vote_average') and tmdb_details.vote_average and tmdb_details.vote_average > 0:
+                            series_rating = str(tmdb_details.vote_average)
+                        elif isinstance(tmdb_details, dict) and tmdb_details.get('vote_average') and tmdb_details.get('vote_average') > 0:
+                            series_rating = str(tmdb_details.get('vote_average'))
+                    
+                    # Build meta text with rating if available
+                    meta_parts = [f"Year: {year_to_display}", f"Genre: {genre_to_display}"]
+                    if series_rating:
+                        meta_parts.append(f"Rating: ★ {series_rating}")
+                    
+                    self.meta_label.setText(" | ".join(meta_parts))
                     
                     # Update description, but preserve TMDB plot data if it exists
                     self.desc_text.setPlainText(plot_to_display)
@@ -749,9 +793,22 @@ class SeriesDetailsWidget(QWidget):
                     if (not current_year or current_year == '--') and first_air_date:
                         try:
                             year = first_air_date[:4]  # Extract year from date
-                            self.series_data.year = year
+                            self.series_data.releaseDate = first_air_date
                             current_genre_display = self.series_data.genre or '--'
-                            self.meta_label.setText(f"Year: {year} | Genre: {current_genre_display}")
+                            
+                            # Get rating with TMDB fallback
+                            series_rating = self.series_data.rating
+                            if not series_rating and hasattr(series_details, 'vote_average') and series_details.vote_average and series_details.vote_average > 0:
+                                series_rating = str(series_details.vote_average)
+                            elif not series_rating and isinstance(series_details, dict) and series_details.get('vote_average') and series_details.get('vote_average') > 0:
+                                series_rating = str(series_details.get('vote_average'))
+                            
+                            # Build meta text with rating if available
+                            meta_parts = [f"Year: {year}", f"Genre: {current_genre_display}"]
+                            if series_rating:
+                                meta_parts.append(f"Rating: ★ {series_rating}")
+                            
+                            self.meta_label.setText(" | ".join(meta_parts))
                             updated_data = True
                             print(f"[SeriesDetailsWidget] Updated year to: {year}")
                         except (ValueError, IndexError):
@@ -777,7 +834,20 @@ class SeriesDetailsWidget(QWidget):
                             genre_string = ', '.join(genres)
                             self.series_data.genre = genre_string
                             current_year_display = self.series_data.get_release_year() or '--'
-                            self.meta_label.setText(f"Year: {current_year_display} | Genre: {genre_string}")
+                            
+                            # Get rating with TMDB fallback
+                            series_rating = self.series_data.rating
+                            if not series_rating and hasattr(series_details, 'vote_average') and series_details.vote_average and series_details.vote_average > 0:
+                                series_rating = str(series_details.vote_average)
+                            elif not series_rating and isinstance(series_details, dict) and series_details.get('vote_average') and series_details.get('vote_average') > 0:
+                                series_rating = str(series_details.get('vote_average'))
+                            
+                            # Build meta text with rating if available
+                            meta_parts = [f"Year: {current_year_display}", f"Genre: {genre_string}"]
+                            if series_rating:
+                                meta_parts.append(f"Rating: ★ {series_rating}")
+                            
+                            self.meta_label.setText(" | ".join(meta_parts))
                             updated_data = True
                             print(f"[SeriesDetailsWidget] Updated genre to: {genre_string}")
                         except (KeyError, TypeError):
