@@ -2,7 +2,7 @@
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, List
 
 from src.config import API_TIMEOUT, API_RETRIES
 from src.constants import APIConstants, ErrorMessages
@@ -605,3 +605,42 @@ class XtreamClient:
                         except Exception as e:
                             print(f"Error deleting cache file {fname}: {e}")
         # Do NOT touch favorites file here!
+
+    def get_available_qualities(self, episode_id: str) -> List[Dict[str, str]]:
+        """Get available quality options for an episode
+        
+        Args:
+            episode_id: The episode ID
+            
+        Returns:
+            List of available quality options
+        """
+        if not self._has_credentials():
+            return []
+        
+        # Common quality parameters used by IPTV providers
+        quality_options = [
+            {"name": "Auto", "value": None, "description": "Adaptive quality"},
+            {"name": "FHD", "value": "fhd", "description": "1080p Full HD"},
+            {"name": "HD", "value": "hd", "description": "720p HD"},
+            {"name": "SD", "value": "sd", "description": "480p Standard"},
+            {"name": "Low", "value": "low", "description": "360p Low quality"}
+        ]
+        
+        available_qualities = []
+        
+        for quality in quality_options:
+            if quality["value"] is None:  # Auto/adaptive always available
+                available_qualities.append(quality)
+                continue
+                
+            # Test if quality is available
+            test_url = self.get_series_url_with_quality(episode_id, "mp4", quality["value"])
+            try:
+                response = self.session.head(test_url, timeout=5)
+                if response.status_code == 200:
+                    available_qualities.append(quality)
+            except Exception:
+                continue
+        
+        return available_qualities

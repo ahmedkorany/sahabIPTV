@@ -11,7 +11,7 @@ from src.ui.tabs.live_tab import LiveTab
 from src.ui.tabs.movies_tab import MoviesTab
 from src.ui.tabs.series_tab import SeriesTab
 from src.ui.tabs.search_tab import SearchTab
-
+from src.ui.tabs.offline_content_tab import OfflineContentTab
 from src.utils.helpers import get_translations
 from src.utils.favorites_manager import FavoritesManager
 from src.config import DEFAULT_LANGUAGE, WINDOW_SIZE
@@ -140,6 +140,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.series_tab, self.translations.get("Series", "Series"))
 
         self.tabs.addTab(self.search_tab, self.translations.get("Search", "Search")) # Added Search tab
+        # Add Offline Content Tab
+        self.offline_content_tab = OfflineContentTab()
+        self.tabs.addTab(self.offline_content_tab, self.translations.get("Offline Content", "Offline Content"))
 
         self.live_tab.set_main_window(self)
         self.movies_tab.main_window = self
