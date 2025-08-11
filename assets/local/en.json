@@ -189,5 +189,22 @@
   "User": "User:",
   "Subscription expires": "Subscription expires:",
   "Password": "Password:",
-  "Server URL": "Server URL:"
+  "Server URL": "Server URL:",
+  "Select Quality": "Select Quality",
+  "Choose video quality for export:": "Choose video quality for export:",
+  "Quality": "Quality",
+  "Bandwidth": "Bandwidth", 
+  "Resolution": "Resolution",
+  "Auto (Best Available)": "Auto (Best Available)",
+  "Export with Selected Quality": "Export with Selected Quality",
+  "Detecting available qualities...": "Detecting available qualities...",
+  "No quality variants found": "No quality variants found",
+  "Server does not support multiple qualities": "Server does not support multiple qualities", 
+  "Quality detection failed": "Quality detection failed",
+  "Using default quality": "Using default quality",
+  "High": "High",
+  "Medium": "Medium",
+  "Low": "Low",
+  "Unknown": "Unknown",
+  "qualities found": "qualities found"
 }

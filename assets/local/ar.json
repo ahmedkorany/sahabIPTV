@@ -189,5 +189,22 @@
   "User": "المستخدم",
   "Subscription expires": "إنتهاء الاشتراك",
   "Password": "كلمة المرور:",
-  "Server URL": "رابط الخادم:"
+  "Server URL": "رابط الخادم:",
+  "Select Quality": "اختيار الجودة",
+  "Choose video quality for export:": "اختر جودة الفيديو للتصدير:",
+  "Quality": "الجودة",
+  "Bandwidth": "عرض النطاق",
+  "Resolution": "الدقة", 
+  "Auto (Best Available)": "تلقائي (أفضل متاح)",
+  "Export with Selected Quality": "تصدير بالجودة المحددة",
+  "Detecting available qualities...": "جاري اكتشاف الجودات المتاحة...",
+  "No quality variants found": "لم يتم العثور على متغيرات الجودة",
+  "Server does not support multiple qualities": "الخادم لا يدعم جودات متعددة",
+  "Quality detection failed": "فشل اكتشاف الجودة",
+  "Using default quality": "استخدام الجودة الافتراضية",
+  "High": "عالية",
+  "Medium": "متوسطة", 
+  "Low": "منخفضة",
+  "Unknown": "غير معروف",
+  "qualities found": "جودات تم العثور عليها"
 }

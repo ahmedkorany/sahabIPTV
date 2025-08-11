@@ -4,13 +4,14 @@ Series Details Widget for the application
 import os
 import time
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QMessageBox, QComboBox, QScrollArea, QGridLayout)
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QMessageBox, QComboBox, QScrollArea, QGridLayout, QDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QFont
 from src.api.tmdb import TMDBClient # Added import
 from src.ui.widgets.cast_widget import CastWidget
 from src.utils.helpers import get_translations
 from src.models import SeriesItem
+from src.ui.widgets.quality_selection_dialog import QualitySelectionDialog
 
 class SeriesDetailsWidget(QWidget):
     back_clicked = pyqtSignal()
@@ -19,8 +20,9 @@ class SeriesDetailsWidget(QWidget):
     # Signals for download/export actions, will need to be connected in SeriesTab
     # download_episode_requested = pyqtSignal(object) # episode data # Removed
     # download_season_requested = pyqtSignal(str) # season number # Removed
-    export_season_requested = pyqtSignal(str) # season number
-
+    # Update line 22 - the signal definition
+    export_season_requested = pyqtSignal(str, object) # season number, quality_info
+    
     def __init__(self, series_data, api_client, main_window, parent=None):
         super().__init__(parent)
         self.series_data = series_data
@@ -681,12 +683,37 @@ class SeriesDetailsWidget(QWidget):
         pass
 
     def _on_export_season(self):
+        """Handle export season button click with quality selection"""
         if self.seasons_combo.currentIndex() < 0:
-            QMessageBox.warning(self, "Error", "No season selected to export.")
+            QMessageBox.warning(self, "Error", self.translations.get("No season selected to export.", "No season selected to export."))
             return
+        
         season_number = self.seasons_combo.itemData(self.seasons_combo.currentIndex())
-        self.export_season_requested.emit(season_number)
-
+        
+        # Get episodes for the season to check if we have any
+        if not hasattr(self, 'series_info') or not self.series_info:
+            QMessageBox.warning(self, "Error", self.translations.get("Series data not available for season export.", "Series data not available for season export."))
+            return
+            
+        if 'episodes' not in self.series_info or season_number not in self.series_info['episodes']:
+            QMessageBox.warning(self, "Error", f"{self.translations.get('No episodes found for Season', 'No episodes found for Season')} {season_number} {self.translations.get('to export.', 'to export.')}")
+            return
+            
+        episodes_to_export = self.series_info['episodes'][season_number]
+        if not episodes_to_export:
+            QMessageBox.warning(self, "Error", f"{self.translations.get('No episodes found for Season', 'No episodes found for Season')} {season_number} {self.translations.get('to export.', 'to export.')}")
+            return
+        
+        # Use first episode to detect qualities (assuming all episodes have same quality options)
+        first_episode = episodes_to_export[0]
+        
+        # Show quality selection dialog
+        quality_dialog = QualitySelectionDialog(first_episode, self.api_client, self.translations, self)
+        
+        if quality_dialog.exec() == QDialog.Accepted:
+            selected_quality = quality_dialog.get_selected_quality()
+            self.export_season_requested.emit(season_number, selected_quality)
+        
     # Public method to be called by SeriesTab after favorite status changes
     def refresh_favorite_button(self):
         self._update_favorite_series_button_text()

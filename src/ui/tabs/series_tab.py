@@ -491,7 +491,8 @@ class SeriesTab(QWidget):
         pass
 
 
-    def _handle_export_season_request(self, season_number):
+    def _handle_export_season_request(self, season_number, quality_info=None):
+        """Handle season export with quality selection"""
         if not self.current_series or not self.details_widget:
             QMessageBox.warning(self, "Error", "Series data not available for season export.")
             return
@@ -506,33 +507,97 @@ class SeriesTab(QWidget):
             QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number} to export.")
             return
 
-        series_name = self.current_series.get('name', 'Series')
+        # Handle both SeriesItem objects and dictionary objects
+        if isinstance(self.current_series, SeriesItem):
+            series_name = self.current_series.name or 'Series'
+        else:
+            series_name = self.current_series.get('name', 'Series')
+        
         sane_series_name = series_name.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
-        default_m3u_filename = f"{sane_series_name} - Season {str(season_number).zfill(2)}.m3u"
+        
+        # Add quality info to filename if specific quality was selected
+        quality_suffix = ""
+        if quality_info:
+            if quality_info.get('resolution'):
+                width, height = quality_info['resolution']
+                quality_suffix = f" - {height}p"
+            elif quality_info.get('label'):
+                quality_suffix = f" - {quality_info['label']}"
+        
+        default_m3u_filename = f"{sane_series_name} - Season {str(season_number).zfill(2)}{quality_suffix}.m3u"
 
         save_path, _ = QFileDialog.getSaveFileName(self, "Export Season URLs", default_m3u_filename, "M3U Playlist (*.m3u);;All Files (*)")
         if not save_path:
             return
 
         m3u_content = ["#EXTM3U"]
+        
+        # Helper function to get episode URL based on quality selection
+        def get_episode_url(episode_data):
+            if quality_info is None:
+                # Use default quality
+                episode_id = episode_data.get('id') or episode_data.get('stream_id')
+                container_extension = episode_data.get('container_extension', 'mp4')
+                return self.api_client.get_series_url(episode_id, container_extension)
+            else:
+                # Use specific quality URL
+                episode_id = episode_data.get('id') or episode_data.get('stream_id')
+                container_extension = episode_data.get('container_extension', 'mp4')
+                base_url = self.api_client.get_series_url(episode_id, container_extension)
+                
+                if quality_info['url'].startswith('http'):
+                    return quality_info['url'].replace(
+                        episodes_to_export[0].get('id') or episodes_to_export[0].get('stream_id'),
+                        episode_id
+                    )
+                else:
+                    # For relative URLs, we'd need to do more complex resolution
+                    # For now, fall back to default URL for individual episodes
+                    return base_url
+        
+        successful_exports = 0
         for episode_data in episodes_to_export:
             episode_title = episode_data.get('title', 'Episode')
             episode_id = episode_data.get('id') or episode_data.get('stream_id')
-            container_extension = episode_data.get('container_extension', 'mp4')
-            stream_url = self.api_client.get_series_url(episode_id, container_extension)
+            
+            try:
+                stream_url = get_episode_url(episode_data)
+                
+                if stream_url:
+                    # Enhanced M3U format with more metadata
+                    extinf_line = f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title}\" group-title=\"Season {season_number}\""
+                    if quality_info and quality_info.get('resolution'):
+                        width, height = quality_info['resolution']
+                        extinf_line += f" tvg-logo=\"\" resolution=\"{width}x{height}\""
+                    extinf_line += f",{episode_title}"
+                    
+                    m3u_content.append(extinf_line)
+                    m3u_content.append(stream_url)
+                    successful_exports += 1
+                else:
+                    print(f"Could not get stream URL for {episode_title}")
+            except Exception as e:
+                print(f"Error processing {episode_title}: {e}")
 
-            if stream_url:
-                # Basic M3U format, can be extended with #EXTINF if more metadata is needed
-                m3u_content.append(f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title}\" group-title=\"Season {season_number}\",{episode_title}")
-                m3u_content.append(stream_url)
-            else:
-                print(f"Could not get stream URL for {episode_title}")
-
-        if len(m3u_content) > 1: # Has at least one episode
+        if successful_exports > 0:
             try:
                 with open(save_path, 'w', encoding='utf-8') as f:
                     f.write("\n".join(m3u_content))
-                QMessageBox.information(self, "Export Successful", f"Season {season_number} URLs exported to {save_path}")
+                
+                # Enhanced success message
+                quality_text = ""
+                if quality_info:
+                    if quality_info.get('resolution'):
+                        width, height = quality_info['resolution']
+                        quality_text = f" ({height}p quality)"
+                    elif quality_info.get('label'):
+                        quality_text = f" ({quality_info['label']} quality)"
+                
+                QMessageBox.information(
+                    self, "Export Successful", 
+                    f"Season {season_number} URLs{quality_text} exported to {save_path}\n"
+                    f"Successfully exported {successful_exports} of {len(episodes_to_export)} episodes."
+                )
             except IOError as e:
                 QMessageBox.warning(self, "Export Error", f"Could not write to file: {save_path}\n{e}")
         else:
