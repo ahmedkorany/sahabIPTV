@@ -6,7 +6,6 @@ from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                             QListWidget, QPushButton, QLineEdit, QMessageBox,
                             QFileDialog, QLabel, QListWidgetItem, QFrame, QScrollArea, QGridLayout, QStackedWidget, QComboBox)
-from typing import Optional
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QFont, QFontMetrics
 from PyQt5.QtCore import QRect
@@ -136,10 +135,6 @@ class SeriesTab(QWidget):
         self._opened_from_search = False
         # Get translations from main window
         self.translations = getattr(main_window, 'translations', {}) if main_window else {}
-        
-        # Setup quality selection BEFORE setup_ui
-        self.setup_quality_selection()
-        
         self.setup_ui()
         self.api_client = api_client
         self.main_window = main_window
@@ -221,43 +216,10 @@ class SeriesTab(QWidget):
         order_layout.addStretch(1)
         self.order_panel.setVisible(False)
         # Insert sorting panel just above the grid (series_grid_scroll)
-        # grid_parent_layout = self.series_grid_scroll.parentWidget().layout() if self.series_grid_scroll.parentWidget() else self.layout()
-        # grid_parent_layout.insertWidget(grid_parent_layout.indexOf(self.series_grid_scroll), self.order_panel)
+        grid_parent_layout = self.series_grid_scroll.parentWidget().layout() if self.series_grid_scroll.parentWidget() else self.layout()
+        grid_parent_layout.insertWidget(grid_parent_layout.indexOf(self.series_grid_scroll), self.order_panel)
 
-        # Add quality selection to the layout
-        layout.insertWidget(0, self.order_panel)
-        layout.insertLayout(0, self.quality_layout)
-        
-        # self.setLayout(layout) # Layout is already set above
-
-    def setup_quality_selection(self):
-        """Setup quality selection widget"""
-        self.quality_layout = QHBoxLayout()
-        
-        self.quality_label = QLabel("Quality:")
-        self.quality_combo = QComboBox()
-        self.quality_combo.addItem("Auto (Adaptive)", None)
-        self.quality_combo.addItem("1080p (FHD)", "fhd")
-        self.quality_combo.addItem("720p (HD)", "hd")
-        self.quality_combo.addItem("480p (SD)", "sd")
-        self.quality_combo.addItem("360p (Low)", "low")
-        
-        self.quality_layout.addWidget(self.quality_label)
-        self.quality_layout.addWidget(self.quality_combo)
-        self.quality_layout.addStretch()
-
-    def get_selected_quality(self) -> Optional[str]:
-        """Get the currently selected quality"""
-        return self.quality_combo.currentData()
-
-    def update_quality_options_for_episode(self, episode_id: str):
-        """Update available quality options for specific episode"""
-        if hasattr(self.api_client, 'get_available_qualities'):
-            qualities = self.api_client.get_available_qualities(episode_id)
-            
-            self.quality_combo.clear()
-            for quality in qualities:
-                self.quality_combo.addItem(quality["description"], quality["value"])
+        self.setLayout(layout)
 
     # Search input handler removed
 
@@ -317,12 +279,6 @@ class SeriesTab(QWidget):
         # self.details_widget.download_season_requested.connect(self._handle_download_season_request) # Removed
         self.details_widget.export_season_requested.connect(self._handle_export_season_request)
         
-        # Update quality options for the series if available
-        if hasattr(self.details_widget, 'get_current_episode_id'):
-            episode_id = self.details_widget.get_current_episode_id()
-            if episode_id:
-                self.update_quality_options_for_episode(episode_id)
-        
         # Connect to main window's favorites_changed signal to refresh button state
         if hasattr(self.main_window, 'favorites_changed'):
             self.main_window.favorites_changed.connect(self._on_favorites_changed)
@@ -375,12 +331,6 @@ class SeriesTab(QWidget):
         self.details_widget.toggle_favorite_series_requested.connect(self._handle_toggle_favorite_request)
         self.details_widget.export_season_requested.connect(self._handle_export_season_request)
         
-        # Update quality options for the series if available
-        if hasattr(self.details_widget, 'get_current_episode_id'):
-            episode_id = self.details_widget.get_current_episode_id()
-            if episode_id:
-                self.update_quality_options_for_episode(episode_id)
-        
         # Connect to main window's favorites_changed signal to refresh button state
         if hasattr(self.main_window, 'favorites_changed'):
             self.main_window.favorites_changed.connect(self._on_favorites_changed)
@@ -400,93 +350,70 @@ class SeriesTab(QWidget):
     def _handle_play_episode_request(self, episode_data):
         # This will replace the logic of the old _play_episode method
         # For now, just a placeholder
-        print(f"SeriesTab: Play episode requested: {episode_data.title}")
-        # Use the new quality-aware play method
-        self.play_episode_with_quality(episode_data)
-
-    def play_episode_with_quality(self, episode_data):
-        """Play episode with selected quality"""
+        print(f"SeriesTab: Play episode requested: {episode_data.get('title')}")
+        # Actual play logic will be added in a subsequent step
         main_window = self.window()
-        if not hasattr(main_window, 'player_window') or not episode_data:
-            QMessageBox.warning(self, "Error", "Player window or episode data not available.")
-            return
+        if hasattr(main_window, 'player_window') and episode_data:
+            stream_id = episode_data.get('id') or episode_data.get('stream_id')
+            container_extension = episode_data.get('container_extension', 'mp4')
             
-        stream_id = episode_data.id or episode_data.stream_id
-        container_extension = episode_data.container_extension or 'mp4'
-        
-        # Ensure current_series is set if needed by get_series_url or for context
-        if not hasattr(self, 'current_series') or not self.current_series:
-            series_id_for_url = episode_data.series_id
-        else:
-            from src.models import SeriesItem
-            if isinstance(self.current_series, SeriesItem):
-                series_id_for_url = self.current_series.series_id
+            # Ensure current_series is set if needed by get_series_url or for context
+            if not hasattr(self, 'current_series') or not self.current_series:
+                # This might happen if show_series_details wasn't called or series context is lost
+                # Try to get series_id from episode_data if possible, though it's not standard
+                # QMessageBox.warning(self, "Error", "Series context not found for playing episode.")
+                # return
+                # Fallback: if series_id is in episode_data (not typical but as a safeguard)
+                series_id_for_url = episode_data.get('series_id') 
             else:
-                series_id_for_url = self.current_series.series_id
-        
-        # Check for adaptive streaming support first
-        if hasattr(self.api_client, 'check_adaptive_streaming_support'):
-            adaptive_info = self.api_client.check_adaptive_streaming_support(stream_id)
-            
-            if adaptive_info["supported"]:
-                # Use adaptive streaming format
-                preferred_format = adaptive_info["formats"][0]  # Use first available
-                stream_url = self.api_client.get_series_url(stream_id, preferred_format["ext"])
-            else:
-                # Use quality-specific URL
-                selected_quality = self.get_selected_quality()
-                if hasattr(self.api_client, 'get_series_url_with_quality'):
-                    stream_url = self.api_client.get_series_url_with_quality(
-                        stream_id, container_extension, selected_quality
-                    )
-                else:
-                    stream_url = self.api_client.get_series_url(stream_id, container_extension)
-        else:
-            # Fallback to original method
-            selected_quality = self.get_selected_quality()
-            if hasattr(self.api_client, 'get_series_url_with_quality') and selected_quality:
-                stream_url = self.api_client.get_series_url_with_quality(
-                    stream_id, container_extension, selected_quality
-                )
-            else:
-                stream_url = self.api_client.get_series_url(stream_id, container_extension)
-
-        if stream_url:
-            episode_name = episode_data.title or 'Episode'
-            if hasattr(self, 'current_series') and self.current_series:
+                from src.models import SeriesItem
                 if isinstance(self.current_series, SeriesItem):
-                    series_name = self.current_series.name or 'Series'
+                    series_id_for_url = self.current_series.series_id
                 else:
-                    series_name = self.current_series.name or 'Series'
+                    series_id_for_url = self.current_series.get('series_id')
+
+            # The get_series_url might need series_id if it's not part of episode's stream_id logic
+            # Assuming get_series_url can derive necessary info from stream_id and container_extension
+            stream_url = self.api_client.get_series_url(stream_id, container_extension)
+
+            if stream_url:
+                episode_name = episode_data.get('title', 'Episode')
+                if hasattr(self, 'current_series') and self.current_series:
+                    if isinstance(self.current_series, SeriesItem):
+                        series_name = self.current_series.name or 'Series'
+                    else:
+                        series_name = self.current_series.get('name', 'Series')
+                else:
+                    series_name = ''
+                
+                player_item_info = {
+                    'name': f"{series_name} - {episode_name}",
+                    'stream_id': stream_id,
+                    'stream_url': stream_url,
+                    'container_extension': container_extension,
+                    'stream_type': 'episode', # or 'series' depending on player's expectation
+                    'series_id': series_id_for_url, # For context, like adding to history/watched status
+                    'episode_num': episode_data.get('episode_num'),
+                    'season_num': episode_data.get('season_num')
+                }
+                main_window.player_window.play(stream_url, player_item_info)
+                main_window.player_window.show()
             else:
-                series_name = ''
-            
-            player_item_info = {
-                'name': f"{series_name} - {episode_name}",
-                'stream_id': stream_id,
-                'stream_url': stream_url,
-                'container_extension': container_extension,
-                'stream_type': 'episode', # or 'series' depending on player's expectation
-                'series_id': series_id_for_url, # For context, like adding to history/watched status
-                'episode_num': episode_data.episode_num,
-                'season_num': episode_data.season_num
-            }
-            main_window.player_window.play(stream_url, player_item_info)
-            main_window.player_window.show()
+                QMessageBox.warning(self, "Error", "Could not retrieve stream URL for the episode.")
         else:
-            QMessageBox.warning(self, "Error", "Could not retrieve stream URL for the episode.")
+            QMessageBox.warning(self, "Error", "Player window or episode data not available.")
 
     def _handle_toggle_favorite_request(self, series_data):
         # This will replace the logic of the old _toggle_favorite_series method
-        print(f"SeriesTab: Toggle favorite requested for: {series_data.name}")
+        print(f"SeriesTab: Toggle favorite requested for: {series_data.get('name')}")
         if not self.favorites_manager:
             QMessageBox.warning(self, "Error", "Favorite functionality not available.")
             return
 
-        series_id = series_data.series_id
-        series_name = series_data.name
+        series_id = series_data.get('series_id')
+        series_name = series_data.get('name')
         # Ensure 'cover' is present in series_data if needed by favorites manager
-        series_cover = series_data.cover
+        series_cover = series_data.get('cover') 
 
         if not series_id or not series_name:
             QMessageBox.warning(self, "Error", "Series data is incomplete for favorites.")
@@ -500,9 +427,8 @@ class SeriesTab(QWidget):
             # Add other fields as expected by favorites manager
         }
         
-        # Convert SeriesItem to dict and add additional fields
-        series_dict = series_data.to_dict()
-        for key, value in series_dict.items():
+        # Add any additional fields from series_data
+        for key, value in series_data.items():
             if key not in favorite_item:
                 favorite_item[key] = value
 
@@ -580,7 +506,7 @@ class SeriesTab(QWidget):
             QMessageBox.warning(self, "Error", f"No episodes found for Season {season_number} to export.")
             return
 
-        series_name = self.current_series.name
+        series_name = self.current_series.get('name', 'Series')
         sane_series_name = series_name.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
         default_m3u_filename = f"{sane_series_name} - Season {str(season_number).zfill(2)}.m3u"
 
@@ -590,51 +516,17 @@ class SeriesTab(QWidget):
 
         m3u_content = ["#EXTM3U"]
         for episode_data in episodes_to_export:
-            episode_title = episode_data.get('title', f'Episode {episode_data.get("episode_num", "Unknown")}')
+            episode_title = episode_data.get('title', 'Episode')
             episode_id = episode_data.get('id') or episode_data.get('stream_id')
             container_extension = episode_data.get('container_extension', 'mp4')
-            
-            # Check for adaptive streaming first
-            if hasattr(self.api_client, 'check_adaptive_streaming_support'):
-                adaptive_info = self.api_client.check_adaptive_streaming_support(episode_id)
-                
-                if adaptive_info["supported"]:
-                    # Export adaptive streaming URLs
-                    for fmt in adaptive_info["formats"]:
-                        stream_url = self.api_client.get_series_url(episode_id, fmt["ext"])
-                        if stream_url:
-                            m3u_content.append(f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title} ({fmt['type']})\" group-title=\"Season {season_number}\",{episode_title} - {fmt['type']}")
-                            m3u_content.append(stream_url)
-                else:
-                    # Export quality-specific URLs
-                    if hasattr(self.api_client, 'get_available_qualities'):
-                        qualities = self.api_client.get_available_qualities(episode_id)
-                        for quality in qualities:
-                            if hasattr(self.api_client, 'get_series_url_with_quality'):
-                                stream_url = self.api_client.get_series_url_with_quality(
-                                    episode_id, container_extension, quality["value"]
-                                )
-                            else:
-                                stream_url = self.api_client.get_series_url(episode_id, container_extension)
-                            
-                            if stream_url:
-                                quality_suffix = f" - {quality['description']}" if quality["value"] else ""
-                                m3u_content.append(f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title}{quality_suffix}\" group-title=\"Season {season_number}\",{episode_title}{quality_suffix}")
-                                m3u_content.append(stream_url)
-                    else:
-                        # Fallback to single quality
-                        stream_url = self.api_client.get_series_url(episode_id, container_extension)
-                        if stream_url:
-                            m3u_content.append(f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title}\" group-title=\"Season {season_number}\",{episode_title}")
-                            m3u_content.append(stream_url)
+            stream_url = self.api_client.get_series_url(episode_id, container_extension)
+
+            if stream_url:
+                # Basic M3U format, can be extended with #EXTINF if more metadata is needed
+                m3u_content.append(f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title}\" group-title=\"Season {season_number}\",{episode_title}")
+                m3u_content.append(stream_url)
             else:
-                # Fallback to original implementation
-                stream_url = self.api_client.get_series_url(episode_id, container_extension)
-                if stream_url:
-                    m3u_content.append(f"#EXTINF:-1 tvg-id=\"{episode_id}\" tvg-name=\"{episode_title}\" group-title=\"Season {season_number}\",{episode_title}")
-                    m3u_content.append(stream_url)
-                else:
-                    print(f"Could not get stream URL for {episode_title}")
+                print(f"Could not get stream URL for {episode_title}")
 
         if len(m3u_content) > 1: # Has at least one episode
             try:
@@ -1095,40 +987,8 @@ class SeriesTab(QWidget):
                 for episode in episodes:
                     episode_id = episode['id']
                     container_extension = episode.get('container_extension', 'mp4')
-                    
-                    # Check for adaptive streaming first
-                    if hasattr(self.api_client, 'check_adaptive_streaming_support'):
-                        adaptive_info = self.api_client.check_adaptive_streaming_support(episode_id)
-                        
-                        if adaptive_info["supported"]:
-                            # Export adaptive streaming URLs
-                            for fmt in adaptive_info["formats"]:
-                                stream_url = self.api_client.get_series_url(episode_id, fmt["ext"])
-                                if stream_url:
-                                    file.write(f"{stream_url}\n")
-                        else:
-                            # Export quality-specific URLs
-                            if hasattr(self.api_client, 'get_available_qualities'):
-                                qualities = self.api_client.get_available_qualities(episode_id)
-                                for quality in qualities:
-                                    if hasattr(self.api_client, 'get_series_url_with_quality'):
-                                        stream_url = self.api_client.get_series_url_with_quality(
-                                            episode_id, container_extension, quality["value"]
-                                        )
-                                    else:
-                                        stream_url = self.api_client.get_series_url(episode_id, container_extension)
-                                    
-                                    if stream_url:
-                                        file.write(f"{stream_url}\n")
-                            else:
-                                # Fallback to single quality
-                                stream_url = self.api_client.get_series_url(episode_id, container_extension)
-                                if stream_url:
-                                    file.write(f"{stream_url}\n")
-                    else:
-                        # Fallback to original implementation
-                        stream_url = self.api_client.get_series_url(episode_id, container_extension)
-                        file.write(f"{stream_url}\n")
+                    stream_url = self.api_client.get_series_url(episode_id, container_extension)
+                    file.write(f"{stream_url}\n")
 
             QMessageBox.information(self, "Export Complete", f"Season URLs exported to: {save_path}")
         except Exception as e:

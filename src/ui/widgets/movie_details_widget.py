@@ -4,7 +4,6 @@ from PyQt5.QtGui import QPixmap, QFont
 from src.utils.helpers import load_image_async, get_translations
 from src.ui.widgets.cast_widget import CastWidget
 from src.models import MovieItem
-from src.services.download_service import DownloadService
 
 class MovieDetailsWidget(QWidget):
     favorite_toggled = pyqtSignal(object)
@@ -225,25 +224,6 @@ class MovieDetailsWidget(QWidget):
         self.favorite_btn.setFont(QFont('Arial', 16))
         self.favorite_btn.clicked.connect(self._on_favorite_clicked)
         controls_layout.addWidget(self.favorite_btn)
-        
-        # Download button
-        self.download_btn = QPushButton(self.translations.get("Download", "Download"))
-        self.download_btn.setFont(QFont('Arial', 16, QFont.Bold))
-        self.download_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(0, 0, 0, 0.8);
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                border-radius: 6px;
-                margin-left: 16px;
-            }
-            QPushButton:hover {
-                background: #f40612;
-            }
-        """)
-        self.download_btn.clicked.connect(self._on_download_clicked)
-        controls_layout.addWidget(self.download_btn)
         
         # Trailer button if available
         self.trailer_url = self.movie.youtube_trailer
@@ -911,8 +891,3 @@ class MovieDetailsWidget(QWidget):
                     print(f"[MovieDetailsWidget] No movie details returned from TMDB for ID: {tmdb_id}")
             except Exception as e:
                 print(f"[MovieDetailsWidget] Error fetching movie details from TMDB: {e}")
-
-    def _on_download_clicked(self):
-        print("Download button clicked")
-        download_service = DownloadService.instance()
-        download_service.queue_download(self.movie.stream_icon)
