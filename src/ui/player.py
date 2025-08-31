@@ -2,6 +2,7 @@
 Media player widget for the application
 """
 import sys
+import os # Added
 import vlc
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame
 from PyQt5.QtWidgets import QLabel
@@ -18,6 +19,7 @@ class MediaPlayer(QWidget):
     playback_stopped = pyqtSignal()
     playback_error = pyqtSignal(str)
     add_to_favorites = pyqtSignal(dict)  # Signal to add current item to favorites
+    playback_position_updated = pyqtSignal(str, int, int) # Added: stream_id, position_ms, duration_ms
     
     def __init__(self, parent=None, favorites_manager=None):
         super().__init__(parent)
@@ -26,6 +28,7 @@ class MediaPlayer(QWidget):
         self.translations = get_translations(language)
         self.setup_ui()
         self.setup_player()
+        self._pending_start_time_ms = 0
         
         # Timer for updating the player state
         self.update_timer = QTimer(self)
@@ -91,53 +94,92 @@ class MediaPlayer(QWidget):
             self.player.set_hwnd(self.video_frame.winId())
         elif sys.platform == "darwin":
             self.player.set_nsobject(int(self.video_frame.winId()))
+
+        # Attach to events
+        self.vlc_event_manager = self.player.event_manager()
+        self.vlc_event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, self._on_media_player_playing, self.player)
         
         # Set initial volume
         self.player.audio_set_volume(DEFAULT_VOLUME)
         self.controls.set_volume(DEFAULT_VOLUME)
-    def play(self, url, item=None):
-        """Play media from URL"""
+
+    def play(self, media_source, item=None, start_position_ms=0):
+        """Play media from URL or local file path"""
         try:
-            # Store the current item
             self.current_item = item
-            
-            # Update favorite status if item is provided
+            self._pending_start_time_ms = start_position_ms
+
             if item is not None:
-                # Check if this item is in favorites
                 self.is_favorite = self.check_if_favorite(item)
                 self.controls.set_favorite(self.is_favorite)
             else:
                 self.is_favorite = False
                 self.controls.set_favorite(False)
-            
-            # Resolve YouTube URLs to direct stream URLs
-            resolved_url = youtube_resolver.resolve_url(url)
-            print(f"[DEBUG] Original URL: {url}")
-            print(f"[DEBUG] Resolved URL: {resolved_url}")
-            
-            # Create media
-            media = self.instance.media_new(resolved_url)
-            
-            # Set media to player
+
+            media = None
+            if isinstance(media_source, str) and media_source.startswith(('http://', 'https://', 'rtmp://', 'rtsp://')):
+                resolved_media_source = youtube_resolver.resolve_url(media_source)
+                print(f"[MediaPlayer] Playing URL: {resolved_media_source}")
+                media = self.instance.media_new(resolved_media_source)
+            elif isinstance(media_source, str) and os.path.exists(media_source):
+                print(f"[MediaPlayer] Playing local file: {media_source}")
+                media = self.instance.media_new_path(media_source)
+            else:
+                error_msg = f"Invalid media source: {media_source}"
+                print(f"[MediaPlayer] {error_msg}")
+                self.playback_error.emit(error_msg)
+                return False
+
+            if not media:
+                error_msg = f"Could not create media from source: {media_source}"
+                print(f"[MediaPlayer] {error_msg}")
+                self.playback_error.emit(error_msg)
+                return False
+
             self.player.set_media(media)
+            media.release()
             
-            # Play
             self.player.play()
-            
-            # Start update timer
             self.update_timer.start()
-            
-            # Update controls
             self.controls.set_playing(True)
-            
-            # Emit signal
             self.playback_started.emit()
             self.play_started = True
             return True
+
         except Exception as e:
             self.playback_error.emit(str(e))
+            print(f"[MediaPlayer] Error in play: {e}")
             return False
-            
+
+    def _on_media_player_playing(self, event, player_instance):
+        if self._pending_start_time_ms > 0 and player_instance == self.player:
+            # Ensure player is in a good state and media has duration
+            if self.player.get_length() > 0 : # get_length() returns msec
+                self.player.set_time(self._pending_start_time_ms)
+                print(f"[MediaPlayer] Event: MediaPlayerPlaying - Seeked to {self._pending_start_time_ms} ms")
+                self._pending_start_time_ms = 0 # Reset after seeking
+            else:
+                # If duration is not yet known, try again with a short delay
+                QTimer.singleShot(200, lambda: self._ensure_seek_after_playing(self._pending_start_time_ms))
+
+    def _ensure_seek_after_playing(self, time_ms):
+       if time_ms > 0 and (self.player.is_playing() or self.player.get_state() == vlc.State.Playing):
+           if self.player.get_length() > 0:
+               self.player.set_time(time_ms)
+               print(f"[MediaPlayer] Seek (ensure_seek): Seeked to {time_ms} ms")
+               if self._pending_start_time_ms == time_ms: # Clear if this was the pending one
+                    self._pending_start_time_ms = 0
+           else:
+               # Still no length, this is problematic. Log it.
+               print(f"[MediaPlayer] Warning: Could not seek to {time_ms}ms, media length unknown even after playing.")
+               if self._pending_start_time_ms == time_ms: # Avoid repeated attempts
+                    self._pending_start_time_ms = 0
+       elif time_ms > 0 : # Not playing or in a valid seekable state, clear pending time
+            print(f"[MediaPlayer] Warning: Player not in seekable state for time {time_ms}ms. Clearing pending seek.")
+            if self._pending_start_time_ms == time_ms:
+                self._pending_start_time_ms = 0
+
+
     def check_if_favorite(self, item):
         """Check if the current item is in favorites"""
         if self.favorites_manager and item:
@@ -390,15 +432,25 @@ class MediaPlayer(QWidget):
     def update_player_state(self):
         """Update player state and controls"""
         # Update time
-        time = self.player.get_time() // 1000  # Convert to seconds
-        self.controls.set_current_time(time)
+        current_time_ms = self.player.get_time()
+        duration_ms = self.player.get_length()
+
+        time_sec = current_time_ms // 1000
+        self.controls.set_current_time(time_sec)
         
-        # Update duration if not set
         if self.controls.duration == 0:
-            duration = self.player.get_length() // 1000  # Convert to seconds
-            if duration > 0:
-                self.controls.set_duration(duration)
+            duration_sec = duration_ms // 1000
+            if duration_sec > 0:
+                self.controls.set_duration(duration_sec)
         
+        # Emit position update for offline items
+        if self.current_item:
+            stream_id = self.current_item.get('stream_id')
+            # Consider adding an 'is_offline' flag to current_item if differentiation is needed
+            # For now, assume any item with stream_id might be tracked.
+            if stream_id is not None and duration_ms > 0 : # Only emit if duration is known (meaning media is loaded)
+                self.playback_position_updated.emit(str(stream_id), current_time_ms, duration_ms)
+
         # Check if playback ended
         if not self.player.is_playing() and self.controls.is_playing:
             state = self.player.get_state()
@@ -421,34 +473,70 @@ class PlayerWindow(QMainWindow):
         self.setWindowTitle(self.translations.get("Player", "Player"))
         self.setMinimumSize(800, 450)
         self.favorites_manager = favorites_manager
-        self.player = MediaPlayer(self, favorites_manager)
-        self.setCentralWidget(self.player)
-        self.player.playback_stopped.connect(self.close)
-        self.player.add_to_favorites.connect(self.handle_add_to_favorites)
+        self.media_player = MediaPlayer(self, favorites_manager) # Renamed for clarity from self.player
+        self.setCentralWidget(self.media_player)
+        self.media_player.playback_stopped.connect(self.close)
+        self.media_player.add_to_favorites.connect(self.handle_add_to_favorites)
         self._was_closed = False
-        self.current_item = None
+        self.current_item_info = None # Renamed for clarity
 
-    def play(self, url, item=None):
-        # If the window was closed, re-create the player widget
-        if self._was_closed:
-            self.takeCentralWidget().deleteLater()
-            self.player = MediaPlayer(self, self.favorites_manager)
-            self.setCentralWidget(self.player)
-            self.player.playback_stopped.connect(self.close)
-            self.player.add_to_favorites.connect(self.handle_add_to_favorites)
+    def play_media(self, media_source, media_type=None, metadata=None, is_offline=False, start_position_ms=0):
+        """ Plays media. Replaces the old play() method.
+            media_source: URL or local filepath
+            media_type: 'movie', 'series', 'live' (can be used by player for context)
+            metadata: Dictionary with item details (e.g. stream_id, name, etc.)
+            is_offline: Boolean indicating if playing from offline storage
+            start_position_ms: Position to start playback from (in milliseconds)
+        """
+        if self._was_closed: # If window was closed, recreate player part
+            if self.centralWidget():
+                self.centralWidget().deleteLater()
+            self.media_player = MediaPlayer(self, self.favorites_manager)
+            self.setCentralWidget(self.media_player)
+            self.media_player.playback_stopped.connect(self.close)
+            self.media_player.add_to_favorites.connect(self.handle_add_to_favorites)
             self._was_closed = False
-        self.player.stop()  # Always stop previous playback
-        self.current_item = item
+
+        self.media_player.stop() # Stop previous playback
+        self.current_item_info = metadata # Store metadata (formerly item)
+
+        # Update window title based on what's playing
+        title = self.translations.get("Player", "Player")
+        if metadata and metadata.get('name'):
+            title = f"{metadata.get('name')} - {title}"
+        elif metadata and metadata.get('title'): # some items use 'title'
+             title = f"{metadata.get('title')} - {title}"
+        self.setWindowTitle(title)
+
         self.show()
         self.raise_()
         self.activateWindow()
-        self.player.play(url, item)
         
+        # Pass all relevant info to MediaPlayer's play method
+        self.media_player.play(media_source, item=metadata, start_position_ms=start_position_ms)
+
+    # Keep old play method for a while for compatibility, mark as deprecated or update calls
+    def play(self, url, item=None, start_position_ms=0): # Added start_position_ms for compatibility if direct calls exist
+        # This method now delegates to play_media
+        # item is equivalent to metadata here.
+        # media_type could be inferred or passed if available. For now, assume 'movie' or 'live' based on context.
+        media_type = item.get('stream_type', 'movie') if item else 'live' # Basic inference
+        is_offline_playback = os.path.exists(url) if isinstance(url, str) else False # Basic inference
+
+        self.play_media(
+            media_source=url,
+            media_type=media_type,
+            metadata=item,
+            is_offline=is_offline_playback,
+            start_position_ms=start_position_ms
+        )
+
     def handle_add_to_favorites(self, item):
         """Handle add to favorites signal from player"""
         self.add_to_favorites.emit(item)
 
     def closeEvent(self, event):
-        self.player.stop()
+        if hasattr(self, 'media_player') and self.media_player: # Check if media_player exists
+            self.media_player.stop()
         self._was_closed = True
         event.accept()

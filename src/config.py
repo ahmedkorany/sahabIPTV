@@ -23,13 +23,18 @@ LIST_ITEM_HEIGHT = 40
 ICON_SIZE = QSize(24, 24)
 
 # Cache settings
-CACHE_DIR = os.path.expanduser("~/.sahabiptv/cache")
-FAVORITES_FILE = os.path.expanduser("~/.sahabiptv/favorites.json")
-SETTINGS_FILE = os.path.expanduser("~/.sahabiptv/settings.json")
+CONFIG_DIR = os.path.expanduser("~/.sahabiptv") # Base dir for config files
+CACHE_DIR = os.path.join(CONFIG_DIR, "cache")
+OFFLINE_MOVIES_DIR = os.path.join(CACHE_DIR, "offline_movies")
+OFFLINE_METADATA_FILE = os.path.join(CONFIG_DIR, "offline_movies.json")
+FAVORITES_FILE = os.path.join(CONFIG_DIR, "favorites.json") # Updated to use CONFIG_DIR
+SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json") # Updated to use CONFIG_DIR
 
-# Create cache directory if it doesn't exist
+# Create directories if they don't exist
+os.makedirs(CONFIG_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
-os.makedirs(os.path.dirname(FAVORITES_FILE), exist_ok=True)
+os.makedirs(OFFLINE_MOVIES_DIR, exist_ok=True)
+# os.makedirs(os.path.dirname(FAVORITES_FILE), exist_ok=True) # No longer needed as CONFIG_DIR is created
 
 # API settings
 API_TIMEOUT = 30  # seconds
