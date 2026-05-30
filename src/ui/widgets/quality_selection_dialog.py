@@ -26,13 +26,43 @@ class QualityDetectionWorker(QThread):
     def run(self):
         """Detect available qualities from the stream URL"""
         try:
-            # Try to fetch the playlist
-            response = requests.get(self.episode_url, timeout=self.timeout)
+            # 1. Fast check: Inspect extension of the URL path first
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.episode_url)
+            path = parsed_url.path.lower()
+            
+            # Common direct video file extensions that are never HLS playlists
+            direct_video_extensions = ('.mp4', '.mkv', '.avi', '.ts', '.mp3', '.m4a', '.flv', '.wmv', '.mov')
+            if path.endswith(direct_video_extensions):
+                print(f"[QualityDetectionWorker] URL ends with direct video extension: {path}. Skipping fetch.")
+                self.qualitiesDetected.emit([])
+                return
+                
+            # 2. Network check: Use stream=True to only fetch headers first
+            response = requests.get(self.episode_url, timeout=self.timeout, stream=True)
             if response.status_code != 200:
                 self.detectionFailed.emit(f"HTTP {response.status_code}")
                 return
                 
-            content = response.text
+            # Check Content-Type header
+            content_type = response.headers.get('Content-Type', '').lower()
+            
+            # If Content-Type is a standard video container, skip downloading
+            if 'video/' in content_type and 'mpegurl' not in content_type and 'apple.mpegurl' not in content_type:
+                print(f"[QualityDetectionWorker] Content-Type is a direct video format: {content_type}. Skipping fetch.")
+                self.qualitiesDetected.emit([])
+                return
+                
+            # 3. Read only a small chunk to check if it contains M3U8 headers
+            # HLS master playlists are small text files. We only need the first few hundred bytes.
+            content = ""
+            for chunk in response.iter_content(chunk_size=4096, decode_unicode=True):
+                if chunk:
+                    content += chunk
+                    # Stop reading if we got enough content to identify and parse the playlist
+                    # Or if we've read enough and determined it is not a playlist
+                    if len(content) > 65536 or '#EXT-X-STREAM-INF' in content or '#EXTM3U' not in content:
+                        break
             
             # Check if it's an HLS playlist
             if '#EXTM3U' in content and '#EXT-X-STREAM-INF' in content:
@@ -178,7 +208,13 @@ class QualitySelectionDialog(QDialog):
         """Start quality detection in background thread"""
         episode_id = self.episode_data.get('id') or self.episode_data.get('stream_id')
         container_extension = self.episode_data.get('container_extension', 'mp4')
-        episode_url = self.api_client.get_series_url(episode_id, container_extension)
+        
+        # Support both movie and episode/series URLs
+        stream_type = self.episode_data.get('stream_type', 'episode')
+        if stream_type == 'movie':
+            episode_url = self.api_client.get_movie_url(episode_id, container_extension)
+        else:
+            episode_url = self.api_client.get_series_url(episode_id, container_extension)
         
         if not episode_url:
             self._on_detection_failed("Could not get episode URL")
@@ -283,17 +319,23 @@ class QualitySelectionDialog(QDialog):
     
     def get_export_url(self):
         """Get the URL to use for export based on selection"""
+        episode_id = self.episode_data.get('id') or self.episode_data.get('stream_id')
+        container_extension = self.episode_data.get('container_extension', 'mp4')
+        stream_type = self.episode_data.get('stream_type', 'episode')
+        
         if self.selected_quality is None:
             # Use default API URL
-            episode_id = self.episode_data.get('id') or self.episode_data.get('stream_id')
-            container_extension = self.episode_data.get('container_extension', 'mp4')
-            return self.api_client.get_series_url(episode_id, container_extension)
+            if stream_type == 'movie':
+                return self.api_client.get_movie_url(episode_id, container_extension)
+            else:
+                return self.api_client.get_series_url(episode_id, container_extension)
         else:
             # Use specific quality URL (need to resolve relative URLs)
-            base_url = self.api_client.get_series_url(
-                self.episode_data.get('id') or self.episode_data.get('stream_id'),
-                self.episode_data.get('container_extension', 'mp4')
-            )
+            if stream_type == 'movie':
+                base_url = self.api_client.get_movie_url(episode_id, container_extension)
+            else:
+                base_url = self.api_client.get_series_url(episode_id, container_extension)
+                
             if self.selected_quality['url'].startswith('http'):
                 return self.selected_quality['url']
             else:

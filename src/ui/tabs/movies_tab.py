@@ -5,7 +5,7 @@ from operator import contains
 from functools import partial
 from PyQt5.QtGui import QFontMetrics
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox, QListWidgetItem, QScrollArea, QGridLayout, QComboBox, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox, QListWidgetItem, QScrollArea, QGridLayout, QComboBox, QFrame, QFileDialog
 )
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QFont, QFontMetrics
@@ -498,6 +498,7 @@ class MoviesTab(QWidget):
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
         self.details_widget.toggle_favorite_movie_requested.connect(self._handle_toggle_favorite_request)
+        self.details_widget.export_movie_requested.connect(self._handle_export_movie_request)
         # Connect to main window's favorites_changed signal to refresh button state
         if hasattr(self.main_window, 'favorites_changed'):
             self.main_window.favorites_changed.connect(self._on_favorites_changed)
@@ -563,6 +564,7 @@ class MoviesTab(QWidget):
         self.details_widget.play_clicked.connect(self._play_movie_from_details)
         self.details_widget.trailer_clicked.connect(self._play_trailer)
         self.details_widget.toggle_favorite_movie_requested.connect(self._handle_toggle_favorite_request)
+        self.details_widget.export_movie_requested.connect(self._handle_export_movie_request)
         # Connect to main window's favorites_changed signal to refresh button state
         if hasattr(self.main_window, 'favorites_changed'):
             self.main_window.favorites_changed.connect(self._on_favorites_changed)
@@ -647,6 +649,89 @@ class MoviesTab(QWidget):
         # Refresh the favorite button in the details widget
         if hasattr(self.details_widget, 'refresh_favorite_button'):
             self.details_widget.refresh_favorite_button()
+
+    def _handle_export_movie_request(self, movie_data, quality_info=None):
+        """Handle movie export with quality selection"""
+        if not movie_data:
+            QMessageBox.warning(self, self.translations.get("Error", "Error"), "Movie data not available for export.")
+            return
+
+        movie_title = movie_data.get('name', 'Movie')
+        movie_id = movie_data.get('stream_id')
+        container_extension = movie_data.get('container_extension', 'mp4')
+        
+        sane_movie_title = movie_title.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+        
+        # Add quality info to filename if specific quality was selected
+        quality_suffix = ""
+        if quality_info:
+            if quality_info.get('resolution'):
+                width, height = quality_info['resolution']
+                quality_suffix = f" - {height}p"
+            elif quality_info.get('label'):
+                quality_suffix = f" - {quality_info['label']}"
+        
+        default_m3u_filename = f"{sane_movie_title}{quality_suffix}.m3u"
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            self.translations.get("Export Movie URL", "Export Movie URL"), 
+            default_m3u_filename, 
+            "M3U Playlist (*.m3u);;All Files (*)"
+        )
+        if not save_path:
+            return
+
+        # Resolve the movie streaming URL
+        try:
+            if quality_info is None:
+                stream_url = self.api_client.get_movie_url(movie_id, container_extension)
+            else:
+                base_url = self.api_client.get_movie_url(movie_id, container_extension)
+                if quality_info['url'].startswith('http'):
+                    stream_url = quality_info['url']
+                else:
+                    # Resolve relative URL
+                    from urllib.parse import urljoin
+                    stream_url = urljoin(base_url, quality_info['url'])
+
+            if not stream_url:
+                QMessageBox.warning(self, self.translations.get("Error", "Error"), "Could not retrieve direct stream URL for the movie.")
+                return
+
+            m3u_content = [
+                "#EXTM3U",
+                f"#EXTINF:-1 tvg-id=\"{movie_id}\" tvg-name=\"{movie_title}\" tvg-logo=\"{movie_data.get('stream_icon', '')}\" group-title=\"Movies\","
+            ]
+            
+            # Append resolution to extinf if available
+            if quality_info and quality_info.get('resolution'):
+                width, height = quality_info['resolution']
+                m3u_content[-1] = m3u_content[-1][:-1] + f" resolution=\"{width}x{height}\","
+            
+            m3u_content[-1] += movie_title
+            m3u_content.append(stream_url)
+
+            with open(save_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(m3u_content))
+
+            # Success message
+            quality_text = ""
+            if quality_info:
+                if quality_info.get('resolution'):
+                    width, height = quality_info['resolution']
+                    quality_text = f" ({height}p quality)"
+                elif quality_info.get('label'):
+                    quality_text = f" ({quality_info['label']} quality)"
+
+            QMessageBox.information(
+                self, 
+                self.translations.get("Export Successful", "Export Successful"), 
+                f"Movie URL{quality_text} exported to {save_path}"
+            )
+
+        except Exception as e:
+            QMessageBox.warning(self, self.translations.get("Export Error", "Export Error"), f"Could not export movie URL: {e}")
 
     def _on_favorites_changed(self):
         """Handle favorites changed signal from main window"""

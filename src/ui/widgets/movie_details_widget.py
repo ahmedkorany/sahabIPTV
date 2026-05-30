@@ -1,8 +1,9 @@
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QDialog
 from PyQt5.QtGui import QPixmap, QFont
 from src.utils.helpers import load_image_async, get_translations
 from src.ui.widgets.cast_widget import CastWidget
+from src.ui.widgets.quality_selection_dialog import QualitySelectionDialog
 from src.models import MovieItem
 
 class MovieDetailsWidget(QWidget):
@@ -10,6 +11,7 @@ class MovieDetailsWidget(QWidget):
     play_clicked = pyqtSignal(object)
     trailer_clicked = pyqtSignal(str)
     toggle_favorite_movie_requested = pyqtSignal(object)  # movie data
+    export_movie_requested = pyqtSignal(object, object)  # movie_data (dict), quality_info
 
     def __init__(self, movie, api_client=None, main_window=None, tmdb_client=None, parent=None):
         super().__init__(parent)
@@ -224,6 +226,25 @@ class MovieDetailsWidget(QWidget):
         self.favorite_btn.setFont(QFont('Arial', 16))
         self.favorite_btn.clicked.connect(self._on_favorite_clicked)
         controls_layout.addWidget(self.favorite_btn)
+        
+        # Export URL button
+        self.export_btn = QPushButton(self.translations.get("Export URL", "Export URL"))
+        self.export_btn.setFont(QFont('Arial', 14))
+        self.export_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 0.2);
+                color: white;
+                border: 2px solid white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                margin-left: 16px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+        """)
+        self.export_btn.clicked.connect(self._on_export_movie)
+        controls_layout.addWidget(self.export_btn)
         
         # Trailer button if available
         self.trailer_url = self.movie.youtube_trailer
@@ -525,6 +546,19 @@ class MovieDetailsWidget(QWidget):
         """Handle favorite button click - emit signal for main window to handle"""
         self.toggle_favorite_movie_requested.emit(self.movie)
         # The button text/icon update should be handled by the main window
+
+    def _on_export_movie(self):
+        """Handle export movie button click with quality selection"""
+        # Prepare movie dictionary for the quality dialog
+        movie_dict = self.movie.to_dict()
+        movie_dict['stream_type'] = 'movie'
+        
+        # Show quality selection dialog
+        quality_dialog = QualitySelectionDialog(movie_dict, self.api_client, self.translations, self)
+        
+        if quality_dialog.exec() == QDialog.Accepted:
+            selected_quality = quality_dialog.get_selected_quality()
+            self.export_movie_requested.emit(movie_dict, selected_quality)
         # or by re-checking favorite status after the signal is processed.
 
     def update_metadata_from_api(self):
